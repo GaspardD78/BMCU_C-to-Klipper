@@ -98,6 +98,7 @@ struct adc_regs {
     volatile uint32_t IDATAR2;
     volatile uint32_t IDATAR3;
     volatile uint32_t IDATAR4;
+    volatile uint32_t RDATAR;
 };
 
 typedef struct adc_regs ADC_TypeDef;
@@ -166,6 +167,7 @@ typedef struct adc_regs ADC_TypeDef;
 #define RCC_APB2_IOPE   (1U << 6)
 #define RCC_APB2_AFIO   (1U << 0)
 #define RCC_APB2_USART1 (1U << 14)
+#define RCC_APB2_ADC1   (1U << 9)
 
 #define RCC_APB1_TIM2   (1U << 0)
 #define RCC_APB1_TIM3   (1U << 1)
@@ -236,5 +238,16 @@ void clock_init(void);
 void gpio_init(void);
 void timer_init(void);
 void serial_init(void);
+
+#define ADC_STATR_EOC       (1U << 1)
+
+#define ADC_CTLR2_ADON      (1U << 0)
+#define ADC_CTLR2_CONT      (1U << 1)
+#define ADC_CTLR2_CAL       (1U << 2)
+#define ADC_CTLR2_RSTCAL    (1U << 3)
+#define ADC_CTLR2_EXTTRIG   (1U << 20)
+#define ADC_CTLR2_SWSTART   (1U << 22)
+
+#define ADC_RDATAR_DATA_Msk 0x00000FFFU
 
 #endif
