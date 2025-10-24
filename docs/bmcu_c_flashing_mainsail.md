@@ -16,7 +16,7 @@ Ce guide décrit la marche à suivre pour rendre un BMCU-C opérationnel sous Kl
    * **Micro-controller Architecture** : `CH32V203` (entrée `MACH_CH32V20X`).
    * **Processor model** : `CH32V203C8`.
    * **Clock Reference** : `Internal 8 MHz crystal`.
-   * Activez `Enable extra low-level configuration options` puis assurez-vous que l'UART `MCU_TX/MCU_RX` est configuré avec la bonne vitesse (250 000 bauds par défaut) et que `CONFIG_WANT_ADC` reste activé pour la télémétrie courant/capteurs.【F:klipper-master/klipper-master/src/ch32v20x/Kconfig†L6-L19】
+   * Activez `Enable extra low-level configuration options` puis assurez-vous que l'UART `MCU_TX/MCU_RX` est configuré avec la bonne vitesse (250 000 bauds par défaut) et que `CONFIG_WANT_ADC` reste activé pour la télémétrie courant/capteurs.【F:klipper/src/ch32v20x/Kconfig†L6-L19】
 4. **Sauvegarder la configuration** : le menu `Save Configuration` génère `out/klipper.dict` ainsi que le binaire `out/klipper.bin` ciblant le CH32V203.
 
 ## 2. Flasher le CH32V203 du BMCU-C
@@ -39,7 +39,7 @@ Ce guide décrit la marche à suivre pour rendre un BMCU-C opérationnel sous Kl
    serial: /dev/serial/by-id/usb-klipper_ch32v203-if00
    restart_method: command
    ```
-   Le fichier `config/boards/bmcu_c.cfg` fournit les alias de broches, les sections `[manual_stepper]` et `[neopixel]` nécessaires au buffer.【F:klipper-master/klipper-master/config/boards/bmcu_c.cfg†L1-L134】
+   Le fichier `config/boards/bmcu_c.cfg` fournit les alias de broches, les sections `[manual_stepper]` et `[neopixel]` nécessaires au buffer.【F:klipper/config/boards/bmcu_c.cfg†L1-L134】
 2. **Charger les macros dédiées** : ajoutez au besoin `bmcu_macros.cfg` pour bénéficier des commandes de changement de spool.
    ```ini
    [include bmcu_macros.cfg]
@@ -58,7 +58,7 @@ Ce guide décrit la marche à suivre pour rendre un BMCU-C opérationnel sous Kl
    ```
    Les commandes actionnent successivement l'alimentation des drivers, le déplacement d'un spool et le retour à la position de référence.【F:docs/usage.md†L19-L52】
 3. **Surveiller les capteurs** : utilisez `QUERY_ENDSTOPS` pour suivre les capteurs Hall et `QUERY_ADC PIN=bmcu_c:spool1_ir` pour les photodiodes IR exposées par le portage.【F:docs/usage.md†L54-L70】
-4. **Configurer l'éclairage** : personnalisez l'objet `[neopixel bmcu_c_status]` dans `bmcu_c.cfg` afin de synchroniser la LED WS2812B avec vos scripts de changement de filament.【F:klipper-master/klipper-master/config/boards/bmcu_c.cfg†L101-L134】
+4. **Configurer l'éclairage** : personnalisez l'objet `[neopixel bmcu_c_status]` dans `bmcu_c.cfg` afin de synchroniser la LED WS2812B avec vos scripts de changement de filament.【F:klipper/config/boards/bmcu_c.cfg†L101-L134】
 
 ## 5. Maintenance
 

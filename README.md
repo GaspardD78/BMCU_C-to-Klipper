@@ -26,7 +26,7 @@ Un développeur ayant accès à un BMCU-C physique devra réaliser les étapes s
 ## Installation (pour le développement)
 
 1.  **Copier le module Klipper :**
-    *   `cp klipper-master/klipper-master/klippy/extras/bmcu.py /home/pi/klipper/klippy/extras/`
+    *   `cp klipper/klippy/extras/bmcu.py /home/pi/klipper/klippy/extras/`
 
 2.  **Copier les fichiers de configuration :**
     *   `cp bmcu_config.cfg bmcu_macros.cfg /home/pi/klipper_config/`
@@ -46,3 +46,7 @@ Un développeur ayant accès à un BMCU-C physique devra réaliser les étapes s
 
 *   [Mise à jour de Klipper et intégration Mainsail pour le BMCU-C](docs/bmcu_c_flashing_mainsail.md) : procédure pas-à-pas pour compiler, flasher le CH32V203 et déclarer la carte dans Mainsail.
 *   [Audit du portage CH32V203 et procédures de flash](docs/ch32v203_audit_et_flash.md) : état du support bas niveau et méthode de flash depuis un CB2 ou un Raspberry Pi.
+
+## Ressources firmware
+
+Les dumps fournis par Bambu pour les différentes variantes du buffer sont désormais regroupés dans le répertoire `firmware/` afin de faciliter leur consultation et d'éviter la duplication d'arborescences intermédiaires.【F:firmware/README.md†L3-L5】
