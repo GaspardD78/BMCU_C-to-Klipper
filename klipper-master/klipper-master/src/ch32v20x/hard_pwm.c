@@ -31,11 +31,13 @@ struct gpio_pwm_info {
 };
 
 static const struct gpio_pwm_info pwm_map[] = {
+#if CONFIG_HAVE_PWM_TIM1
     // TIM1 default mapping (PA8-PA11)
     { TIM1, GPIO('A', 8),  1, AFIO_PCFR1_TIM1_REMAP_MASK, AFIO_PCFR1_TIM1_REMAP_NONE },
     { TIM1, GPIO('A', 9),  2, AFIO_PCFR1_TIM1_REMAP_MASK, AFIO_PCFR1_TIM1_REMAP_NONE },
     { TIM1, GPIO('A', 10), 3, AFIO_PCFR1_TIM1_REMAP_MASK, AFIO_PCFR1_TIM1_REMAP_NONE },
     { TIM1, GPIO('A', 11), 4, AFIO_PCFR1_TIM1_REMAP_MASK, AFIO_PCFR1_TIM1_REMAP_NONE },
+#endif
 
     // TIM2 mappings
     { TIM2, GPIO('A', 0),  1, AFIO_PCFR1_TIM2_REMAP_MASK, AFIO_PCFR1_TIM2_REMAP_NONE },
@@ -63,6 +65,7 @@ static const struct gpio_pwm_info pwm_map[] = {
     { TIM3, GPIO('C', 8),  3, AFIO_PCFR1_TIM3_REMAP_MASK, AFIO_PCFR1_TIM3_REMAP_FULL },
     { TIM3, GPIO('C', 9),  4, AFIO_PCFR1_TIM3_REMAP_MASK, AFIO_PCFR1_TIM3_REMAP_FULL },
 
+#if CONFIG_HAVE_PWM_TIM4
     // TIM4 mappings
     { TIM4, GPIO('B', 6),  1, AFIO_PCFR1_TIM4_REMAP_MASK, AFIO_PCFR1_TIM4_REMAP_NONE },
     { TIM4, GPIO('B', 7),  2, AFIO_PCFR1_TIM4_REMAP_MASK, AFIO_PCFR1_TIM4_REMAP_NONE },
@@ -72,6 +75,7 @@ static const struct gpio_pwm_info pwm_map[] = {
     { TIM4, GPIO('D', 13), 2, AFIO_PCFR1_TIM4_REMAP_MASK, AFIO_PCFR1_TIM4_REMAP_FULL },
     { TIM4, GPIO('D', 14), 3, AFIO_PCFR1_TIM4_REMAP_MASK, AFIO_PCFR1_TIM4_REMAP_FULL },
     { TIM4, GPIO('D', 15), 4, AFIO_PCFR1_TIM4_REMAP_MASK, AFIO_PCFR1_TIM4_REMAP_FULL },
+#endif
 };
 
 static const struct gpio_pwm_info *
