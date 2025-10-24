@@ -6,7 +6,7 @@ Ce dépôt contient une base de code solide pour intégrer un BMCU-C avec Klippe
 
 ## État Actuel
 
-*   **Structure du projet :** Tous les fichiers nécessaires sont présents (`bmcu.py`, `bmcu_config.cfg`, `bmcu_macros.cfg`).
+*   **Structure du projet :** Tous les fichiers nécessaires sont présents (`bmcu.py`, `config/bmcu_config.cfg`, `config/bmcu_macros.cfg`).
 *   **Intégration Happy Hare :** La configuration pour utiliser le `MacroSelector` de Happy Hare est correcte.
 *   **Checksums :** Les algorithmes de checksum `CRC8 DVB-S2` et `CRC16` spécifiques au "bambubus" ont été implémentés en Python.
 *   **Communication :** Le module Klipper contient une logique de base pour envoyer des paquets, mais elle est simplifiée et doit être complétée.
@@ -29,7 +29,7 @@ Un développeur ayant accès à un BMCU-C physique devra réaliser les étapes s
     *   `cp klipper/klippy/extras/bmcu.py /home/pi/klipper/klippy/extras/`
 
 2.  **Copier les fichiers de configuration :**
-    *   `cp bmcu_config.cfg bmcu_macros.cfg /home/pi/klipper_config/`
+    *   `cp config/bmcu_config.cfg config/bmcu_macros.cfg /home/pi/klipper_config/`
 
 3.  **Modifier `printer.cfg` :**
     *   Ajoutez `[include bmcu_config.cfg]` et `[include bmcu_macros.cfg]`.
@@ -46,6 +46,16 @@ Un développeur ayant accès à un BMCU-C physique devra réaliser les étapes s
 
 *   [Mise à jour de Klipper et intégration Mainsail pour le BMCU-C](docs/bmcu_c_flashing_mainsail.md) : procédure pas-à-pas pour compiler, flasher le CH32V203 et déclarer la carte dans Mainsail.
 *   [Audit du portage CH32V203 et procédures de flash](docs/ch32v203_audit_et_flash.md) : état du support bas niveau et méthode de flash depuis un CB2 ou un Raspberry Pi.
+
+## Organisation du dépôt
+
+| Répertoire | Contenu |
+| --- | --- |
+| `config/` | Fichiers Klipper prêts à l'emploi (`bmcu_config.cfg`, `bmcu_macros.cfg`). |
+| `firmware/` | Images binaires officielles du BMCU-C triées par variantes. |
+| `hardware/` | Ressources matérielles (schémas, PCB) pour la carte principale et la carte capteurs. |
+| `klipper/` | Copie figée du dépôt Klipper incluant le module expérimental `bmcu.py`. |
+| `BMCU`, `Happy-Hare` | Sous-modules optionnels pointant vers les projets amont pour référence. |
 
 ## Ressources firmware
 
