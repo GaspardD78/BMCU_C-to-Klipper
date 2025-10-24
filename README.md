@@ -25,22 +25,30 @@ Un développeur ayant accès à un BMCU-C physique devra réaliser les étapes s
 
 ## Installation (pour le développement)
 
-1.  **Copier le module Klipper :**
-    *   `cp klipper/klippy/extras/bmcu.py /home/pi/klipper/klippy/extras/`
+1.  **Installation automatisée (recommandée)** :
+    *   Le script `scripts/setup_bmcu.py` copie le module, les fichiers de configuration et peut mettre à jour `printer.cfg`.
+        ```bash
+        python3 scripts/setup_bmcu.py \
+          --klipper-path ~/klipper \
+          --config-path ~/klipper_config \
+          --printer-config ~/klipper_config/printer.cfg
+        ```
+        Ajoutez `--list-firmware` pour afficher les binaires fournis, `--firmware-variant <nom>`/`--firmware-dest <chemin>` pour en déployer un vers la machine cible, et `--flash --flash-device <interface>` pour chaîner un `make flash`.
 
-2.  **Copier les fichiers de configuration :**
-    *   `cp config/bmcu_config.cfg config/bmcu_macros.cfg /home/pi/klipper_config/`
-
-3.  **Modifier `printer.cfg` :**
-    *   Ajoutez `[include bmcu_config.cfg]` et `[include bmcu_macros.cfg]`.
-    *   Ajoutez la section `[bmcu]` en spécifiant le bon port série :
+2.  **Installation manuelle** :
+    *   Copier le module Klipper : `cp klipper/klippy/extras/bmcu.py /home/pi/klipper/klippy/extras/`
+    *   Copier les fichiers de configuration : `cp config/bmcu_config.cfg config/bmcu_macros.cfg /home/pi/klipper_config/`
+    *   Ajouter dans `printer.cfg` :
         ```cfg
+        [include bmcu_config.cfg]
+        [include bmcu_macros.cfg]
+
         [bmcu]
         serial: /dev/serial/by-id/usb-your_bmcu_serial_id_here
         # baud: 1250000 # À activer quand le support sera prêt
         ```
 
-4.  **Redémarrer Klipper.**
+3.  **Redémarrer Klipper.**
 
 ## Documentation complémentaire
 
