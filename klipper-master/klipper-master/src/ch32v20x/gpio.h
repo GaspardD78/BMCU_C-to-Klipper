@@ -40,7 +40,8 @@ uint16_t gpio_adc_read(struct gpio_adc g);
 void gpio_adc_cancel_sample(struct gpio_adc g);
 
 struct spi_config {
-    uint8_t bus;
+    SPI_TypeDef *spi;
+    uint32_t ctlr1;
 };
 struct spi_config spi_setup(uint32_t bus, uint8_t mode, uint32_t rate);
 void spi_prepare(struct spi_config config);

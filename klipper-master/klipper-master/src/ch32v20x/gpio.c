@@ -33,6 +33,56 @@ static GPIO_TypeDef * const digital_regs[] = {
     ['E' - 'A'] = GPIOE,
 };
 
+struct spi_bus {
+    SPI_TypeDef *regs;
+    uint32_t sck_pin;
+    uint32_t miso_pin;
+    uint32_t mosi_pin;
+    volatile uint32_t *clk_reg;
+    uint32_t clk_mask;
+    uint32_t pclk_hz;
+};
+
+DECL_ENUMERATION("spi_bus", "spi1", 0);
+DECL_CONSTANT_STR("BUS_PINS_spi1", "PA6,PA7,PA5");
+
+static const struct spi_bus spi_bus[] = {
+    {
+        .regs = SPI1,
+        .sck_pin = GPIO('A', 5),
+        .miso_pin = GPIO('A', 6),
+        .mosi_pin = GPIO('A', 7),
+        .clk_reg = &RCC->APB2PCENR,
+        .clk_mask = RCC_APB2_SPI1,
+        .pclk_hz = CONFIG_CLOCK_FREQ,
+    },
+};
+
+static void
+spi_bus_enable(uint32_t bus)
+{
+    const struct spi_bus *info = &spi_bus[bus];
+    *info->clk_reg |= info->clk_mask;
+
+    static uint8_t initialized[ARRAY_SIZE(spi_bus)];
+    if (initialized[bus])
+        return;
+    initialized[bus] = 1;
+
+    gpio_peripheral(info->miso_pin,
+                    GPIO_CONFIG(GPIO_MODE_INPUT, GPIO_CNF_FLOATING), -1);
+    gpio_peripheral(info->mosi_pin,
+                    GPIO_CONFIG(GPIO_MODE_OUTPUT_50MHZ, GPIO_CNF_AF_PUSHPULL),
+                    0);
+    gpio_peripheral(info->sck_pin,
+                    GPIO_CONFIG(GPIO_MODE_OUTPUT_50MHZ, GPIO_CNF_AF_PUSHPULL),
+                    0);
+
+    SPI_TypeDef *spi = info->regs;
+    spi->CTLR1 = 0;
+    spi->CTLR2 = 0;
+}
+
 #define AT8236_VIRTUAL_BASE     BMCU_C_AT8236_PIN_BASE
 #define AT8236_VIRTUAL_MAX      (AT8236_VIRTUAL_BASE \
                                  + BMCU_C_AT8236_PIN_STRIDE * 4)
@@ -329,28 +379,69 @@ gpio_in_read(struct gpio_in g)
 struct spi_config
 spi_setup(uint32_t bus, uint8_t mode, uint32_t rate)
 {
-    (void)bus;
-    (void)mode;
-    (void)rate;
-    struct spi_config cfg = { .bus = 0 };
-    shutdown("SPI not yet implemented on CH32V20x");
-    return cfg;
+    if (bus >= ARRAY_SIZE(spi_bus))
+        shutdown("Invalid spi bus");
+
+    spi_bus_enable(bus);
+
+    const struct spi_bus *info = &spi_bus[bus];
+    uint32_t pclk = info->pclk_hz;
+    if (!rate || rate > pclk)
+        rate = pclk;
+
+    uint32_t br = 0;
+    while ((pclk / (1U << (br + 1))) > rate && br < 7)
+        br++;
+
+    uint32_t mode_bits = 0;
+    if (mode & 0x1)
+        mode_bits |= SPI_CTLR1_CPHA;
+    if (mode & 0x2)
+        mode_bits |= SPI_CTLR1_CPOL;
+
+    uint32_t ctlr1 = mode_bits | (br << SPI_CTLR1_BR_SHIFT)
+        | SPI_CTLR1_MSTR | SPI_CTLR1_SSM | SPI_CTLR1_SSI | SPI_CTLR1_SPE;
+
+    return (struct spi_config){ .spi = info->regs, .ctlr1 = ctlr1 };
 }
 
 void
 spi_prepare(struct spi_config config)
 {
-    (void)config;
+    SPI_TypeDef *spi = config.spi;
+    uint32_t cur = spi->CTLR1;
+    if (cur == config.ctlr1)
+        return;
+
+    spi->CTLR1 = cur & ~SPI_CTLR1_SPE;
+    spi->CTLR1;
+    spi->CTLR1 = config.ctlr1;
 }
 
 void
 spi_transfer(struct spi_config config, uint8_t receive_data,
              uint8_t len, uint8_t *data)
 {
-    (void)config;
-    (void)receive_data;
-    (void)len;
-    (void)data;
+    SPI_TypeDef *spi = config.spi;
+
+    while (spi->STATR & SPI_STATR_RXNE)
+        (void)spi->DATAR;
+
+    while (len--) {
+        while (!(spi->STATR & SPI_STATR_TXE))
+            ;
+        uint8_t out = *data;
+        *(volatile uint8_t *)&spi->DATAR = out;
+        while (!(spi->STATR & SPI_STATR_RXNE))
+            ;
+        uint8_t in = *(volatile uint8_t *)&spi->DATAR;
+        if (receive_data)
+            *data = in;
+        data++;
+    }
+
+    while (spi->STATR & SPI_STATR_BSY)
+        ;
 }
 
 struct i2c_config
