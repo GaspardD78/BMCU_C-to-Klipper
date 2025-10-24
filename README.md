@@ -41,3 +41,7 @@ Un développeur ayant accès à un BMCU-C physique devra réaliser les étapes s
         ```
 
 4.  **Redémarrer Klipper.**
+
+## Documentation complémentaire
+
+*   [Mise à jour de Klipper et intégration Mainsail pour le BMCU-C](docs/bmcu_c_flashing_mainsail.md) : procédure pas-à-pas pour compiler, flasher le CH32V203 et déclarer la carte dans Mainsail.
