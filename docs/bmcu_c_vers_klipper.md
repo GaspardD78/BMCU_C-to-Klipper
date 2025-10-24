@@ -6,30 +6,30 @@ Ce document propose une démarche pour porter le circuit imprimé **BMCU-C** (co
 
 ### 1.1 Cartographie générale
 
-* **Microcontrôleur** : la carte principale s'appuie sur un `CH32V203C8T6` (cœur RISC-V à 144 MHz, 64 Ko de flash, 20 Ko de RAM). 【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L396-L500】
-* **Pilotes moteurs** : quatre ponts en H `AT8236` gèrent directement les bobines des moteurs 370 du buffer (senses de courant de 680 mΩ par canal). 【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L1342-L1500】
-* **Communication** : un transceiver `TP75176E-SR` assure le lien différentiel RS‑485 qui relie habituellement le BMCU à l'imprimante/hub. 【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L114-L146】【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L1740-L1827】
-* **Alimentation** : une chaîne `TPS54202` + inductance 10 µH crée l'alimentation 5 V/3,3 V à partir du 24 V du bus. 【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L820-L900】
-* **Signalisation** : une LED RVB adressable WS2812B (`LED1`) ainsi que quatre sorties `RGB_OUTx` sont disponibles pour reproduire les états lumineux d'origine. 【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L680-L714】
-* **Capteurs** : la carte « composants » expose des sorties hall `HALL_OUT`/`HALL_RC`, un bus I²C (`MCU_SCL`/`MCU_SDA`) et les lignes `MOTOR_HOUT`/`MOTOR_LOUT` vers la carte principale. 【F:pbmcu_c_hall/BMCU-C Hall/组件板/Schematic1_1/1_P1.schdoc†L200-L360】
+* **Microcontrôleur** : la carte principale s'appuie sur un `CH32V203C8T6` (cœur RISC-V à 144 MHz, 64 Ko de flash, 20 Ko de RAM). 【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L396-L500】
+* **Pilotes moteurs** : quatre ponts en H `AT8236` gèrent directement les bobines des moteurs 370 du buffer (senses de courant de 680 mΩ par canal). 【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L1342-L1500】
+* **Communication** : un transceiver `TP75176E-SR` assure le lien différentiel RS‑485 qui relie habituellement le BMCU à l'imprimante/hub. 【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L114-L146】【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L1740-L1827】
+* **Alimentation** : une chaîne `TPS54202` + inductance 10 µH crée l'alimentation 5 V/3,3 V à partir du 24 V du bus. 【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L820-L900】
+* **Signalisation** : une LED RVB adressable WS2812B (`LED1`) ainsi que quatre sorties `RGB_OUTx` sont disponibles pour reproduire les états lumineux d'origine. 【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L680-L714】
+* **Capteurs** : la carte « composants » expose des sorties hall `HALL_OUT`/`HALL_RC`, un bus I²C (`MCU_SCL`/`MCU_SDA`) et les lignes `MOTOR_HOUT`/`MOTOR_LOUT` vers la carte principale. 【F:hardware/pbmcu_c_hall/BMCU-C Hall/组件板/Schematic1_1/1_P1.schdoc†L200-L360】
 
 ### 1.2 Signaux utiles à interfacer
 
 | Groupe de signaux | Rôle | Références |
 | --- | --- | --- |
-| `MOTORx_H`, `MOTORx_L` (x = 1..4) | Commande des enroulements moteur via les AT8236. | 【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L669-L676】【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L1342-L1500】 |
-| `MOTORx_HOUT`, `MOTORx_LOUT` | Sorties de puissance des drivers vers le faisceau moteurs/hall. | 【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L1308-L1516】 |
-| `RS485_A/B`, résistances R9/R10, TVS D2 | Lien différentiel avec terminaison 120 Ω et protection TVS. | 【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L1740-L1827】 |
-| `MCU_TX`, `MCU_RX`, `MCU_RTS` | UART interne CH32⇄transceiver RS‑485. | 【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L498-L506】【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L151-L153】 |
-| `MCU_SCL`, `MCU_SDA`, `HALL_OUT`, `HALL_RC` | Bus I²C et retours capteurs depuis la carte hall. | 【F:pbmcu_c_hall/BMCU-C Hall/组件板/Schematic1_1/1_P1.schdoc†L215-L224】【F:pbmcu_c_hall/BMCU-C Hall/组件板/Schematic1_1/1_P1.schdoc†L659-L798】 |
-| `SYS_RGB`, `RGB_OUTx`, LED WS2812B | Indicateurs lumineux état buffer. | 【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L680-L714】 |
+| `MOTORx_H`, `MOTORx_L` (x = 1..4) | Commande des enroulements moteur via les AT8236. | 【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L669-L676】【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L1342-L1500】 |
+| `MOTORx_HOUT`, `MOTORx_LOUT` | Sorties de puissance des drivers vers le faisceau moteurs/hall. | 【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L1308-L1516】 |
+| `RS485_A/B`, résistances R9/R10, TVS D2 | Lien différentiel avec terminaison 120 Ω et protection TVS. | 【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L1740-L1827】 |
+| `MCU_TX`, `MCU_RX`, `MCU_RTS` | UART interne CH32⇄transceiver RS‑485. | 【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L498-L506】【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L151-L153】 |
+| `MCU_SCL`, `MCU_SDA`, `HALL_OUT`, `HALL_RC` | Bus I²C et retours capteurs depuis la carte hall. | 【F:hardware/pbmcu_c_hall/BMCU-C Hall/组件板/Schematic1_1/1_P1.schdoc†L215-L224】【F:hardware/pbmcu_c_hall/BMCU-C Hall/组件板/Schematic1_1/1_P1.schdoc†L659-L798】 |
+| `SYS_RGB`, `RGB_OUTx`, LED WS2812B | Indicateurs lumineux état buffer. | 【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L680-L714】 |
 
 ## 2. Portage du microcontrôleur CH32V203 vers Klipper
 
 1. **Créer une nouvelle architecture bas niveau** : suivez le guide détaillé [Portage du CH32V203 dans Klipper](./ch32v203_porting_guide.md) pour déclarer l'architecture `MACH_CH32V20X`, ajouter son `Kconfig`, écrire le `Makefile` spécifique (toolchain RISC-V) et implémenter les couches `clock`, `gpio`, `timer`, `serial`, `adc` et `pwm`. 【F:docs/ch32v203_porting_guide.md†L1-L196】
 
 2. **Mapper les broches** :
-   * Exporter la netlist depuis les schémas (`*.schdoc`) ou utiliser EasyEDA/Altium pour associer chaque net `MOTORx_H/L`, `MCU_TX`… à un port physique (`PA9`, `PB5`, etc.). Les coordonnées listées ci-dessus facilitent le repérage des pins sur le composant CH32. 【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L447-L500】
+   * Exporter la netlist depuis les schémas (`*.schdoc`) ou utiliser EasyEDA/Altium pour associer chaque net `MOTORx_H/L`, `MCU_TX`… à un port physique (`PA9`, `PB5`, etc.). Les coordonnées listées ci-dessus facilitent le repérage des pins sur le composant CH32. 【F:hardware/pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L447-L500】
    * Créer un fichier `src/ch32v20x/pins_bmcu_c.h` qui expose ces correspondances, puis une carte Klipper `config/boards/bmcu_c.cfg` contenant les sections `stepper_bmcu1` à `stepper_bmcu4`, entrées capteurs, LED et bus RS‑485.
 
 3. **Piloter les AT8236** :
@@ -41,7 +41,7 @@ Ce document propose une démarche pour porter le circuit imprimé **BMCU-C** (co
    * Configurer `usart` en demi‑duplex avec contrôle DE/RE (ligne `MCU_RTS`).
 
 5. **Gestion des capteurs et LED** :
-   * Déclarer des entrées digitales pour `HALL_OUT` et analogiques pour les photodiodes IR (voir nets `IR1_RECV` dans la carte capteur). 【F:pbmcu_c_hall/BMCU-C Hall/组件板/Schematic1_1/1_P1.schdoc†L659-L798】
+   * Déclarer des entrées digitales pour `HALL_OUT` et analogiques pour les photodiodes IR (voir nets `IR1_RECV` dans la carte capteur). 【F:hardware/pbmcu_c_hall/BMCU-C Hall/组件板/Schematic1_1/1_P1.schdoc†L659-L798】
    * Utiliser le module `neopixel` de Klipper pour piloter `SYS_RGB` et reproduire les animations lumineuses de l'AMS.
 
 ## 3. Exemple de configuration Klipper
