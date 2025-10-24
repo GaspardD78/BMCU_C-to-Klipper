@@ -1,6 +1,8 @@
 # 📂 BMCU-C Firmware v0020
 
-This folder contains the **v0020 universal firmware** for **all BMCU-C boards**, including the upcoming dual microswitch Hall sensor version.
+## Folder overview
+
+This folder regroups the **v0020 universal firmware** for **all BMCU-C boards**, including the upcoming dual microswitch Hall sensor version. These archives were moved to the top-level `firmware/` directory to simplify navigation and avoid redundant nesting from previous releases.
 
 > 🔧 "**Universal**" means it works across all A1/P1/X1 printers, as long as you’re using a **370 motor and Hall-based buffer**.  
 > The choice of sub-board does not matter; for P1, just ensure the pipe length is configured correctly to choose **internal** or **external** version.  
