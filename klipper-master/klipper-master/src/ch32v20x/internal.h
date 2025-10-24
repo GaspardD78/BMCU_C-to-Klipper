@@ -95,6 +95,20 @@ struct spi_regs {
 
 typedef struct spi_regs SPI_TypeDef;
 
+struct i2c_regs {
+    volatile uint32_t CTLR1;
+    volatile uint32_t CTLR2;
+    volatile uint32_t OADDR1;
+    volatile uint32_t OADDR2;
+    volatile uint32_t DATAR;
+    volatile uint32_t STAR1;
+    volatile uint32_t STAR2;
+    volatile uint32_t CKCFGR;
+    volatile uint32_t RTR;
+};
+
+typedef struct i2c_regs I2C_TypeDef;
+
 struct adc_regs {
     volatile uint32_t STATR;
     volatile uint32_t CTLR1;
@@ -140,6 +154,8 @@ typedef struct adc_regs ADC_TypeDef;
 #define TIM3_BASE        (APB1PERIPH_BASE + 0x0400)
 #define TIM4_BASE        (APB1PERIPH_BASE + 0x0800)
 #define SPI2_BASE        (APB1PERIPH_BASE + 0x3800)
+#define I2C1_BASE        (APB1PERIPH_BASE + 0x5400)
+#define I2C2_BASE        (APB1PERIPH_BASE + 0x5800)
 #define USART2_BASE      (APB1PERIPH_BASE + 0x4400)
 #define USART3_BASE      (APB1PERIPH_BASE + 0x4800)
 
@@ -152,6 +168,8 @@ typedef struct adc_regs ADC_TypeDef;
 #define GPIOE ((GPIO_TypeDef *)GPIOE_BASE)
 #define SPI1  ((SPI_TypeDef *)SPI1_BASE)
 #define SPI2  ((SPI_TypeDef *)SPI2_BASE)
+#define I2C1  ((I2C_TypeDef *)I2C1_BASE)
+#define I2C2  ((I2C_TypeDef *)I2C2_BASE)
 #define ADC1  ((ADC_TypeDef *)ADC1_BASE)
 #define TIM1  ((TIM_TypeDef *)TIM1_BASE)
 #define TIM2  ((TIM_TypeDef *)TIM2_BASE)
@@ -196,6 +214,8 @@ typedef struct adc_regs ADC_TypeDef;
 #define RCC_APB1_TIM3   (1U << 1)
 #define RCC_APB1_TIM4   (1U << 2)
 #define RCC_APB1_SPI2   (1U << 14)
+#define RCC_APB1_I2C1   (1U << 21)
+#define RCC_APB1_I2C2   (1U << 22)
 #define RCC_APB1_USART2 (1U << 17)
 #define RCC_APB1_USART3 (1U << 18)
 
@@ -266,6 +286,26 @@ typedef struct adc_regs ADC_TypeDef;
 #define SPI_STATR_RXNE      (1U << 0)
 #define SPI_STATR_TXE       (1U << 1)
 #define SPI_STATR_BSY       (1U << 7)
+
+/* I2C bits */
+#define I2C_CTLR1_PE        (1U << 0)
+#define I2C_CTLR1_START     (1U << 8)
+#define I2C_CTLR1_STOP      (1U << 9)
+#define I2C_CTLR1_ACK       (1U << 10)
+#define I2C_CTLR1_SWRST     (1U << 15)
+
+#define I2C_CTLR2_FREQ_MASK 0x3FU
+
+#define I2C_STAR1_SB        (1U << 0)
+#define I2C_STAR1_ADDR      (1U << 1)
+#define I2C_STAR1_BTF       (1U << 2)
+#define I2C_STAR1_RXNE      (1U << 6)
+#define I2C_STAR1_TXE       (1U << 7)
+#define I2C_STAR1_AF        (1U << 10)
+
+#define I2C_STAR2_MSL       (1U << 0)
+#define I2C_STAR2_BUSY      (1U << 1)
+
 
 /* Simple ECLIC helpers */
 #define ECLIC_BASE        0xE0000000UL

@@ -6,9 +6,11 @@
 #include <stddef.h>
 #include <string.h>
 #include "board/irq.h" // irq_save
+#include "board/misc.h" // timer_read_time
 #include "command.h" // DECL_ENUMERATION_RANGE, shutdown
 #include "compiler.h"
 #include "gpio.h"
+#include "i2ccmds.h" // I2C_BUS_SUCCESS
 #include "pins_bmcu_c.h"
 
 DECL_ENUMERATION_RANGE("pin", "PA0", GPIO('A', 0), 16);
@@ -32,6 +34,45 @@ static GPIO_TypeDef * const digital_regs[] = {
     ['D' - 'A'] = GPIOD,
     ['E' - 'A'] = GPIOE,
 };
+
+struct i2c_bus_info {
+    I2C_TypeDef *regs;
+    uint32_t scl_pin;
+    uint32_t sda_pin;
+    volatile uint32_t *clk_reg;
+    uint32_t clk_mask;
+};
+
+DECL_ENUMERATION("i2c_bus", "i2c1", 0);
+DECL_CONSTANT_STR("BUS_PINS_i2c1", "PB6,PB7");
+DECL_ENUMERATION("i2c_bus", "i2c2", 1);
+DECL_CONSTANT_STR("BUS_PINS_i2c2", "PB10,PB11");
+
+static const struct i2c_bus_info i2c_buses[] = {
+    {
+        .regs = I2C1,
+        .scl_pin = GPIO('B', 6),
+        .sda_pin = GPIO('B', 7),
+        .clk_reg = &RCC->APB1PCENR,
+        .clk_mask = RCC_APB1_I2C1,
+    },
+    {
+        .regs = I2C2,
+        .scl_pin = GPIO('B', 10),
+        .sda_pin = GPIO('B', 11),
+        .clk_reg = &RCC->APB1PCENR,
+        .clk_mask = RCC_APB1_I2C2,
+    },
+};
+
+static uint32_t
+ch32_i2c_get_pclk(void)
+{
+    static const uint8_t presc_table[8] = { 1, 1, 1, 1, 2, 4, 8, 16 };
+    uint32_t presc = (RCC->CFGR0 >> 8) & 0x7U;
+    uint32_t divisor = presc_table[presc];
+    return CONFIG_CLOCK_FREQ / divisor;
+}
 
 struct spi_bus {
     SPI_TypeDef *regs;
@@ -444,33 +485,195 @@ spi_transfer(struct spi_config config, uint8_t receive_data,
         ;
 }
 
+static int
+i2c_wait(I2C_TypeDef *i2c, uint32_t set, uint32_t clear, uint32_t timeout)
+{
+    while (1) {
+        uint32_t star1 = i2c->STAR1;
+        if ((star1 & set) == set && (star1 & clear) == 0)
+            return I2C_BUS_SUCCESS;
+        if (star1 & I2C_STAR1_AF)
+            return I2C_BUS_NACK;
+        if (!timer_is_before(timer_read_time(), timeout))
+            return I2C_BUS_TIMEOUT;
+    }
+}
+
+static int
+i2c_start(I2C_TypeDef *i2c, uint8_t addr, uint8_t xfer_len, uint32_t timeout)
+{
+    uint32_t wait_end = timeout;
+    while (i2c->STAR2 & I2C_STAR2_BUSY) {
+        if (!timer_is_before(timer_read_time(), wait_end))
+            return I2C_BUS_TIMEOUT;
+    }
+
+    i2c->CTLR1 |= I2C_CTLR1_PE;
+    i2c->CTLR1 |= I2C_CTLR1_START;
+
+    int ret = i2c_wait(i2c, I2C_STAR1_SB, 0, timeout);
+    if (ret != I2C_BUS_SUCCESS)
+        return ret;
+
+    if (addr & 0x01 && xfer_len > 1)
+        i2c->CTLR1 |= I2C_CTLR1_ACK;
+
+    i2c->DATAR = addr;
+
+    ret = i2c_wait(i2c, I2C_STAR1_ADDR, 0, timeout);
+    if (ret != I2C_BUS_SUCCESS)
+        return ret;
+
+    irqstatus_t flag = irq_save();
+    uint32_t star2 = i2c->STAR2;
+    if ((addr & 0x01) && xfer_len == 1)
+        i2c->CTLR1 = I2C_CTLR1_STOP | I2C_CTLR1_PE;
+    irq_restore(flag);
+
+    if (!(star2 & I2C_STAR2_MSL))
+        shutdown("Failed to send i2c addr");
+
+    return ret;
+}
+
+static int
+i2c_send_byte(I2C_TypeDef *i2c, uint8_t b, uint32_t timeout)
+{
+    i2c->DATAR = b;
+    return i2c_wait(i2c, I2C_STAR1_TXE, 0, timeout);
+}
+
+static uint8_t
+i2c_read_byte(I2C_TypeDef *i2c, uint32_t timeout, uint8_t remaining)
+{
+    i2c_wait(i2c, I2C_STAR1_RXNE, 0, timeout);
+    irqstatus_t flag = irq_save();
+    uint8_t b = i2c->DATAR;
+    if (remaining == 1)
+        i2c->CTLR1 = I2C_CTLR1_STOP | I2C_CTLR1_PE;
+    irq_restore(flag);
+    return b;
+}
+
+static int
+i2c_stop(I2C_TypeDef *i2c, uint32_t timeout)
+{
+    i2c->CTLR1 = I2C_CTLR1_STOP | I2C_CTLR1_PE;
+    return i2c_wait(i2c, 0, I2C_STAR1_TXE, timeout);
+}
+
 struct i2c_config
 i2c_setup(uint32_t bus, uint32_t rate, uint8_t addr)
 {
-    (void)bus;
-    (void)rate;
-    struct i2c_config cfg = { .bus = 0, .addr = addr };
-    shutdown("I2C not yet implemented on CH32V20x");
-    return cfg;
+    if (bus >= ARRAY_SIZE(i2c_buses))
+        shutdown("Unsupported i2c bus");
+
+    const struct i2c_bus_info *info = &i2c_buses[bus];
+    I2C_TypeDef *i2c = info->regs;
+
+    *info->clk_reg |= info->clk_mask;
+
+    static uint8_t initialized[ARRAY_SIZE(i2c_buses)];
+    if (!initialized[bus]) {
+        initialized[bus] = 1;
+        gpio_peripheral(info->scl_pin,
+                        GPIO_CONFIG(GPIO_MODE_OUTPUT_50MHZ, GPIO_CNF_AF_OPENDRAIN),
+                        1);
+        gpio_peripheral(info->sda_pin,
+                        GPIO_CONFIG(GPIO_MODE_OUTPUT_50MHZ, GPIO_CNF_AF_OPENDRAIN),
+                        1);
+
+        i2c->CTLR1 = I2C_CTLR1_SWRST;
+        i2c->CTLR1 = 0;
+
+        uint32_t pclk = ch32_i2c_get_pclk();
+        uint32_t target = rate ? rate : 100000U;
+        if (target > 400000U)
+            target = 400000U;
+
+        uint32_t freq = pclk / 1000000U;
+        if (freq < 2U)
+            freq = 2U;
+        if (freq > I2C_CTLR2_FREQ_MASK)
+            freq = I2C_CTLR2_FREQ_MASK;
+
+        i2c->CTLR2 = freq;
+
+        uint32_t divider = pclk / (target * 2U);
+        if (divider < 4U)
+            divider = 4U;
+        if (divider > 0x0FFFU)
+            divider = 0x0FFFU;
+        i2c->CKCFGR = divider;
+        i2c->RTR = freq + 1U;
+    }
+
+    i2c->CTLR1 |= I2C_CTLR1_PE;
+
+    return (struct i2c_config){ .bus = bus, .addr = (addr & 0x7fU) << 1 };
 }
 
 int
 i2c_write(struct i2c_config config, uint8_t write_len, uint8_t *write)
 {
-    (void)config;
-    (void)write_len;
-    (void)write;
-    return -1;
+    if (config.bus >= ARRAY_SIZE(i2c_buses))
+        return I2C_BUS_TIMEOUT;
+
+    const struct i2c_bus_info *info = &i2c_buses[config.bus];
+    I2C_TypeDef *i2c = info->regs;
+    uint32_t timeout = timer_read_time() + timer_from_us(5000);
+
+    int ret = i2c_start(i2c, config.addr, write_len, timeout);
+    if (ret == I2C_BUS_NACK)
+        ret = I2C_BUS_START_NACK;
+
+    while (write_len-- && ret == I2C_BUS_SUCCESS)
+        ret = i2c_send_byte(i2c, *write++, timeout);
+
+    int stop_ret = i2c_stop(i2c, timeout);
+    if (ret == I2C_BUS_SUCCESS && stop_ret != I2C_BUS_SUCCESS)
+        ret = stop_ret;
+
+    return ret;
 }
 
 int
 i2c_read(struct i2c_config config, uint8_t reg_len, uint8_t *reg,
           uint8_t read_len, uint8_t *read)
 {
-    (void)config;
-    (void)reg_len;
-    (void)reg;
-    (void)read_len;
-    (void)read;
-    return -1;
+    if (config.bus >= ARRAY_SIZE(i2c_buses))
+        return I2C_BUS_TIMEOUT;
+
+    const struct i2c_bus_info *info = &i2c_buses[config.bus];
+    I2C_TypeDef *i2c = info->regs;
+    uint32_t timeout = timer_read_time() + timer_from_us(5000);
+    uint8_t addr_read = config.addr | 0x01;
+    int ret = I2C_BUS_SUCCESS;
+
+    if (reg_len) {
+        ret = i2c_start(i2c, config.addr, reg_len, timeout);
+        if (ret == I2C_BUS_NACK)
+            ret = I2C_BUS_START_NACK;
+        while (reg_len-- && ret == I2C_BUS_SUCCESS)
+            ret = i2c_send_byte(i2c, *reg++, timeout);
+        if (ret != I2C_BUS_SUCCESS)
+            goto out;
+    }
+
+    ret = i2c_start(i2c, addr_read, read_len, timeout);
+    if (ret == I2C_BUS_NACK)
+        ret = I2C_BUS_START_READ_NACK;
+    if (ret != I2C_BUS_SUCCESS)
+        goto out;
+
+    while (read_len--) {
+        *read = i2c_read_byte(i2c, timeout, read_len);
+        read++;
+    }
+
+    return i2c_wait(i2c, 0, I2C_STAR1_RXNE, timeout);
+
+out:
+    i2c_stop(i2c, timeout);
+    return ret;
 }
