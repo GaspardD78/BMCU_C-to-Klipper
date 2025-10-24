@@ -11,7 +11,7 @@ CFLAGS += -Isrc/ch32v20x -DCH32V20X
 src-y += generic/riscv_start.S generic/riscv_irq.c generic/timer_irq.c
 src-y += ch32v20x/system.c ch32v20x/main.c ch32v20x/clock.c
 src-y += ch32v20x/gpio.c ch32v20x/timer.c
-src-$(CONFIG_SERIAL) += ch32v20x/serial.c generic/serial_irq.c
+src-$(CONFIG_SERIAL) += ch32v20x/usart.c generic/serial_irq.c
 src-$(CONFIG_WANT_ADC) += ch32v20x/adc.c
 src-$(CONFIG_WANT_HARD_PWM) += ch32v20x/hard_pwm.c
 
