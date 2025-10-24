@@ -6,7 +6,8 @@ Ce dépôt contient une base de code solide pour intégrer un BMCU-C avec Klippe
 
 ## État Actuel
 
-*   **Structure du projet :** Tous les fichiers nécessaires sont présents (`bmcu.py`, `bmcu_config.cfg`, `bmcu_macros.cfg`).
+*   **Structure du projet :** Tous les fichiers nécessaires sont présents (`klipper/klippy/extras/bmcu.py`, `configs/bmcu_config.cfg`, `configs/bmcu_macros.cfg`).
+*   **Organisation du dépôt :** Les ressources sont regroupées par rôle (`configs/`, `docs/`, `firmware/`, `hardware/`, `klipper/`) afin de simplifier la navigation.
 *   **Intégration Happy Hare :** La configuration pour utiliser le `MacroSelector` de Happy Hare est correcte.
 *   **Checksums :** Les algorithmes de checksum `CRC8 DVB-S2` et `CRC16` spécifiques au "bambubus" ont été implémentés en Python.
 *   **Communication :** Le module Klipper contient une logique de base pour envoyer des paquets, mais elle est simplifiée et doit être complétée.
@@ -26,10 +27,10 @@ Un développeur ayant accès à un BMCU-C physique devra réaliser les étapes s
 ## Installation (pour le développement)
 
 1.  **Copier le module Klipper :**
-    *   `cp klipper-master/klipper-master/klippy/extras/bmcu.py /home/pi/klipper/klippy/extras/`
+    *   `cp klipper/klippy/extras/bmcu.py /home/pi/klipper/klippy/extras/`
 
 2.  **Copier les fichiers de configuration :**
-    *   `cp bmcu_config.cfg bmcu_macros.cfg /home/pi/klipper_config/`
+    *   `cp configs/bmcu_config.cfg configs/bmcu_macros.cfg /home/pi/klipper_config/`
 
 3.  **Modifier `printer.cfg` :**
     *   Ajoutez `[include bmcu_config.cfg]` et `[include bmcu_macros.cfg]`.
