@@ -213,6 +213,7 @@ typedef struct adc_regs ADC_TypeDef;
 #define RCC_APB1_TIM2   (1U << 0)
 #define RCC_APB1_TIM3   (1U << 1)
 #define RCC_APB1_TIM4   (1U << 2)
+#define RCC_APB1_USB    (1U << 23)
 #define RCC_APB1_SPI2   (1U << 14)
 #define RCC_APB1_I2C1   (1U << 21)
 #define RCC_APB1_I2C2   (1U << 22)

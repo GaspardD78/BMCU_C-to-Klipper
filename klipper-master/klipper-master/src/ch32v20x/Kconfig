@@ -42,4 +42,19 @@ config CH32V20X_USB
     select USBSERIAL
 endchoice
 
+config HAVE_PWM_TIM1
+    bool "Exposer les sorties PWM basées sur TIM1" if LOW_LEVEL_OPTIONS
+    default y
+    help
+        Active les définitions de broches utilisant le timer avancé TIM1.
+        Désactivez cette option si le design matériel ne câble aucune sortie
+        sur TIM1 afin de réduire la consommation et le code généré.
+
+config HAVE_PWM_TIM4
+    bool "Exposer les sorties PWM basées sur TIM4" if LOW_LEVEL_OPTIONS
+    default y
+    help
+        Active les définitions de broches utilisant TIM4. Désactivez cette
+        option pour les cartes qui n'acheminent pas de PWM sur ce timer.
+
 endif

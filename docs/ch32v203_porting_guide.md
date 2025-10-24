@@ -174,6 +174,14 @@ void clock_init(void)
 }
 ```
 
+> ℹ️ Les horloges optionnelles sont désormais gouvernées par les drapeaux
+> `CONFIG_HAVE_PWM_TIM1`/`CONFIG_HAVE_PWM_TIM4` (exposés dans `make menuconfig`
+> quand `LOW_LEVEL_OPTIONS` est activé). `clock_init()` n'active `TIM1` et
+> `TIM4` que si ces options sont cochées, ce qui évite d'alimenter des blocs
+> matériels inutilisés. De même, sélectionner l'interface USB (`CH32V20X_USB`
+> ou toute option qui implique `CONFIG_USB`) provoque l'activation de
+> `RCC_APB1_USB`.
+
 ### 3.3 GPIO (`gpio.c`)
 
 Exposez `gpio_set_mode()` et `gpio_read()` en utilisant la structure des ports STM32F1 (registres `CRL/CRH`, `ODR`, `IDR`). L'initialisation par défaut peut forcer tous les ports en entrée flottante pour minimiser la consommation.
