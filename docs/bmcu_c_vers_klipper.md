@@ -26,11 +26,7 @@ Ce document propose une démarche pour porter le circuit imprimé **BMCU-C** (co
 
 ## 2. Portage du microcontrôleur CH32V203 vers Klipper
 
-1. **Créer une nouvelle architecture bas niveau** :
-   * Ajouter `config MACH_CH32V20X` dans `src/Kconfig` et pointer vers un nouveau dossier `src/ch32v20x`. 【F:klipper-master/klipper-master/src/Kconfig†L1-L36】
-   * Décliner les règles de compilation dans `src/Makefile` pour activer GPIO, PWM, UART… comme pour les autres architectures. 【F:klipper-master/klipper-master/src/Makefile†L1-L27】
-   * Fournir l'initialisation horloge/PLL, la gestion NVIC et les couches GPIO/ADC/PWM. On peut s'inspirer des ports existants (STM32, HC32) pour la structure des fichiers (`board.c`, `gpio.c`, `clock.c`).
-   * Utiliser une toolchain `riscv-none-elf-gcc` (WCH fournit un SDK libre) et l'intégrer dans `scripts/toolchain-riscv.cmake` (copie du script RP2040 en adaptant les options).
+1. **Créer une nouvelle architecture bas niveau** : suivez le guide détaillé [Portage du CH32V203 dans Klipper](./ch32v203_porting_guide.md) pour déclarer l'architecture `MACH_CH32V20X`, ajouter son `Kconfig`, écrire le `Makefile` spécifique (toolchain RISC-V) et implémenter les couches `clock`, `gpio`, `timer`, `serial`, `adc` et `pwm`. 【F:docs/ch32v203_porting_guide.md†L1-L196】
 
 2. **Mapper les broches** :
    * Exporter la netlist depuis les schémas (`*.schdoc`) ou utiliser EasyEDA/Altium pour associer chaque net `MOTORx_H/L`, `MCU_TX`… à un port physique (`PA9`, `PB5`, etc.). Les coordonnées listées ci-dessus facilitent le repérage des pins sur le composant CH32. 【F:pbmcu_c_hall/BMCU-C Hall/主机板子/Schematic1/1_P1.schdoc†L447-L500】
