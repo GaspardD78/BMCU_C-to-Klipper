@@ -53,7 +53,7 @@ struct tim_regs {
     volatile uint32_t SWEVGR;
     volatile uint32_t CHCTLR1;
     volatile uint32_t CHCTLR2;
-    volatile uint32_t CHIER;
+    volatile uint32_t CCER;
     volatile uint32_t CNT;
     volatile uint32_t PSC;
     volatile uint32_t ATRLR;
@@ -62,6 +62,9 @@ struct tim_regs {
     volatile uint32_t CH2CVR;
     volatile uint32_t CH3CVR;
     volatile uint32_t CH4CVR;
+    volatile uint32_t BDTR;
+    volatile uint32_t DCR;
+    volatile uint32_t DMAR;
 };
 
 typedef struct tim_regs TIM_TypeDef;
@@ -168,6 +171,7 @@ typedef struct adc_regs ADC_TypeDef;
 #define RCC_APB2_AFIO   (1U << 0)
 #define RCC_APB2_USART1 (1U << 14)
 #define RCC_APB2_ADC1   (1U << 9)
+#define RCC_APB2_TIM1   (1U << 11)
 
 #define RCC_APB1_TIM2   (1U << 0)
 #define RCC_APB1_TIM3   (1U << 1)
@@ -192,9 +196,23 @@ typedef struct adc_regs ADC_TypeDef;
 #define GPIO_CONFIG(mode, cnf) (((mode) & 0x3) | (((cnf) & 0x3) << 2))
 
 /* Timer helpers */
-#define TIM_CEN   (1U << 0)
-#define TIM_UIE   (1U << 0)
-#define TIM_UIF   (1U << 0)
+#define TIM_CEN        (1U << 0)
+#define TIM_ARPE       (1U << 7)
+#define TIM_UIE        (1U << 0)
+#define TIM_UIF        (1U << 0)
+#define TIM_SWEVGR_UG  (1U << 0)
+
+#define TIM_CCMR_CC1S_MASK   0x3U
+#define TIM_CCMR_OC1PE       (1U << 3)
+#define TIM_CCMR_OC1M_MASK   (0x7U << 4)
+#define TIM_CCMR_OC1M_PWM1   (0x6U << 4)
+
+#define TIM_CCER_CC1E        (1U << 0)
+#define TIM_CCER_CC2E        (1U << 4)
+#define TIM_CCER_CC3E        (1U << 8)
+#define TIM_CCER_CC4E        (1U << 12)
+
+#define TIM_BDTR_MOE         (1U << 15)
 
 /* USART bits */
 #define USART_CTLR1_RE   (1U << 2)
@@ -235,6 +253,7 @@ eclic_enable_interrupt(uint32_t irq, uint8_t level, uint8_t priority)
 #define USART1_IRQn 37
 
 void clock_init(void);
+void clock_enable_timer(TIM_TypeDef *timer);
 void gpio_init(void);
 void timer_init(void);
 void serial_init(void);

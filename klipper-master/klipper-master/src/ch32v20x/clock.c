@@ -38,7 +38,20 @@ clock_init(void)
 
     // Enable GPIO and timer clocks we rely on
     RCC->APB2PCENR |= RCC_APB2_AFIO | RCC_APB2_IOPA | RCC_APB2_IOPB
-        | RCC_APB2_IOPC;
+        | RCC_APB2_IOPC | RCC_APB2_IOPD | RCC_APB2_IOPE;
     RCC->APB1PCENR |= RCC_APB1_TIM2 | RCC_APB1_TIM3 | RCC_APB1_USART2;
     RCC->APB2PCENR |= RCC_APB2_USART1;
+}
+
+void
+clock_enable_timer(TIM_TypeDef *timer)
+{
+    if (timer == TIM1)
+        RCC->APB2PCENR |= RCC_APB2_TIM1;
+    else if (timer == TIM2)
+        RCC->APB1PCENR |= RCC_APB1_TIM2;
+    else if (timer == TIM3)
+        RCC->APB1PCENR |= RCC_APB1_TIM3;
+    else if (timer == TIM4)
+        RCC->APB1PCENR |= RCC_APB1_TIM4;
 }
