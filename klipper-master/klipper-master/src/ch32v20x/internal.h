@@ -81,6 +81,20 @@ struct usart_regs {
 
 typedef struct usart_regs USART_TypeDef;
 
+struct spi_regs {
+    volatile uint32_t CTLR1;
+    volatile uint32_t CTLR2;
+    volatile uint32_t STATR;
+    volatile uint32_t DATAR;
+    volatile uint32_t CRCR;
+    volatile uint32_t RCRCR;
+    volatile uint32_t TCRCR;
+    volatile uint32_t I2SCFGR;
+    volatile uint32_t I2SPR;
+};
+
+typedef struct spi_regs SPI_TypeDef;
+
 struct adc_regs {
     volatile uint32_t STATR;
     volatile uint32_t CTLR1;
@@ -117,6 +131,7 @@ typedef struct adc_regs ADC_TypeDef;
 #define GPIOC_BASE       (APB2PERIPH_BASE + 0x1000)
 #define GPIOD_BASE       (APB2PERIPH_BASE + 0x1400)
 #define GPIOE_BASE       (APB2PERIPH_BASE + 0x1800)
+#define SPI1_BASE        (APB2PERIPH_BASE + 0x3000)
 #define ADC1_BASE        (APB2PERIPH_BASE + 0x2400)
 #define TIM1_BASE        (APB2PERIPH_BASE + 0x2C00)
 #define USART1_BASE      (APB2PERIPH_BASE + 0x3800)
@@ -124,6 +139,7 @@ typedef struct adc_regs ADC_TypeDef;
 #define TIM2_BASE        (APB1PERIPH_BASE + 0x0000)
 #define TIM3_BASE        (APB1PERIPH_BASE + 0x0400)
 #define TIM4_BASE        (APB1PERIPH_BASE + 0x0800)
+#define SPI2_BASE        (APB1PERIPH_BASE + 0x3800)
 #define USART2_BASE      (APB1PERIPH_BASE + 0x4400)
 #define USART3_BASE      (APB1PERIPH_BASE + 0x4800)
 
@@ -134,6 +150,8 @@ typedef struct adc_regs ADC_TypeDef;
 #define GPIOC ((GPIO_TypeDef *)GPIOC_BASE)
 #define GPIOD ((GPIO_TypeDef *)GPIOD_BASE)
 #define GPIOE ((GPIO_TypeDef *)GPIOE_BASE)
+#define SPI1  ((SPI_TypeDef *)SPI1_BASE)
+#define SPI2  ((SPI_TypeDef *)SPI2_BASE)
 #define ADC1  ((ADC_TypeDef *)ADC1_BASE)
 #define TIM1  ((TIM_TypeDef *)TIM1_BASE)
 #define TIM2  ((TIM_TypeDef *)TIM2_BASE)
@@ -169,6 +187,7 @@ typedef struct adc_regs ADC_TypeDef;
 #define RCC_APB2_IOPD   (1U << 5)
 #define RCC_APB2_IOPE   (1U << 6)
 #define RCC_APB2_AFIO   (1U << 0)
+#define RCC_APB2_SPI1   (1U << 12)
 #define RCC_APB2_USART1 (1U << 14)
 #define RCC_APB2_ADC1   (1U << 9)
 #define RCC_APB2_TIM1   (1U << 11)
@@ -176,6 +195,7 @@ typedef struct adc_regs ADC_TypeDef;
 #define RCC_APB1_TIM2   (1U << 0)
 #define RCC_APB1_TIM3   (1U << 1)
 #define RCC_APB1_TIM4   (1U << 2)
+#define RCC_APB1_SPI2   (1U << 14)
 #define RCC_APB1_USART2 (1U << 17)
 #define RCC_APB1_USART3 (1U << 18)
 
@@ -227,6 +247,25 @@ typedef struct adc_regs ADC_TypeDef;
 #define USART_STATR_TXE  (1U << 7)
 #define USART_STATR_ORE  (1U << 3)
 #define USART_STATR_TC   (1U << 6)
+
+/* SPI bits */
+#define SPI_CTLR1_CPHA      (1U << 0)
+#define SPI_CTLR1_CPOL      (1U << 1)
+#define SPI_CTLR1_MSTR      (1U << 2)
+#define SPI_CTLR1_BR_SHIFT  3
+#define SPI_CTLR1_BR_MASK   (0x7U << SPI_CTLR1_BR_SHIFT)
+#define SPI_CTLR1_SPE       (1U << 6)
+#define SPI_CTLR1_LSBFIRST  (1U << 7)
+#define SPI_CTLR1_SSI       (1U << 8)
+#define SPI_CTLR1_SSM       (1U << 9)
+#define SPI_CTLR1_RXONLY    (1U << 10)
+#define SPI_CTLR1_DFF       (1U << 11)
+#define SPI_CTLR1_BIDIOE    (1U << 14)
+#define SPI_CTLR1_BIDIMODE  (1U << 15)
+
+#define SPI_STATR_RXNE      (1U << 0)
+#define SPI_STATR_TXE       (1U << 1)
+#define SPI_STATR_BSY       (1U << 7)
 
 /* Simple ECLIC helpers */
 #define ECLIC_BASE        0xE0000000UL
