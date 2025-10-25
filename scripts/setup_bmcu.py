@@ -170,10 +170,20 @@ def _update_printer_cfg(
     print(f"Updated {printer_cfg}")
 
 
-def _flash_firmware(klipper_path: Path, flash_device: str | None, dry_run: bool) -> None:
+def _flash_firmware(
+    klipper_path: Path,
+    flash_device: str | None,
+    flash_baud: int | None,
+    flash_extra_opts: str | None,
+    dry_run: bool,
+) -> None:
     cmd: List[str] = ["make", "flash"]
     if flash_device:
         cmd.append(f"FLASH_DEVICE={flash_device}")
+    if flash_baud is not None:
+        cmd.append(f"FLASH_BAUD={flash_baud}")
+    if flash_extra_opts:
+        cmd.append(f"FLASH_EXTRA_OPTS={flash_extra_opts}")
 
     print("Running", " ".join(cmd), "in", klipper_path)
     if dry_run:
@@ -244,6 +254,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--flash-device",
         help="Valeur à fournir à FLASH_DEVICE lors de l'appel à make flash",
+    )
+    parser.add_argument(
+        "--flash-baud",
+        type=int,
+        help=(
+            "Débit série à transmettre via FLASH_BAUD lors de l'appel à make flash (ex. 115200 pour UART)"
+        ),
+    )
+    parser.add_argument(
+        "--flash-extra-opts",
+        help=(
+            "Options supplémentaires à relayer à wchisp via FLASH_EXTRA_OPTS lors de l'appel à make flash"
+        ),
     )
     parser.add_argument(
         "--no-backup",
@@ -339,7 +362,7 @@ def main() -> int:
             print(
                 "Avertissement : aucun lien série n'a été détecté. "
                 "La section [mcu bmcu_c] sera ajoutée avec un rappel TODO ; "
-                "éditez printer.cfg pour renseigner le port réel avant de démarrer Klipper.",
+                "éditez printer.cfg pour renseigner le port réel ou relancez le script avec --serial-path=... avant de démarrer Klipper.",
                 file=sys.stderr,
             )
         printer_cfg = args.printer_config.expanduser().resolve()
@@ -354,6 +377,7 @@ def main() -> int:
                 "Renseignez le port du BMCU dans la section [mcu bmcu_c] avant de démarrer Klipper.",
                 file=sys.stderr,
             )
+            return 1
 
     if args.firmware_variant and not args.firmware_dest:
         print("Erreur : --firmware-dest est requis lorsque --firmware-variant est fourni.", file=sys.stderr)
@@ -375,7 +399,13 @@ def main() -> int:
 
     if args.flash:
         try:
-            _flash_firmware(klipper_path, args.flash_device, args.dry_run)
+            _flash_firmware(
+                klipper_path,
+                args.flash_device,
+                args.flash_baud,
+                args.flash_extra_opts,
+                args.dry_run,
+            )
         except RuntimeError as exc:
             print(f"Erreur : {exc}", file=sys.stderr)
             return 1
