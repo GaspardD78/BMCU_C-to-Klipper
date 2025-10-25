@@ -16,6 +16,15 @@ def test_ensure_mcu_section_uses_serial_path():
     assert any(line.strip() == f"serial: {serial}" for line in updated_lines)
 
 
+def test_ensure_mcu_section_skips_serial_when_unknown():
+    lines = ["# existing config\n"]
+
+    updated_lines, changed = setup_bmcu._ensure_mcu_section(lines, None)
+
+    assert changed is True
+    assert not any(line.strip().startswith("serial:") for line in updated_lines)
+
+
 def test_main_fails_when_klipper_structure_is_invalid(tmp_path, monkeypatch, capsys):
     klipper_dir = tmp_path / "fake_klipper"
     klipper_dir.mkdir()
@@ -117,3 +126,43 @@ def test_detect_serial_symlink_handles_multiple_candidates(tmp_path):
         setup_bmcu._detect_serial_symlink(base=base)
 
     assert "--serial-path" in str(excinfo.value)
+
+
+def test_main_requires_manual_serial_when_detection_fails(tmp_path, monkeypatch, capsys):
+    klipper_dir = tmp_path / "klipper"
+    klipper_dir.mkdir()
+    (klipper_dir / "Makefile").write_text("")
+    klippy_dir = klipper_dir / "klippy"
+    klippy_dir.mkdir()
+    (klippy_dir / "__init__.py").write_text("")
+
+    config_dir = tmp_path / "klipper_config"
+    config_dir.mkdir()
+
+    printer_cfg = config_dir / "printer.cfg"
+    printer_cfg.write_text("# printer configuration\n")
+
+    args = SimpleNamespace(
+        list_firmware=False,
+        klipper_path=klipper_dir,
+        config_path=config_dir,
+        printer_config=printer_cfg,
+        serial_path=None,
+        firmware_variant=None,
+        firmware_dest=None,
+        firmware_aliases={},
+        flash=False,
+        flash_device=None,
+        no_backup=False,
+        dry_run=False,
+    )
+
+    monkeypatch.setattr(setup_bmcu, "parse_args", lambda: args)
+    monkeypatch.setattr(setup_bmcu, "_copy_file", lambda *a, **k: None)
+    monkeypatch.setattr(setup_bmcu, "_detect_serial_symlink", lambda: None)
+
+    exit_code = setup_bmcu.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "--serial-path" in captured.err
