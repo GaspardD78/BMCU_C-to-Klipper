@@ -40,24 +40,28 @@ def _ensure_includes(lines: List[str], includes: Iterable[str]) -> Tuple[List[st
     return result, updated
 
 
-def _detect_serial_symlink() -> Optional[str]:
-    base = Path("/dev/serial/by-id")
+def _detect_serial_symlink(base: Path | None = None) -> Optional[str]:
+    base = base or Path("/dev/serial/by-id")
     if not base.exists():
         return None
 
-    preferred_patterns = ["usb-klipper_ch32v203*", "*klipper*", "*"]
-    for pattern in preferred_patterns:
-        matches = sorted(base.glob(pattern))
-        if not matches:
-            continue
-        if len(matches) == 1:
-            return str(matches[0])
-        # If multiple matches exist for a given pattern, take the first one
-        # for the most specific patterns (to avoid falling back to a generic
-        # device when several Klipper devices are connected).
-        if pattern != "*":
-            return str(matches[0])
-    return None
+    patterns = ("usb-klipper_ch32v203*", "wch-link*")
+    candidates: dict[str, Path] = {}
+    for pattern in patterns:
+        for match in base.glob(pattern):
+            candidates.setdefault(str(match), match)
+
+    matches = [candidates[key] for key in sorted(candidates)]
+
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return str(matches[0])
+
+    raise RuntimeError(
+        "Plusieurs périphériques Klipper détectés. "
+        "Veuillez préciser --serial-path pour sélectionner le bon lien."
+    )
 
 
 def _ensure_mcu_section(lines: List[str], serial_path: Optional[str]) -> Tuple[List[str], bool]:
@@ -239,7 +243,11 @@ def main() -> int:
     if args.printer_config:
         serial_path: Optional[str] = args.serial_path
         if serial_path is None:
-            detected = _detect_serial_symlink()
+            try:
+                detected = _detect_serial_symlink()
+            except RuntimeError as exc:
+                print(f"Erreur : {exc}", file=sys.stderr)
+                return 1
             if detected:
                 print(f"Lien série détecté automatiquement : {detected}")
             serial_path = detected
