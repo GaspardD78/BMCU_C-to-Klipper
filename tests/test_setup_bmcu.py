@@ -2,7 +2,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import subprocess
+import sys
+
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import setup_bmcu
 
@@ -24,6 +30,19 @@ def test_ensure_mcu_section_skips_serial_when_unknown():
 
     assert changed is True
     assert not any(line.strip().startswith("serial:") for line in updated_lines)
+
+
+def test_cli_list_firmware_does_not_require_paths():
+    script_path = Path("scripts/setup_bmcu.py")
+
+    result = subprocess.run(
+        [sys.executable, str(script_path), "--list-firmware"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert "Firmware disponibles" in result.stdout
 
 
 def test_main_fails_when_klipper_structure_is_invalid(tmp_path, monkeypatch, capsys):

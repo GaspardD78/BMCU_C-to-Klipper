@@ -202,9 +202,15 @@ def parse_args() -> argparse.Namespace:
             "et facilite le flash du microcontrôleur."
         )
     )
-    parser.add_argument("--klipper-path", type=Path, required=True, help="Répertoire de l'installation Klipper hôte")
     parser.add_argument(
-        "--config-path", type=Path, required=True, help="Répertoire de configuration Klipper (généralement ~/klipper_config)"
+        "--klipper-path",
+        type=Path,
+        help="Répertoire de l'installation Klipper hôte",
+    )
+    parser.add_argument(
+        "--config-path",
+        type=Path,
+        help="Répertoire de configuration Klipper (généralement ~/klipper_config)"
     )
     parser.add_argument(
         "--printer-config", type=Path, help="Chemin vers printer.cfg pour y injecter les includes BMCU"
@@ -259,6 +265,20 @@ def main() -> int:
         for alias, firmware_path in sorted(firmware_aliases.items()):
             print(f"  - {alias}: {firmware_path.name}")
         return 0
+
+    if args.klipper_path is None:
+        print(
+            "Erreur : --klipper-path est requis sauf lors de l'utilisation de --list-firmware.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if args.config_path is None:
+        print(
+            "Erreur : --config-path est requis sauf lors de l'utilisation de --list-firmware.",
+            file=sys.stderr,
+        )
+        return 1
 
     klipper_path: Path = args.klipper_path.expanduser().resolve()
     config_path: Path = args.config_path.expanduser().resolve()
