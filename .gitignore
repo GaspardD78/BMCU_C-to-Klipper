@@ -1,0 +1,17 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+
+# macOS/Windows cruft
+.DS_Store
+Thumbs.db
