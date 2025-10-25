@@ -50,6 +50,39 @@ Un développeur ayant accès à un BMCU-C physique devra réaliser les étapes s
 
 3.  **Redémarrer Klipper.**
 
+## Compilation et Flashage du Firmware Klipper
+
+Pour compiler le firmware Klipper pour la BMCU-C, vous devez d'abord installer les dépendances nécessaires sur votre système.
+
+### Dépendances Requises
+
+Assurez-vous d'avoir les paquets suivants installés :
+
+*   `gcc-riscv64-unknown-elf`
+*   `picolibc-riscv64-unknown-elf`
+*   `wchisp` (installable via `pip3 install wchisp`)
+
+Sur les systèmes basés sur Debian (comme Raspberry Pi OS), vous pouvez les installer avec la commande suivante :
+
+```bash
+sudo apt-get update
+sudo apt-get install gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf
+pip3 install wchisp
+```
+
+**Note :** Une chaîne de compilation `riscv64-unknown-elf` correctement installée devrait automatiquement trouver ses bibliothèques et en-têtes (comme `picolibc`). Si vous rencontrez des erreurs de compilation concernant des fichiers d'en-tête manquants, assurez-vous que votre environnement de compilation est correctement configuré.
+
+### Compilation et Flashage
+
+Une fois les dépendances installées, vous pouvez compiler et flasher le firmware en utilisant la commande `make flash` depuis le répertoire `klipper`.
+
+```bash
+cd klipper
+make flash FLASH_DEVICE=/dev/ttyUSB0
+```
+
+Remplacez `/dev/ttyUSB0` par le port série de votre BMCU-C.
+
 ## Documentation complémentaire
 
 *   [Mise à jour de Klipper et intégration Mainsail pour le BMCU-C](docs/bmcu_c_flashing_mainsail.md) : procédure pas-à-pas pour compiler, flasher le CH32V203 et déclarer la carte dans Mainsail.
