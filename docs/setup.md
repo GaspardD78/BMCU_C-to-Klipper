@@ -9,18 +9,31 @@ Ce document décrit **l'unique procédure** nécessaire pour mettre en service l
 - Happy Hare installé sur l'imprimante. Si besoin, suivez la documentation officielle :
   - Klipper : <https://www.klipper3d.org/Installation.html>
   - Happy Hare : <https://github.com/moggieuk/Happy-Hare>
-- Accès aux sources du firmware BMCU-C (dépôt séparé, voir section 4).
+- Outils de compilation pour RISC-V : `gcc-riscv64-unknown-elf`, `picolibc-riscv64-unknown-elf`.
+- Outil de flashage : `wchisp`.
 
 ## 2. Récupérer les fichiers de l'addon
 
 ```bash
-git clone https://github.com/GaspardD78/BMCU_C-to-Klipper.git
+git clone --recurse-submodules https://github.com/GaspardD78/BMCU_C-to-Klipper.git
 cd BMCU_C-to-Klipper
 ```
 
-Le dépôt contient uniquement le module Klipper et les fichiers de configuration nécessaires.
+## 3. Compiler et flasher le firmware
 
-## 3. Installer l'addon sur Klipper
+1. **Compiler le firmware :**
+   Le script `build.sh` prépare et lance la compilation du firmware Klipper.
+   ```bash
+   ./firmware/build.sh
+   ```
+
+2. **Flasher le firmware :**
+   Le script `flash.sh` vous guidera pour mettre le BMCU-C en mode bootloader et flasher le firmware.
+   ```bash
+   ./firmware/flash.sh
+   ```
+
+## 4. Installer l'addon sur Klipper
 
 1. Copier l'addon dans le dossier de configuration Klipper :
 
@@ -46,11 +59,3 @@ Le dépôt contient uniquement le module Klipper et les fichiers de configuratio
    ```bash
    sudo service klipper restart
    ```
-
-## 4. Préparer le firmware BMCU-C
-
-Le firmware et les instructions de flashage sont fournis dans un dépôt séparé afin de garder ce projet focalisé sur l'addon Klipper :
-
-- <https://github.com/GaspardD78/BMCU-C-Firmware>
-
-Suivez la documentation de ce dépôt pour compiler et flasher le BMCU-C avant d'utiliser l'addon.

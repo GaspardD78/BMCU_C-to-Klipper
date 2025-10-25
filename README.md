@@ -13,6 +13,8 @@ Ce dépôt open-source fournit uniquement les éléments nécessaires pour pilot
 - `bmcu_addon/bmcu.py` : module Klipper responsable de la communication RS-485 avec le BMCU-C (implémentation du protocole « bambubus »).
 - `bmcu_addon/config/` : fichiers de configuration et macros Happy Hare à inclure dans votre configuration Klipper.
 - `docs/setup.md` : guide pas-à-pas pour installer et activer l'addon.
+- `firmware/` : scripts et configuration pour compiler et flasher le firmware Klipper sur le BMCU-C.
+- `klipper/` : sous-module Git contenant les sources du firmware Klipper.
 
 ## Fonctionnalités
 
@@ -26,9 +28,19 @@ Suivez le guide d'installation détaillé disponible dans `docs/setup.md` :
 
 **➡️ [Guide d'installation](./docs/setup.md)**
 
-## Ressources complémentaires
+## Firmware
 
-- **Firmware BMCU-C :** compilation et flashage sont gérés dans un dépôt séparé : [GaspardD78/BMCU-C-Firmware](https://github.com/GaspardD78/BMCU-C-Firmware).
+Ce dépôt inclut désormais tout le nécessaire pour compiler et flasher le firmware Klipper sur le BMCU-C.
+
+1. **Compiler le firmware :**
+   ```bash
+   ./firmware/build.sh
+   ```
+2. **Flasher le firmware :**
+   Suivez les instructions du script pour mettre le BMCU-C en mode bootloader.
+   ```bash
+   ./firmware/flash.sh
+   ```
 
 ## Contribuer
 
