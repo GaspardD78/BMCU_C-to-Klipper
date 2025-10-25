@@ -131,7 +131,8 @@ def _flash_firmware(klipper_path: Path, flash_device: str | None, dry_run: bool)
 
 
 def parse_args() -> argparse.Namespace:
-    firmware_names = [path.name for path in _available_firmware()]
+    firmware_paths = _available_firmware()
+    firmware_aliases: dict[str, Path] = {path.stem: path for path in firmware_paths}
     parser = argparse.ArgumentParser(
         description=(
             "Automatise la copie des fichiers BMCU-C vers une installation Klipper "
@@ -153,7 +154,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--firmware-variant",
-        choices=firmware_names,
+        choices=sorted(firmware_aliases),
         help="Nom du binaire firmware à copier depuis le dépôt",
     )
     parser.add_argument(
@@ -181,16 +182,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Lister les binaires firmware disponibles et quitter",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    setattr(args, "firmware_aliases", firmware_aliases)
+    return args
 
 
 def main() -> int:
     args = parse_args()
+    firmware_aliases: dict[str, Path] = getattr(args, "firmware_aliases", {})
 
     if args.list_firmware:
         print("Firmware disponibles :")
-        for firmware in _available_firmware():
-            print(f"  - {firmware.name}")
+        for alias, firmware_path in sorted(firmware_aliases.items()):
+            print(f"  - {alias}: {firmware_path.name}")
         return 0
 
     klipper_path: Path = args.klipper_path.expanduser().resolve()
@@ -254,14 +258,13 @@ def main() -> int:
         if not args.firmware_variant:
             print("Erreur : --firmware-variant doit être précisé pour copier un firmware.", file=sys.stderr)
             return 1
-        available = {path.name: path for path in _available_firmware()}
-        if args.firmware_variant not in available:
+        if args.firmware_variant not in firmware_aliases:
             print(
                 "Erreur : le firmware demandé n'existe pas dans le dépôt. Utilisez --list-firmware pour voir les options.",
                 file=sys.stderr,
             )
             return 1
-        firmware_src = available[args.firmware_variant]
+        firmware_src = firmware_aliases[args.firmware_variant]
         firmware_dest = args.firmware_dest.expanduser().resolve()
         _copy_file(firmware_src, firmware_dest, args.dry_run)
 
