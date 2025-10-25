@@ -97,8 +97,7 @@ USB ou l'interface série exposée par le CB2.
    cd /chemin/vers/klipper
    make flash FLASH_DEVICE=wch-link-swd
    ```
-   Si vous utilisez le port série interne du CB2, spécifiez `FLASH_DEVICE=/dev/ttyS2` (ou le port détecté) et lancez
-   `wchisp flash out/klipper.bin`.
+   Ajoutez `FLASH_BAUD=115200` pour forcer la vitesse lorsque vous ciblez un adaptateur UART (`FLASH_DEVICE=/dev/ttyS2` par exemple) et transmettez toute option supplémentaire à `wchisp` via `FLASH_EXTRA_OPTS`.【F:klipper/src/ch32v20x/Makefile†L29-L46】
 6. **Vérifier** : après reset, la commande suivante doit afficher l'identifiant USB du MCU :
    ```bash
    ls /dev/serial/by-id/
@@ -117,10 +116,7 @@ USB ou l'interface série exposée par le CB2.
    ```bash
    make flash FLASH_DEVICE=wch-link-swd
    ```
-   En l'absence de WCH-LinkE, vous pouvez utiliser un convertisseur série USB ↔︎ UART et la commande :
-   ```bash
-   wchisp flash out/klipper.bin --device /dev/ttyUSB0 --baud 115200
-   ```
+   Renseignez `FLASH_BAUD=115200` pour un adaptateur UART (`FLASH_DEVICE=/dev/ttyUSB0`) et complétez au besoin avec `FLASH_EXTRA_OPTS` pour relayer des paramètres additionnels à `wchisp`.【F:klipper/src/ch32v20x/Makefile†L29-L46】
 5. **Réassocier Klipper** : mettez à jour `printer.cfg` pour ajouter le MCU BMCU-C :
    ```ini
    [mcu bmcu_c]

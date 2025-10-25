@@ -24,11 +24,12 @@ Ce guide décrit la marche à suivre pour rendre un BMCU-C opérationnel sous Kl
 ## 2. Flasher le CH32V203 du BMCU-C
 
 1. **Mettre la carte en mode bootloader** : connectez un adaptateur SWD (WCH-Link ou ST-Link compatible) sur les broches `SWCLK/SWDIO` présentes sur le PCB. Alimentez la carte via son connecteur 24 V ou par le 5 V auxiliaire.
-2. **Lancer le flash** : utilisez `make flash FLASH_DEVICE=<interface>` pour écrire `out/klipper.bin` sur la flash interne. Avec un WCH-LinkE configuré en SWD, la commande ressemble à :
+2. **Lancer le flash** : installez au préalable l'outil [`wchisp`](https://github.com/ch32-rs/wchisp) (`pip3 install --user wchisp`), puis utilisez `make flash FLASH_DEVICE=<interface>` pour écrire `out/klipper.bin` sur la flash interne. Avec un WCH-LinkE configuré en SWD, la commande ressemble à :
    ```bash
    make flash FLASH_DEVICE=wch-link-swd
    ```
-   En alternative, `wchisp` ou `openocd` peuvent être employés si vous disposez déjà des scripts correspondants.
+   Le paramètre `FLASH_BAUD=115200` permet de fixer une vitesse série lorsque vous utilisez un adaptateur UART, et `FLASH_EXTRA_OPTS="--chip ch32v20x"` relaie des options supplémentaires à `wchisp` si besoin.【F:klipper/src/ch32v20x/Makefile†L29-L46】
+   En alternative, `openocd` ou un script personnel peuvent être employés si vous disposez déjà des scripts correspondants.
 3. **Redémarrer et vérifier** : après flash, exécutez `make serial` pour confirmer que le microcontrôleur répond et expose l'identifiant USB/serial attendu (préfixe `usb-klipper_ch32v203`).
 
 ## 3. Déployer la configuration Klipper côté host

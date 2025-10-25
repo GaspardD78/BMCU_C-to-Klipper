@@ -196,6 +196,12 @@ def main() -> int:
             print("Erreur : --firmware-variant doit être précisé pour copier un firmware.", file=sys.stderr)
             return 1
         available = {path.name: path for path in _available_firmware()}
+        if args.firmware_variant not in available:
+            print(
+                "Erreur : le firmware demandé n'existe pas dans le dépôt. Utilisez --list-firmware pour voir les options.",
+                file=sys.stderr,
+            )
+            return 1
         firmware_src = available[args.firmware_variant]
         firmware_dest = args.firmware_dest.expanduser().resolve()
         _copy_file(firmware_src, firmware_dest, args.dry_run)
