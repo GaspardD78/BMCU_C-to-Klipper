@@ -1,5 +1,6 @@
 import collections
 import sys
+import threading
 import types
 from pathlib import Path
 
@@ -271,6 +272,37 @@ def test_error_packet_updates_history():
     status = bmcu_instance.get_status(0.0)
     assert status['error_code'] == 0x2A
     assert status['error_history'][-1]['code'] == 0x2A
+
+
+def test_sequence_is_monotonic_under_concurrency():
+    printer = StubPrinter()
+    config = StubConfig(printer)
+    bmcu_instance = bmcu.BMCU(config)
+    fake_serial = bmcu_instance.serial_conn
+    fake_serial.written.clear()
+
+    commands_per_thread = 50
+
+    def worker():
+        for _ in range(commands_per_thread):
+            bmcu_instance._send_command(bmcu.CMD_PING)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    sequences = []
+    for frame in fake_serial.written:
+        length_byte = frame[2]
+        length_size = 2 if length_byte & 0x80 else 1
+        sequence = frame[2 + length_size]
+        sequences.append(sequence)
+
+    expected_count = commands_per_thread * len(threads)
+    assert len(sequences) == expected_count
+    assert sequences == list(range(expected_count))
 
 
 def test_init_errors_when_high_speed_unavailable(monkeypatch):
