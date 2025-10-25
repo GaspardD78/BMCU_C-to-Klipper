@@ -2,27 +2,33 @@
 
 > ⚠️ **Statut : preuve de concept.** L'intégration n'a pas encore été validée sur un BMCU-C réel. Ce dépôt s'adresse aux développeurs et "makers" souhaitant contribuer aux tests matériels et logiciels.
 
-Ce dépôt open-source fournit un addon pour piloter un BMCU-C (clone communautaire de l'AMS Bambu Lab) depuis Klipper à l'aide du framework Happy Hare.
+Ce dépôt open-source fournit uniquement les éléments nécessaires pour piloter un BMCU-C (clone communautaire de l'AMS Bambu Lab) depuis Klipper en s'appuyant sur Happy Hare :
+
+- un module Python à copier dans `klippy/extras` ;
+- les fichiers de configuration et macros à inclure dans votre `printer.cfg` ;
+- la documentation d'installation minimale pour préparer l'environnement.
 
 ## Structure du dépôt
 
-- `bmcu_addon/` : code Python et fichiers de configuration pour l'addon Klipper.
-- `docs/` : documentation pour l'installation et l'utilisation de l'addon.
-- `a_supprimer/` : ressources héritées (firmware, fichiers hardware, documents) destinées à être supprimées ultérieurement.
-
-Les fichiers déplacés dans `a_supprimer/` sont conservés temporairement pour référence. Ils ne sont plus nécessaires pour l'installation courante et pourront être retirés dans une prochaine étape de nettoyage.
+- `bmcu_addon/bmcu.py` : module Klipper responsable de la communication RS-485 avec le BMCU-C (implémentation du protocole « bambubus »).
+- `bmcu_addon/config/` : fichiers de configuration et macros Happy Hare à inclure dans votre configuration Klipper.
+- `docs/setup.md` : guide pas-à-pas pour installer et activer l'addon.
 
 ## Fonctionnalités
 
-- **Module Klipper `bmcu.py` :** Gère la communication série avec le BMCU-C via le protocole "bambubus".
-- **Intégration Happy Hare :** Fournit les configurations et macros nécessaires pour piloter le BMCU-C.
-- **Documentation complète :** Inclut des guides détaillés pour l'installation et le développement.
+- **Module Klipper `bmcu.py` :** Gère l'encodage/décodage des trames, expose les commandes G-code (`BMCU_SELECT_GATE`, `BMCU_HOME`, etc.) et publie l'état du BMCU-C.
+- **Intégration Happy Hare :** Paramètres et macros prêts à l'emploi pour relier Happy Hare au BMCU-C.
+- **Documentation minimale :** Toutes les étapes d'installation sont regroupées dans `docs/setup.md`.
 
 ## Installation
 
-Pour installer l'addon, veuillez suivre notre guide d'installation détaillé :
+Suivez le guide d'installation détaillé disponible dans `docs/setup.md` :
 
-**[Guide d'installation](./docs/setup.md)**
+**➡️ [Guide d'installation](./docs/setup.md)**
+
+## Ressources complémentaires
+
+- **Firmware BMCU-C :** compilation et flashage sont gérés dans un dépôt séparé : [GaspardD78/BMCU-C-Firmware](https://github.com/GaspardD78/BMCU-C-Firmware).
 
 ## Contribuer
 
