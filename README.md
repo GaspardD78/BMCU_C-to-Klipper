@@ -15,7 +15,7 @@ Ce dépôt contient une base de code solide pour intégrer un BMCU-C avec Klippe
 
 Un développeur ayant accès à un BMCU-C physique devra réaliser les étapes suivantes :
 
-1.  **Corriger le Baud Rate :** Le firmware du BMCU-C communique à **1,250,000 baud**. Cette vitesse n'est souvent pas supportée par défaut par PySerial. Il sera probablement nécessaire de recompiler Klipper ou de trouver une autre solution pour permettre cette vitesse de communication. Le code est actuellement configuré pour un baud rate standard (115200) qui ne fonctionnera pas.
+1.  **Valider le débit 1,25 Mbaud :** Le firmware du BMCU-C communique à **1 250 000 baud** et le module Klipper ouvre désormais le port à cette vitesse par défaut. Lors de l'initialisation, PySerial est interrogé : si le débit effectif diffère, Klipper affiche un message d'erreur invitant à activer `set_custom_baudrate()` (option `use_custom_baudrate: True` si votre build PySerial le propose), à recompiler Klipper/PySerial pour supporter le 1,25 Mbaud ou à fournir un débit alternatif via `fallback_baud` après reconfiguration du BMCU.
 
 2.  **Valider et Compléter la Structure des Paquets :** La fonction `_send_command` dans `bmcu.py` est une première tentative. Il faut la comparer avec le trafic réel d'un BMCU-C pour s'assurer que tous les champs (adresses, numéros de paquets, etc.) sont corrects.
 
@@ -45,7 +45,9 @@ Un développeur ayant accès à un BMCU-C physique devra réaliser les étapes s
 
         [bmcu]
         serial: /dev/serial/by-id/usb-your_bmcu_serial_id_here
-        # baud: 1250000 # À activer quand le support sera prêt
+        baud: 1250000
+        # use_custom_baudrate: True  # Active set_custom_baudrate() sur une build PySerial patchée
+        # fallback_baud: 250000      # Si vous avez recompilé le BMCU pour un autre débit
         ```
 
 3.  **Redémarrer Klipper.**
