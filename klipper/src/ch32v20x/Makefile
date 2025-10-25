@@ -1,6 +1,6 @@
 # Build rules for WCH CH32V20x (RISC-V)
 
-CROSS_PREFIX=riscv-none-elf-
+CROSS_PREFIX=riscv64-unknown-elf-
 
 dirs-y += src/ch32v20x src/generic
 
@@ -29,6 +29,11 @@ $(OUT)klipper.bin: $(OUT)klipper.elf
 	$(Q)$(OBJCOPY) -O binary $< $@
 
 flash: $(OUT)klipper.bin
+	@if ! command -v $(CROSS_PREFIX)gcc >/dev/null 2>&1; then \
+		echo "Le compilateur '$(CROSS_PREFIX)gcc' est introuvable."; \
+		echo "Veuillez l'installer via votre gestionnaire de paquets (ex: sudo apt install gcc-riscv64-unknown-elf)"; \
+		exit 1; \
+	fi
 	@if [ -z "$(FLASH_DEVICE)" ]; then \
 		echo "Please specify FLASH_DEVICE=wch-link-swd ou FLASH_DEVICE=/dev/ttyUSBx"; \
 		exit 1; \
