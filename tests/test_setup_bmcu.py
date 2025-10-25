@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from scripts import setup_bmcu
 
 
@@ -94,3 +96,24 @@ def test_firmware_alias_is_resolved_to_actual_path(tmp_path, monkeypatch):
         False,
     )
     assert expected in captured_calls
+
+
+def test_detect_serial_symlink_handles_multiple_candidates(tmp_path):
+    base = tmp_path / "serial" / "by-id"
+    base.mkdir(parents=True)
+
+    # No matching entries
+    assert setup_bmcu._detect_serial_symlink(base=base) is None
+
+    match = base / "usb-klipper_ch32v203-if00"
+    match.touch()
+
+    assert setup_bmcu._detect_serial_symlink(base=base) == str(match)
+
+    another = base / "wch-link-bridge"
+    another.touch()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        setup_bmcu._detect_serial_symlink(base=base)
+
+    assert "--serial-path" in str(excinfo.value)
