@@ -70,16 +70,17 @@ def _ensure_mcu_section(lines: List[str], serial_path: Optional[str]) -> Tuple[L
         if line.strip().lower() == marker:
             return lines, False
 
-    serial_value = serial_path or "/dev/serial/by-id/usb-klipper_ch32v203-if00"
     template = [
         "\n",
         "[mcu bmcu_c]\n",
-        f"serial: {serial_value}\n",
         "restart_method: command\n",
         "baud: 1250000\n",
         "# use_custom_baudrate: True  # Uncomment si PySerial expose set_custom_baudrate()\n",
         "# fallback_baud: 250000      # À déclarer si le BMCU a été recompilé avec un autre débit\n",
     ]
+
+    if serial_path:
+        template.insert(2, f"serial: {serial_path}\n")
 
     result = list(lines)
     result.extend(template)
@@ -248,9 +249,16 @@ def main() -> int:
             except RuntimeError as exc:
                 print(f"Erreur : {exc}", file=sys.stderr)
                 return 1
-            if detected:
-                print(f"Lien série détecté automatiquement : {detected}")
             serial_path = detected
+            if serial_path:
+                print(f"Lien série détecté automatiquement : {serial_path}")
+        if serial_path is None:
+            print(
+                "Erreur : aucun lien série n'a été détecté. "
+                "Veuillez fournir --serial-path pour poursuivre.",
+                file=sys.stderr,
+            )
+            return 1
         printer_cfg = args.printer_config.expanduser().resolve()
         try:
             _update_printer_cfg(printer_cfg, args.dry_run, not args.no_backup, serial_path)

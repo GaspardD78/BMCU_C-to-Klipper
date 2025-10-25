@@ -34,6 +34,7 @@ Un développeur ayant accès à un BMCU-C physique devra réaliser les étapes s
           --printer-config ~/klipper_config/printer.cfg
         ```
         Ajoutez `--list-firmware` pour afficher les binaires fournis, `--firmware-variant <nom>`/`--firmware-dest <chemin>` pour en déployer un vers la machine cible, et `--flash --flash-device <interface>` pour chaîner un `make flash`.
+        Si aucun lien `/dev/serial/by-id/` n'est détecté automatiquement, le script affiche désormais une erreur et vous invite à renseigner manuellement `--serial-path`.
 
 2.  **Installation manuelle** :
     *   Copier le module Klipper : `cp klipper/klippy/extras/bmcu.py /home/pi/klipper/klippy/extras/`
