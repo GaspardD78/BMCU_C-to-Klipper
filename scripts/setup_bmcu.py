@@ -7,8 +7,9 @@ import argparse
 import shutil
 import subprocess
 import sys
+import re
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -16,6 +17,51 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def _available_firmware() -> List[Path]:
     firmware_dir = REPO_ROOT / "firmware"
     return sorted(firmware_dir.glob("*.bin"))
+
+
+def _slugify(name: str) -> str:
+    slug = name.lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    return slug.strip("-")
+
+
+def _read_alias_overrides() -> Dict[str, str]:
+    readme_path = REPO_ROOT / "firmware" / "README.md"
+    if not readme_path.exists():
+        return {}
+
+    content = readme_path.read_text(encoding="utf-8")
+    start_marker = "<!-- firmware-aliases:start -->"
+    end_marker = "<!-- firmware-aliases:end -->"
+    if start_marker not in content or end_marker not in content:
+        return {}
+
+    aliases: Dict[str, str] = {}
+    between = content.split(start_marker, 1)[1].split(end_marker, 1)[0]
+    for line in between.splitlines():
+        match = re.search(r"\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|", line)
+        if match:
+            alias, filename = match.groups()
+            aliases[alias.strip()] = filename.strip()
+    return aliases
+
+
+def _build_firmware_aliases() -> Dict[str, Path]:
+    overrides = _read_alias_overrides()
+    result: Dict[str, Path] = {}
+    for firmware_path in _available_firmware():
+        alias = next(
+            (
+                alias
+                for alias, filename in overrides.items()
+                if firmware_path.name == filename
+            ),
+            None,
+        )
+        if alias is None:
+            alias = _slugify(firmware_path.stem)
+        result[alias] = firmware_path
+    return result
 
 
 def _copy_file(src: Path, dest: Path, dry_run: bool) -> None:
@@ -136,8 +182,7 @@ def _flash_firmware(klipper_path: Path, flash_device: str | None, dry_run: bool)
 
 
 def parse_args() -> argparse.Namespace:
-    firmware_paths = _available_firmware()
-    firmware_aliases: dict[str, Path] = {path.stem: path for path in firmware_paths}
+    firmware_aliases = _build_firmware_aliases()
     parser = argparse.ArgumentParser(
         description=(
             "Automatise la copie des fichiers BMCU-C vers une installation Klipper "

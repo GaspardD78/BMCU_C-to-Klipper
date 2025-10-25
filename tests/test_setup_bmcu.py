@@ -107,6 +107,22 @@ def test_firmware_alias_is_resolved_to_actual_path(tmp_path, monkeypatch):
     assert expected in captured_calls
 
 
+def test_repository_firmware_aliases_are_stable():
+    aliases = setup_bmcu._build_firmware_aliases()
+    expected = {
+        "bmcu-c-0020-a-series-printer": "BMCU-C-0020-A Series Printer.bin",
+        "bmcu-c-0020-p-x-series-ext-hub-a": "BMCU-C-0020-P-X-Series-Ext-Hub-A.bin",
+        "bmcu-c-0020-p-x-series-ext-hub-b": "BMCU-C-0020-P-X-Series-Ext-Hub-B.bin",
+        "bmcu-c-0020-p-x-series-ext-hub-c": "BMCU-C-0020-P-X-Series-Ext-Hub-C.bin",
+        "bmcu-c-0020-p-x-series-ext-hub-d": "BMCU-C-0020-P-X-Series-Ext-Hub-D.bin",
+        "bmcu-c-0020-p-x-series-int-hub-a": "BMCU-C-0020-P-X-Series-Int-Hub-A.bin",
+        "bmcu-c-0020-p-x-series-int-hub-b": "BMCU-C-0020-P-X-Series-Int-Hub-B.bin",
+        "bmcu-c-0020-p-x-series-int-hub-c": "BMCU-C-0020-P-X-Series-Int-Hub-C.bin",
+        "bmcu-c-0020-p-x-series-int-hub-d": "BMCU-C-0020-P-X-Series-Int-Hub-D.bin",
+    }
+    assert {alias: path.name for alias, path in aliases.items()} == expected
+
+
 def test_detect_serial_symlink_handles_multiple_candidates(tmp_path):
     base = tmp_path / "serial" / "by-id"
     base.mkdir(parents=True)
