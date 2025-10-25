@@ -127,6 +127,11 @@ def _ensure_mcu_section(lines: List[str], serial_path: Optional[str]) -> Tuple[L
 
     if serial_path:
         template.insert(2, f"serial: {serial_path}\n")
+    else:
+        template.insert(
+            2,
+            "# TODO: Renseignez le champ 'serial' avec le lien /dev/serial/by-id/ correspondant au BMCU avant de démarrer Klipper.\n",
+        )
 
     result = list(lines)
     result.extend(template)
@@ -332,17 +337,23 @@ def main() -> int:
                 print(f"Lien série détecté automatiquement : {serial_path}")
         if serial_path is None:
             print(
-                "Erreur : aucun lien série n'a été détecté. "
-                "Veuillez fournir --serial-path pour poursuivre.",
+                "Avertissement : aucun lien série n'a été détecté. "
+                "La section [mcu bmcu_c] sera ajoutée avec un rappel TODO ; "
+                "éditez printer.cfg pour renseigner le port réel avant de démarrer Klipper.",
                 file=sys.stderr,
             )
-            return 1
         printer_cfg = args.printer_config.expanduser().resolve()
         try:
             _update_printer_cfg(printer_cfg, args.dry_run, not args.no_backup, serial_path)
         except FileNotFoundError as exc:
             print(f"Erreur : {exc}", file=sys.stderr)
             return 1
+        if serial_path is None and not args.dry_run:
+            print(
+                "printer.cfg a été mis à jour sans champ 'serial'. "
+                "Renseignez le port du BMCU dans la section [mcu bmcu_c] avant de démarrer Klipper.",
+                file=sys.stderr,
+            )
 
     if args.firmware_variant and not args.firmware_dest:
         print("Erreur : --firmware-dest est requis lorsque --firmware-variant est fourni.", file=sys.stderr)
