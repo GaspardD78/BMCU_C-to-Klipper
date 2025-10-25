@@ -45,14 +45,17 @@ def _ensure_mcu_section(lines: List[str]) -> Tuple[List[str], bool]:
     for line in lines:
         if line.strip().lower() == marker:
             return lines, False
-    template = (
-        "\n"
-        "[mcu bmcu_c]\n"
-        "serial: /dev/serial/by-id/usb-klipper_ch32v203-if00\n"
-        "restart_method: command\n"
-        "# baud: 1250000  # Uncomment when high speed serial is available\n"
-    )
-    return lines + [template], True
+    template = [
+        "\n",
+        "[mcu bmcu_c]\n",
+        "serial: /dev/serial/by-id/usb-klipper_ch32v203-if00\n",
+        "restart_method: command\n",
+        "# baud: 1250000  # Uncomment when high speed serial is available\n",
+    ]
+
+    result = list(lines)
+    result.extend(template)
+    return result, True
 
 
 def _update_printer_cfg(printer_cfg: Path, dry_run: bool, create_backup: bool) -> None:
