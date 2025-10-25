@@ -4,6 +4,14 @@
 
 Ce dépôt open-source fournit un addon pour piloter un BMCU-C (clone communautaire de l'AMS Bambu Lab) depuis Klipper à l'aide du framework Happy Hare.
 
+## Structure du dépôt
+
+- `bmcu_addon/` : code Python et fichiers de configuration pour l'addon Klipper.
+- `docs/` : documentation pour l'installation et l'utilisation de l'addon.
+- `a_supprimer/` : ressources héritées (firmware, fichiers hardware, documents) destinées à être supprimées ultérieurement.
+
+Les fichiers déplacés dans `a_supprimer/` sont conservés temporairement pour référence. Ils ne sont plus nécessaires pour l'installation courante et pourront être retirés dans une prochaine étape de nettoyage.
+
 ## Fonctionnalités
 
 - **Module Klipper `bmcu.py` :** Gère la communication série avec le BMCU-C via le protocole "bambubus".
