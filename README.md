@@ -37,10 +37,12 @@ Ce dépôt inclut désormais tout le nécessaire pour compiler et flasher le fir
    ./firmware/build.sh
    ```
 2. **Flasher le firmware :**
-   Suivez les instructions du script pour mettre le BMCU-C en mode bootloader.
+   Suivez les instructions détaillées du document annexe dédié au flash du BMCU-C pour préparer le module et lancer le script.
    ```bash
    ./firmware/flash.sh
    ```
+
+📄 **Documentation annexe :** [Procédure de flash du BMCU-C](./docs/flash_procedure.md)
 
 ## Contribuer
 
