@@ -1,7 +1,7 @@
 import collections
 import sys
-from pathlib import Path
 import types
+from pathlib import Path
 
 import pytest
 
@@ -15,9 +15,17 @@ class FakeSerial:
     def __init__(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
+        self.port = kwargs.get('port', args[0] if args else None)
+        self._baudrate = kwargs.get('baudrate', 9600)
+        self.timeout = kwargs.get('timeout')
+        self.write_timeout = kwargs.get('write_timeout')
+        self.parity = kwargs.get('parity')
+        self.bytesize = kwargs.get('bytesize')
+        self.stopbits = kwargs.get('stopbits')
         self.written = []
         self._read_buffer = bytearray()
         self.in_waiting = 0
+        self.closed = False
 
     def write(self, data):
         self.written.append(bytes(data))
@@ -27,7 +35,16 @@ class FakeSerial:
         return None
 
     def close(self):
+        self.closed = True
         return None
+
+    @property
+    def baudrate(self):
+        return self._baudrate
+
+    @baudrate.setter
+    def baudrate(self, value):
+        self._baudrate = value
 
     def queue_read(self, payload: bytes):
         self._read_buffer.extend(payload)
@@ -110,7 +127,7 @@ class StubPrinter:
 
 
 class StubConfig:
-    def __init__(self, printer):
+    def __init__(self, printer, **overrides):
         self._printer = printer
         self._values = {
             "serial": "/dev/ttyFAKE",
@@ -119,18 +136,34 @@ class StubConfig:
             "device_address": 0x11,
             "poll_interval": 0.05,
         }
+        self._values.update(overrides)
 
     def get_printer(self):
         return self._printer
 
-    def get(self, key):
-        return self._values[key]
+    def get(self, key, default=None):
+        return self._values.get(key, default)
 
-    def getint(self, key, default=None):
-        return int(self._values.get(key, default))
+    def getint(self, key, default=None, minval=None):
+        if key in self._values:
+            return int(self._values[key])
+        if default is None:
+            return default
+        return int(default)
 
     def getfloat(self, key, default=None):
-        return float(self._values.get(key, default))
+        if key in self._values:
+            return float(self._values[key])
+        if default is None:
+            return None
+        return float(default)
+
+    def getboolean(self, key, default=None):
+        if key in self._values:
+            return bool(self._values[key])
+        if default is None:
+            return None
+        return bool(default)
 
     def error(self, message):
         raise RuntimeError(message)
@@ -238,3 +271,50 @@ def test_error_packet_updates_history():
     status = bmcu_instance.get_status(0.0)
     assert status['error_code'] == 0x2A
     assert status['error_history'][-1]['code'] == 0x2A
+
+
+def test_init_errors_when_high_speed_unavailable(monkeypatch):
+    class SlowSerial(FakeSerial):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            # Le pilote force silencieusement un débit plus faible
+            self._baudrate = 115200
+
+    monkeypatch.setattr(bmcu.serial, "Serial", SlowSerial)
+    printer = StubPrinter()
+    config = StubConfig(printer)
+
+    with pytest.raises(RuntimeError) as exc:
+        bmcu.BMCU(config)
+    assert "PySerial n'a pas pu appliquer" in str(exc.value)
+
+
+def test_set_custom_baudrate_is_used(monkeypatch):
+    class CustomSerial(FakeSerial):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._baudrate = 115200
+
+        def set_custom_baudrate(self, value):
+            self._baudrate = value
+
+    monkeypatch.setattr(bmcu.serial, "Serial", CustomSerial)
+    printer = StubPrinter()
+    config = StubConfig(printer, use_custom_baudrate=True)
+
+    bmcu_instance = bmcu.BMCU(config)
+    assert bmcu_instance.baud_rate == 1250000
+
+
+def test_fallback_baudrate_applied(monkeypatch):
+    class SlowSerial(FakeSerial):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._baudrate = 115200
+
+    monkeypatch.setattr(bmcu.serial, "Serial", SlowSerial)
+    printer = StubPrinter()
+    config = StubConfig(printer, fallback_baud=115200)
+
+    bmcu_instance = bmcu.BMCU(config)
+    assert bmcu_instance.baud_rate == 115200

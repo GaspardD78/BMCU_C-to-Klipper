@@ -197,23 +197,34 @@ class BMCU:
         self.gcode = self.printer.lookup_object('gcode')
 
         serial_port = config.get('serial')
-        baud_rate = config.getint('baud', 1250000)
+        baud_rate = config.getint('baud', 1250000, minval=2400)
+        fallback_baud = config.getint('fallback_baud', None, minval=2400)
+        use_custom_baudrate = config.getboolean('use_custom_baudrate', False)
         self.src_addr = config.getint('host_address', 0x01)
         self.dst_addr = config.getint('device_address', 0x11)
         self.poll_interval = config.getfloat('poll_interval', 0.02)
 
         try:
-            self.serial_conn = serial.Serial(
-                serial_port,
-                baud_rate,
+            serial_conn = serial.Serial(
+                port=serial_port,
+                baudrate=baud_rate,
                 timeout=0,
                 write_timeout=1,
                 parity=serial.PARITY_EVEN,
                 bytesize=serial.EIGHTBITS,
                 stopbits=serial.STOPBITS_ONE,
             )
-        except SerialException as exc:
+        except (SerialException, ValueError) as exc:
             raise config.error("Impossible d'ouvrir le port série BMCU: %s" % (exc,))
+
+        self.serial_conn = serial_conn
+        self.baud_rate = self._ensure_baudrate(
+            config,
+            serial_port,
+            baud_rate,
+            fallback_baud,
+            use_custom_baudrate,
+        )
 
         self.codec = BambuBusCodec(self.src_addr, self.dst_addr)
         self._rx_buffer: Deque[int] = collections.deque()
@@ -239,7 +250,112 @@ class BMCU:
         self.printer.register_event_handler('klippy:ready', self._handle_ready)
         self.printer.register_event_handler('klippy:shutdown', self._handle_shutdown)
 
-        LOG.info("Module BMCU-C initialisé sur %s à %d bauds", serial_port, baud_rate)
+        LOG.info(
+            "Module BMCU-C initialisé sur %s à %d bauds",
+            serial_port,
+            self.baud_rate,
+        )
+
+    # ------------------------------------------------------------------
+    # Configuration du port série
+
+    def _ensure_baudrate(
+        self,
+        config,
+        serial_port: str,
+        target_baud: int,
+        fallback_baud: Optional[int],
+        use_custom_baudrate: bool,
+    ) -> int:
+        def _current_baud() -> int:
+            try:
+                return int(self.serial_conn.baudrate)
+            except (AttributeError, TypeError, ValueError):
+                return target_baud
+
+        def _close_and_raise(message: str):
+            try:
+                self.serial_conn.close()
+            except SerialException:
+                pass
+            raise config.error(message)
+
+        actual = _current_baud()
+        if actual == target_baud:
+            return actual
+
+        LOG.warning(
+            "PySerial signale %d bauds sur %s alors que %d ont été demandés",
+            actual,
+            serial_port,
+            target_baud,
+        )
+
+        custom_available = hasattr(self.serial_conn, "set_custom_baudrate")
+        if custom_available:
+            try:
+                self.serial_conn.set_custom_baudrate(target_baud)
+                actual = _current_baud()
+            except (SerialException, ValueError, NotImplementedError, AttributeError) as exc:
+                LOG.warning(
+                    "set_custom_baudrate(%d) a échoué sur %s: %s",
+                    target_baud,
+                    serial_port,
+                    exc,
+                )
+            else:
+                if actual == target_baud:
+                    LOG.info(
+                        "Débit %d bauds appliqué via set_custom_baudrate()",
+                        target_baud,
+                    )
+                    return actual
+                LOG.warning(
+                    "set_custom_baudrate n'a pas permis d'appliquer %d bauds (effectif %d)",
+                    target_baud,
+                    actual,
+                )
+        elif use_custom_baudrate:
+            LOG.warning(
+                "use_custom_baudrate défini mais le pilote PySerial ne fournit pas set_custom_baudrate()",
+            )
+
+        if fallback_baud is not None and fallback_baud != target_baud:
+            LOG.warning(
+                "Tentative d'utilisation du débit alternatif %d bauds pour le BMCU",
+                fallback_baud,
+            )
+            try:
+                if custom_available and use_custom_baudrate:
+                    self.serial_conn.set_custom_baudrate(fallback_baud)
+                else:
+                    self.serial_conn.baudrate = fallback_baud
+                actual = _current_baud()
+            except (SerialException, ValueError, NotImplementedError, AttributeError) as exc:
+                _close_and_raise(
+                    "Impossible d'appliquer le débit alternatif %d bauds sur %s: %s"
+                    % (fallback_baud, serial_port, exc)
+                )
+            if actual == fallback_baud:
+                LOG.warning(
+                    "Le port %s fonctionnera à %d bauds (débit demandé: %d)",
+                    serial_port,
+                    actual,
+                    target_baud,
+                )
+                return actual
+            _close_and_raise(
+                "PySerial n'a pas appliqué le débit alternatif %d bauds (valeur effective: %d)"
+                % (fallback_baud, actual)
+            )
+
+        suggestion = (
+            "PySerial n'a pas pu appliquer %d bauds sur %s (valeur effective: %d). "
+            "Essayez d'activer la prise en charge haute vitesse (set_custom_baudrate() ou recompilation "
+            "de Klipper/PySerial) ou définissez 'fallback_baud' si votre BMCU a été reconfiguré."
+            % (target_baud, serial_port, actual)
+        )
+        _close_and_raise(suggestion)
 
     # ------------------------------------------------------------------
     # Boucles de communication

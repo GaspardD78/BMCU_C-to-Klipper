@@ -2,6 +2,20 @@
 
 Ce guide résume la configuration logicielle nécessaire pour piloter le buffer BMCU-C via Klipper.
 
+## 0. Paramètres du module `[bmcu]`
+
+Déclarez le port série haute vitesse du buffer dans votre `printer.cfg` :
+
+```ini
+[bmcu]
+serial: /dev/serial/by-id/usb-your_bmcu_serial_id_here
+baud: 1250000
+# use_custom_baudrate: True  # à activer si votre PySerial expose set_custom_baudrate()
+# fallback_baud: 250000      # à n'utiliser qu'après reconfiguration du BMCU
+```
+
+Au démarrage, le module vérifie que PySerial applique bien les 1,25 Mbaud attendus. Si ce n'est pas le cas, Klipper lève une erreur explicite avec les pistes de contournement (activer `set_custom_baudrate()`, recompiler PySerial/Klipper ou déclarer un `fallback_baud` correspondant à un firmware BMCU modifié).
+
 ## 1. Configuration Klipper
 
 Incluez la carte `bmcu_c` dans votre fichier `printer.cfg` :

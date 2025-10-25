@@ -50,7 +50,9 @@ def _ensure_mcu_section(lines: List[str]) -> Tuple[List[str], bool]:
         "[mcu bmcu_c]\n",
         "serial: /dev/serial/by-id/usb-klipper_ch32v203-if00\n",
         "restart_method: command\n",
-        "# baud: 1250000  # Uncomment when high speed serial is available\n",
+        "baud: 1250000\n",
+        "# use_custom_baudrate: True  # Uncomment si PySerial expose set_custom_baudrate()\n",
+        "# fallback_baud: 250000      # À déclarer si le BMCU a été recompilé avec un autre débit\n",
     ]
 
     result = list(lines)
