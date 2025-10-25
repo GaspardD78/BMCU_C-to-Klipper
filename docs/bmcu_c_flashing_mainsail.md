@@ -28,7 +28,10 @@ Ce guide décrit la marche à suivre pour rendre un BMCU-C opérationnel sous Kl
    ```bash
    make flash FLASH_DEVICE=wch-link-swd
    ```
-   Le paramètre `FLASH_BAUD=115200` permet de fixer une vitesse série lorsque vous utilisez un adaptateur UART, et `FLASH_EXTRA_OPTS="--chip ch32v20x"` relaie des options supplémentaires à `wchisp` si besoin.【F:klipper/src/ch32v20x/Makefile†L29-L46】
+   Le paramètre `FLASH_BAUD=115200` permet de fixer une vitesse série lorsque vous utilisez un adaptateur UART, et `FLASH_EXTRA_OPTS="--chip ch32v20x"` relaie des options supplémentaires à `wchisp` si besoin. Pour un flash via UART (`/dev/ttyUSB0`), la commande complète devient :
+   ```bash
+   make flash FLASH_DEVICE=/dev/ttyUSB0 FLASH_BAUD=115200 FLASH_EXTRA_OPTS="--chip ch32v20x"
+   ```【F:klipper/src/ch32v20x/Makefile†L29-L46】
    En alternative, `openocd` ou un script personnel peuvent être employés si vous disposez déjà des scripts correspondants.
 3. **Redémarrer et vérifier** : après flash, exécutez `make serial` pour confirmer que le microcontrôleur répond et expose l'identifiant USB/serial attendu (préfixe `usb-klipper_ch32v203`).
 

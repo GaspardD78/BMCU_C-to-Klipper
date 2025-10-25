@@ -33,7 +33,16 @@ Un développeur ayant accès à un BMCU-C physique devra réaliser les étapes s
           --config-path ~/klipper_config \
           --printer-config ~/klipper_config/printer.cfg
         ```
-        Ajoutez `--list-firmware` pour afficher les binaires fournis, `--firmware-variant <nom>`/`--firmware-dest <chemin>` pour en déployer un vers la machine cible, et `--flash --flash-device <interface>` pour chaîner un `make flash`.
+        Ajoutez `--list-firmware` pour afficher les binaires fournis, `--firmware-variant <nom>`/`--firmware-dest <chemin>` pour en déployer un vers la machine cible, et `--flash --flash-device <interface>` pour chaîner un `make flash`. Pour un flash UART complet, complétez avec `--flash-baud` et `--flash-extra-opts` pour transmettre respectivement la vitesse cible et les paramètres additionnels à `wchisp`, par exemple :
+        ```bash
+        python3 scripts/setup_bmcu.py \
+          --klipper-path ~/klipper \
+          --config-path ~/klipper_config \
+          --printer-config ~/klipper_config/printer.cfg \
+          --flash --flash-device /dev/ttyUSB0 \
+          --flash-baud 115200 \
+          --flash-extra-opts "--reset"
+        ```
         Si aucun lien `/dev/serial/by-id/` n'est détecté automatiquement, le script affiche un avertissement, ajoute la section `[mcu bmcu_c]` avec un rappel TODO et vous devrez éditer `printer.cfg` pour renseigner le port réel avant de démarrer Klipper.
 
 2.  **Installation manuelle** :
@@ -81,10 +90,10 @@ Une fois les dépendances installées, vous pouvez compiler et flasher le firmwa
 
 ```bash
 cd klipper
-make flash FLASH_DEVICE=/dev/ttyUSB0
+make flash FLASH_DEVICE=/dev/ttyUSB0 FLASH_BAUD=115200 FLASH_EXTRA_OPTS="--reset"
 ```
 
-Remplacez `/dev/ttyUSB0` par le port série de votre BMCU-C.
+Adaptez `/dev/ttyUSB0` au port série de votre BMCU-C, `FLASH_BAUD` au débit attendu par l'UART et complétez `FLASH_EXTRA_OPTS` en fonction des options requises par `wchisp` (par exemple `--reset`).
 
 ## Documentation complémentaire
 

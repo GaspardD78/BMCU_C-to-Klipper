@@ -61,6 +61,8 @@ def test_main_fails_when_klipper_structure_is_invalid(tmp_path, monkeypatch, cap
         firmware_dest=None,
         flash=False,
         flash_device=None,
+        flash_baud=None,
+        flash_extra_opts=None,
         no_backup=False,
         dry_run=False,
     )
@@ -109,6 +111,8 @@ def test_firmware_alias_is_resolved_to_actual_path(tmp_path, monkeypatch):
         firmware_aliases={"bmcu_special": firmware_src},
         flash=False,
         flash_device=None,
+        flash_baud=None,
+        flash_extra_opts=None,
         no_backup=False,
         dry_run=False,
     )
@@ -189,6 +193,8 @@ def test_main_requires_manual_serial_when_detection_fails(tmp_path, monkeypatch,
         firmware_aliases={},
         flash=False,
         flash_device=None,
+        flash_baud=None,
+        flash_extra_opts=None,
         no_backup=False,
         dry_run=False,
     )
@@ -211,6 +217,10 @@ def test_flash_failure_reports_command_output(monkeypatch, tmp_path, capsys):
     }
 
     def fake_run(cmd, cwd, check, capture_output, text):
+        assert cmd == [
+            "make",
+            "flash",
+        ]
         assert check is True
         assert capture_output is True
         assert text is True
@@ -224,8 +234,47 @@ def test_flash_failure_reports_command_output(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(setup_bmcu.subprocess, "run", fake_run)
 
     with pytest.raises(RuntimeError):
-        setup_bmcu._flash_firmware(tmp_path, flash_device=None, dry_run=False)
+        setup_bmcu._flash_firmware(
+            tmp_path,
+            flash_device=None,
+            flash_baud=None,
+            flash_extra_opts=None,
+            dry_run=False,
+        )
 
     captured = capsys.readouterr()
     assert messages["stdout"].strip() in captured.err
     assert messages["stderr"].strip() in captured.err
+
+
+def test_flash_command_includes_optional_arguments(monkeypatch, tmp_path):
+    captured_cmd = None
+
+    def fake_run(cmd, cwd, check, capture_output, text):
+        nonlocal captured_cmd
+        captured_cmd = cmd
+        raise subprocess.CalledProcessError(
+            returncode=1,
+            cmd=cmd,
+            output="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(setup_bmcu.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError):
+        setup_bmcu._flash_firmware(
+            tmp_path,
+            flash_device="/dev/ttyUSB0",
+            flash_baud=115200,
+            flash_extra_opts="--reset --boot-delay=1",
+            dry_run=False,
+        )
+
+    assert captured_cmd == [
+        "make",
+        "flash",
+        "FLASH_DEVICE=/dev/ttyUSB0",
+        "FLASH_BAUD=115200",
+        "FLASH_EXTRA_OPTS=--reset --boot-delay=1",
+    ]
