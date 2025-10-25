@@ -38,9 +38,25 @@ Ce document détaille la procédure complète pour compiler et flasher le firmwa
 
 ## 4. Variantes sans bouton BOOT / connecteur USB-C
 
-La documentation fournie à ce jour ne couvre que la séquence décrite ci-dessus, qui suppose la présence des boutons **BOOT0** et **RESET**. Pour les révisions dépourvues de bouton BOOT ou équipées uniquement d'un connecteur USB-C, il n'existe pas encore de procédure officielle.
+Certaines cartes BMCU-C récentes sont dépourvues de bouton **BOOT0** et **RESET** et ne proposent qu'un connecteur USB-C pour le flash. La procédure ci-dessous reprend les étapes recommandées pour utiliser l'outil graphique **WCHISPTool** depuis Windows :
 
-- Il peut être nécessaire d'appliquer une méthode matérielle alternative (pontage du signal BOOT0 vers 3V3, utilisation de points de test sur le PCB ou d'un adaptateur USB-C vers UART/RS-485, etc.).
-- Référez-vous aux instructions délivrées par votre vendeur ou la communauté BMCU-C pour ces variantes avant d'entamer le flash, afin de limiter tout risque matériel.
+1. **Lancez WCHISPTool.**
+2. **Configurez les paramètres** comme suit :
+   - *Chip Model* : `CH32V203`
+   - *Download Type* : `Serial Port`
+   - *DI – Baud Rate* : `1M`
+   - *User File* : sélectionnez le firmware `klipper/out/klipper.bin` généré à l'étape précédente.
+   - Cochez l'option **Serial Auto DI**.
+3. **Enchaînez les actions dans l'ordre suivant** jusqu'à obtenir un flash réussi : `Remove Protect` → `Download` → `Remove Protect` → `Download`.
+   - Il est normal que la première itération échoue ; le second passage aboutit généralement.
+4. **Terminez le flash** en redémarrant la carte avec le bouton `R`. Une LED rouge sur la carte mère confirme que le firmware est chargé.
 
-Ce document sera complété dès que des informations plus précises seront disponibles pour ces modèles.
+### Astuces de dépannage
+
+- Maintenez le bouton **B** enfoncé pendant que vous cliquez sur **Download** si le flash refuse de démarrer.
+- Essayez de réduire le débit à `115200` bauds en cas d'échec répété.
+- Inversez les connexions **TX/RX** (TX↔TX, RX↔RX) selon la configuration de votre interface USB-C ↔ UART si nécessaire.
+
+⚠️ Évitez de brancher ou débrancher la BMCU pendant que l'imprimante est sous tension. Pour les tests, suivez la séquence : éteindre l'imprimante, connecter la BMCU, allumer l'imprimante, vérifier la détection de l'AMS, éteindre l'imprimante, puis déconnecter la BMCU.
+
+Ces indications complètent la méthode de flash automatique (`flash.sh`) et doivent être utilisées lorsque la mise en mode bootloader physique n'est pas possible.
