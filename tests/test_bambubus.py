@@ -1,4 +1,5 @@
 import collections
+import logging
 import sys
 import threading
 import types
@@ -272,6 +273,52 @@ def test_error_packet_updates_history():
     status = bmcu_instance.get_status(0.0)
     assert status['error_code'] == 0x2A
     assert status['error_history'][-1]['code'] == 0x2A
+
+
+def test_status_transitions_offline_after_timeout(caplog):
+    printer = StubPrinter()
+    config = StubConfig(printer, offline_timeout=1.0)
+    bmcu_instance = bmcu.BMCU(config)
+
+    ack_packet = bmcu.BambuPacket(
+        1,
+        bmcu_instance.dst_addr,
+        bmcu_instance.src_addr,
+        bmcu.RSP_ACK_MASK | bmcu.CMD_PING,
+        b"",
+        False,
+    )
+    bmcu_instance._handle_packet(ack_packet)
+    assert bmcu_instance.get_status(0.0)['online'] is True
+
+    bmcu_instance._state['error_code'] = 0x22
+
+    sent_commands = []
+    original_send = bmcu_instance._send_command
+
+    def capture(command, payload=b""):
+        sent_commands.append((command, payload))
+        return original_send(command, payload)
+
+    bmcu_instance._send_command = capture
+
+    reactor = printer.get_reactor()
+    caplog.set_level(logging.WARNING, logger=bmcu.LOG.name)
+
+    bmcu_instance._poll_status(reactor.monotonic() + 0.2)
+    assert sent_commands[-1][0] == bmcu.CMD_QUERY_STATUS
+    assert bmcu_instance.get_status(0.0)['error_code'] == 0x22
+
+    reactor.advance(1.5)
+    sent_commands.clear()
+    caplog.clear()
+    bmcu_instance._poll_status(reactor.monotonic())
+
+    status = bmcu_instance.get_status(0.0)
+    assert status['online'] is False
+    assert status['error_code'] == 0
+    assert sent_commands[-1][0] == bmcu.CMD_PING
+    assert any('hors ligne' in record.getMessage() for record in caplog.records)
 
 
 def test_sequence_is_monotonic_under_concurrency():

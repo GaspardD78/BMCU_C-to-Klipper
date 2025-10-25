@@ -203,6 +203,7 @@ class BMCU:
         self.src_addr = config.getint('host_address', 0x01)
         self.dst_addr = config.getint('device_address', 0x11)
         self.poll_interval = config.getfloat('poll_interval', 0.02)
+        self.offline_timeout = config.getfloat('offline_timeout', 2.0)
 
         try:
             serial_conn = serial.Serial(
@@ -383,8 +384,19 @@ class BMCU:
     def _poll_status(self, eventtime):
         if not self._running:
             return self.reactor.NEVER
+
+        elapsed = max(0.0, eventtime - self._last_contact)
+        if self._state['online'] and elapsed >= self.offline_timeout:
+            LOG.warning(
+                "Aucune communication BMCU depuis %.1fs, passage hors ligne", elapsed
+            )
+            self._state['online'] = False
+            self._state['error_code'] = 0
+
         if self._state['online']:
             self._send_command(CMD_QUERY_STATUS)
+        else:
+            self._send_command(CMD_PING)
         return eventtime + 0.5
 
     def _poll_serial(self, eventtime):
