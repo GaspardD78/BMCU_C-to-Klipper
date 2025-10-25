@@ -452,9 +452,9 @@ class BMCU:
     # Construction des trames sortantes
 
     def _send_command(self, command: int, payload: bytes = b"") -> None:
-        frame = self.codec.build_packet(command, payload)
-        LOG.debug("Envoi trame BMCU cmd=%02x: %s", command, frame.hex())
         with self._write_lock:
+            frame = self.codec.build_packet(command, payload)
+            LOG.debug("Envoi trame BMCU cmd=%02x: %s", command, frame.hex())
             try:
                 self.serial_conn.write(frame)
                 self.serial_conn.flush()
