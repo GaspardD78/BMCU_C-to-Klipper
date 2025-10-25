@@ -200,6 +200,21 @@ def main() -> int:
         print(f"Erreur : le répertoire Klipper {klipper_path} n'existe pas.", file=sys.stderr)
         return 1
 
+    required_files = {
+        "Makefile": klipper_path / "Makefile",
+        "klippy/__init__.py": klipper_path / "klippy" / "__init__.py",
+    }
+    missing = [name for name, path in required_files.items() if not path.exists()]
+    if missing:
+        missing_list = ", ".join(missing)
+        print(
+            "Erreur : les fichiers suivants sont introuvables dans"
+            f" {klipper_path} : {missing_list}. Vérifiez que --klipper-path pointe"
+            " vers la racine de l'installation Klipper.",
+            file=sys.stderr,
+        )
+        return 1
+
     if not config_path.exists():
         print(f"Erreur : le répertoire de configuration {config_path} n'existe pas.", file=sys.stderr)
         return 1
