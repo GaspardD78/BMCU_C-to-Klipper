@@ -43,7 +43,7 @@ Ce dépôt open-source fournit les briques nécessaires pour piloter un BMCU-C (
 
 1. **Cloner le dépôt public et se placer dans le dossier :**
    ```bash
-   git clone https://github.com/Happy-Hare/BMCU_C-to-Klipper.git
+   git clone https://github.com/GaspardD78/BMCU_C-to-Klipper.git
    cd BMCU_C-to-Klipper
    ```
 2. **Lancer l'assistant d'installation :**
