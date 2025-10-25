@@ -95,6 +95,30 @@ make flash FLASH_DEVICE=/dev/ttyUSB0 FLASH_BAUD=115200 FLASH_EXTRA_OPTS="--reset
 
 Adaptez `/dev/ttyUSB0` au port série de votre BMCU-C, `FLASH_BAUD` au débit attendu par l'UART et complétez `FLASH_EXTRA_OPTS` en fonction des options requises par `wchisp` (par exemple `--reset`).
 
+### Utilisation du script de flashage (recommandé)
+
+Pour simplifier et sécuriser le processus de compilation et de flashage, un script `flash_bmcu.sh` est fourni à la racine du projet. Il automatise l'installation des dépendances, la configuration de Klipper, la compilation et le flashage du firmware.
+
+**Avantages :**
+
+*   **Guidage pas-à-pas :** Le script vous accompagne à chaque étape.
+*   **Sécurité :** Il détecte automatiquement le port série du BMCU en mode bootloader pour éviter les erreurs de flashage.
+*   **Robustesse :** Il gère les erreurs et fournit des logs clairs en cas de problème.
+
+**Procédure :**
+
+1.  **Donner les permissions d'exécution au script :**
+    ```bash
+    chmod +x flash_bmcu.sh
+    ```
+
+2.  **Lancer le script depuis la racine du projet :**
+    ```bash
+    ./flash_bmcu.sh
+    ```
+
+3.  **Suivre les instructions :** Le script vous demandera de confirmer l'installation des dépendances, vous guidera pour la configuration `menuconfig` de Klipper et vous indiquera quand mettre le BMCU en mode bootloader.
+
 ## Documentation complémentaire
 
 *   [Mise à jour de Klipper et intégration Mainsail pour le BMCU-C](docs/bmcu_c_flashing_mainsail.md) : procédure pas-à-pas pour compiler, flasher le CH32V203 et déclarer la carte dans Mainsail.
