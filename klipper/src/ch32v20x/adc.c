@@ -83,7 +83,7 @@ gpio_adc_sample(struct gpio_adc g)
     while (!(ADC1->STATR & ADC_STATR_EOC))
         ;
 
-    return 0;
+    return ADC1->RDATAR & ADC_RDATAR_DATA_Msk;
 }
 
 uint16_t
