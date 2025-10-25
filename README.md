@@ -1,133 +1,124 @@
 # Intégration du BMCU-C avec Klipper et Happy Hare
 
-**⚠️ Attention : Ce projet est une preuve de concept et n'est pas entièrement fonctionnel en l'état. Il est destiné aux développeurs et aux utilisateurs avancés qui souhaitent contribuer à son développement.**
+> ⚠️ **Statut : preuve de concept.** Ce projet n'est pas utilisable tel quel sans validation matérielle. Il s'adresse aux développeurs et utilisateurs avancés prêts à contribuer.
 
-Ce dépôt fournit une base de code pour intégrer un BMCU-C (un clone open-source de l'AMS de Bambu Lab) avec Klipper, en utilisant le framework Happy Hare pour la gestion des filaments.
+Ce dépôt propose une base open-source pour piloter un BMCU-C (clone communautaire de l'AMS Bambu Lab) depuis Klipper en s'appuyant sur le framework Happy Hare pour la gestion multi-filaments.
 
-L'objectif de ce projet est de fournir une alternative open-source complète pour la gestion multi-filaments sur les imprimantes 3D Klipper.
+## Sommaire
+- [État du projet](#état-du-projet)
+- [Fonctionnalités](#fonctionnalités)
+- [Prérequis](#prérequis)
+- [Installation rapide](#installation-rapide)
+- [Utilisation express](#utilisation-express)
+- [Compilation & flashage développeur](#compilation--flashage-développeur)
+- [Organisation du dépôt](#organisation-du-dépôt)
+- [Documentation](#documentation)
+- [Contribuer](#contribuer)
+- [Licence](#licence)
 
-## 📝 État du Projet
+## État du projet
+- ✔️ **Structure logicielle prête** : module `bmcu.py`, macros Happy Hare et scripts fournis.
+- ✔️ **Checksums bambubus** : implémentations `CRC8 DVB-S2` et `CRC16` en Python.
+- ❌ **Communication matérielle non validée** : nécessite un BMCU-C réel pour finaliser le protocole `bambubus`.
 
-Ce projet est actuellement au stade de **preuve de concept**. Bien que la structure de base soit en place, l'implémentation du protocole de communication "bambubus" n'a pas pu être finalisée sans accès direct au matériel pour les tests.
+### Prochaines étapes
+Pour rendre l'intégration fonctionnelle, un contributeur équipé doit :
+1. Vérifier le débit série à **1,25 Mbaud** et confirmer l'échange de messages.
+2. Ajuster la **structure des paquets** à partir de captures réelles.
+3. Implémenter la **lecture et le parsing** des réponses BMCU-C.
+4. Finaliser les **macros G-code** et leurs payloads.
 
-### Ce qui fonctionne :
+## Fonctionnalités
+- **Module Klipper dédié** (`klipper/klippy/extras/bmcu.py`).
+- **Configuration Happy Hare** prête (`config/bmcu_config.cfg`, `config/bmcu_macros.cfg`).
+- **Firmware Klipper adapté** au microcontrôleur CH32V203.
+- **Scripts d'automatisation** pour l'installation et le flashage.
 
-*   **Structure du projet :** Tous les fichiers nécessaires sont présents (`bmcu.py`, `config/bmcu_config.cfg`, `config/bmcu_macros.cfg`).
-*   **Intégration Happy Hare :** La configuration pour utiliser le `MacroSelector` de Happy Hare est correcte.
-*   **Checksums :** Les algorithmes de checksum `CRC8 DVB-S2` et `CRC16` spécifiques au "bambubus" ont été implémentés en Python.
-
-### Prochaines étapes :
-
-Un développeur ayant accès à un BMCU-C physique devra réaliser les étapes suivantes :
-
-1.  **Valider le débit de 1,25 Mbaud** et la communication série.
-2.  **Valider et compléter la structure des paquets** en comparant avec le trafic réel.
-3.  **Implémenter la lecture des réponses** du BMCU-C.
-4.  **Finaliser les commandes G-code** et leur payload.
-
-## ✨ Fonctionnalités
-
-*   **Intégration Klipper :** Un module Klipper (`bmcu.py`) pour la communication avec le BMCU-C.
-*   **Configuration Happy Hare :** Des fichiers de configuration prêts à l'emploi pour le `MacroSelector`.
-*   **Firmware Klipper pour CH32V203 :** Un portage du firmware Klipper pour le microcontrôleur du BMCU-C.
-*   **Scripts d'automatisation :** Des scripts pour simplifier l'installation et le flashage.
-
-## ⚙️ Prérequis
-
+## Prérequis
 ### Matériel
-
-*   Un BMCU-C (ou clone compatible)
-*   Une imprimante 3D fonctionnant avec Klipper
-*   Un ordinateur pour flasher le firmware (Raspberry Pi, CB2, ou autre)
-*   Un adaptateur de flashage (WCH-Link, ST-Link, ou adaptateur série)
+- Un **BMCU-C** (ou clone compatible).
+- Une **imprimante Klipper** (ex. Voron, P1P sous Klipper, etc.).
+- Une **machine hôte** (Raspberry Pi, CB2, PC Linux...).
+- Un **outil de flashage** (WCH-Link, ST-Link ou adaptateur série).
 
 ### Logiciel
+- Klipper + interface (Mainsail/Fluidd).
+- **Python 3** sur l'hôte.
+- Outils de compilation pour le CH32V203 (voir section développeur).
 
-*   Une installation fonctionnelle de Klipper et Mainsail/Fluidd
-*   Python 3
-*   Les dépendances pour la compilation du firmware (voir la section "Pour les développeurs")
+## Installation rapide
+> Ces instructions copient les fichiers nécessaires dans votre environnement Klipper.
 
-## 🚀 Installation
+1. **Cloner le dépôt :**
+   ```bash
+   git clone https://github.com/Happy-Hare/BMCU_C-to-Klipper.git
+   cd BMCU_C-to-Klipper
+   ```
+   Si vous travaillez depuis un fork, remplacez `Happy-Hare` par votre organisation ou votre compte personnel.
+2. **Lancer l'assistant d'installation :**
+   ```bash
+   python3 scripts/setup_bmcu.py \
+       --klipper-path ~/klipper \
+       --config-path ~/klipper_config \
+       --printer-config ~/klipper_config/printer.cfg
+   ```
+   Le script vérifie les chemins, copie les fichiers et ajoute les inclusions nécessaires.
+3. **Redémarrer Klipper** via Mainsail/Fluidd ou `sudo service klipper restart`.
 
-L'installation est simplifiée grâce à un script automatisé.
+> 📘 Pour un déploiement manuel pas-à-pas (copie de fichiers, modifications de config), consultez [docs/usage.md](docs/usage.md).
 
-1.  **Clonez ce dépôt sur votre machine hôte Klipper :**
-    ```bash
-    git clone https://github.com/votre-utilisateur/votre-repo.git
-    cd votre-repo
-    ```
+## Utilisation express
+Une fois l'installation effectuée :
+- `BMCU_ENABLE_SPOOLS` : alimente les moteurs du BMCU-C.
+- `BMCU_SPOOL_MOVE GATE=1 MOVE=120 VELOCITY=25` : déplace le filament du tiroir 1.
+- `BMCU_HOME` : séquence de homing complet.
 
-2.  **Exécutez le script d'installation :**
-    ```bash
-    python3 scripts/setup_bmcu.py --klipper-path ~/klipper --config-path ~/klipper_config --printer-config ~/klipper_config/printer.cfg
-    ```
-    Le script copiera les fichiers nécessaires et vous guidera pour la configuration.
+Ces macros sont déclarées dans `config/bmcu_macros.cfg`. Adaptez-les selon votre setup.
 
-3.  **Redémarrez Klipper.**
-
-Pour une installation manuelle, veuillez vous référer au [guide d'installation manuelle](docs/usage.md).
-
-## ⚡ Démarrage Rapide
-
-Après l'installation, vous pouvez tester la communication avec le BMCU-C en utilisant les macros G-code fournies.
-
-*   `BMCU_ENABLE_SPOOLS` : Active les moteurs du BMCU-C.
-*   `BMCU_SPOOL_MOVE GATE=1 MOVE=120 VELOCITY=25` : Déplace le filament du tiroir 1.
-*   `BMCU_HOME` : Lance une séquence de "homing".
-
-## 👨‍💻 Pour les Développeurs : Compilation et Flashage
-
-Cette section est destinée aux développeurs qui souhaitent compiler et flasher le firmware Klipper sur le BMCU-C.
+## Compilation & flashage développeur
+Destiné à ceux qui doivent compiler ou mettre à jour le firmware.
 
 ### Dépendances
+Installer les toolchains suivantes (ex. via votre gestionnaire de paquets) :
+- `gcc-riscv64-unknown-elf`
+- `picolibc-riscv64-unknown-elf`
+- `wchisp`
 
-*   `gcc-riscv64-unknown-elf`
-*   `picolibc-riscv64-unknown-elf`
-*   `wchisp`
+Des instructions détaillées par plateforme sont disponibles dans [docs/ch32v203_audit_et_flash.md](docs/ch32v203_audit_et_flash.md).
 
-Pour des instructions d'installation détaillées, consultez le [guide de compilation et flashage](docs/ch32v203_audit_et_flash.md).
+### Procédure automatisée
+Le script `flash_bmcu.sh` orchestre `menuconfig` et le flashage :
+```bash
+chmod +x flash_bmcu.sh
+./flash_bmcu.sh
+```
+Suivez les invites pour sélectionner la cible, compiler puis flasher via votre programmateur.
 
-### Procédure
+### Procédure manuelle
+La documentation décrit également des commandes `make menuconfig`, `make flash` et l'utilisation de `wchisp` manuelle pour Linux, macOS et Windows.
 
-Un script `flash_bmcu.sh` est fourni pour automatiser le processus.
+## Organisation du dépôt
+| Répertoire | Contenu |
+| --- | --- |
+| `config/` | Fichiers de configuration Klipper (macros, includes...). |
+| `docs/` | Guides d'installation, d'usage et références protocole. |
+| `firmware/` | Binaires fournis du firmware BMCU-C. |
+| `hardware/` | Schémas électroniques, PCB et docs matérielles. |
+| `klipper/` | Copie du dépôt Klipper incluant le module `bmcu.py`. |
+| `scripts/` | Scripts pour installer, configurer ou flasher. |
+| `BMCU`, `Happy-Hare/` | Sous-modules vers les projets amont. |
 
-1.  **Rendre le script exécutable :**
-    ```bash
-    chmod +x flash_bmcu.sh
-    ```
+## Documentation
+- [Guide d'utilisation & installation manuelle](docs/usage.md)
+- [Flashage + intégration Mainsail](docs/bmcu_c_flashing_mainsail.md)
+- [Audit technique et procédures avancées](docs/ch32v203_audit_et_flash.md)
+- [Détails du protocole "bambubus"](docs/bambubus_protocol.md)
 
-2.  **Lancer le script :**
-    ```bash
-    ./flash_bmcu.sh
-    ```
+## Contribuer
+Les contributions sont encouragées :
+1. Ouvrir une issue pour discuter d'un bug ou d'une idée.
+2. Travailler sur une branche dédiée.
+3. Soumettre une pull request détaillant les changements et tests.
 
-3.  **Suivez les instructions.** Le script vous guidera à travers la configuration de Klipper (`menuconfig`) et le processus de flashage.
-
-Pour des informations plus détaillées, y compris des procédures de flashage manuelles pour différentes plateformes, veuillez consulter notre [documentation technique](docs/ch32v203_audit_et_flash.md).
-
-## 📁 Organisation du Dépôt
-
-| Répertoire      | Contenu                                                               |
-| --------------- | --------------------------------------------------------------------- |
-| `config/`       | Fichiers de configuration Klipper (`bmcu_config.cfg`, `bmcu_macros.cfg`). |
-| `docs/`         | Documentation détaillée du projet.                                    |
-| `firmware/`     | Binaires officiels du firmware du BMCU-C.                             |
-| `hardware/`     | Schémas et fichiers PCB pour le matériel.                             |
-| `klipper/`      | Copie du dépôt Klipper avec le module `bmcu.py`.                      |
-| `scripts/`      | Scripts d'automatisation pour l'installation et le flashage.          |
-| `BMCU`, `Happy-Hare` | Sous-modules Git vers les projets originaux.                     |
-
-## 📚 Documentation
-
-*   [Guide d'utilisation et d'installation manuelle](docs/usage.md)
-*   [Guide de flashage et d'intégration Mainsail](docs/bmcu_c_flashing_mainsail.md)
-*   [Audit technique et procédure de flashage avancée](docs/ch32v203_audit_et_flash.md)
-*   [Détails sur le protocole "bambubus"](docs/bambubus_protocol.md)
-
-## ❤️ Contribuer
-
-Les contributions sont les bienvenues ! N'hésitez pas à ouvrir une "issue" pour signaler un bug ou proposer une amélioration, ou à soumettre une "pull request".
-
-## 📄 Licence
-
-Ce projet n'a pas de licence définie. Veuillez en ajouter une si vous souhaitez le distribuer.
+## Licence
+Aucune licence n'est définie. Ajoutez-en une si vous souhaitez redistribuer ou dériver ce projet.
