@@ -1,6 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import subprocess
 import pytest
 
 from scripts import setup_bmcu
@@ -182,3 +183,30 @@ def test_main_requires_manual_serial_when_detection_fails(tmp_path, monkeypatch,
 
     assert exit_code == 1
     assert "--serial-path" in captured.err
+
+
+def test_flash_failure_reports_command_output(monkeypatch, tmp_path, capsys):
+    messages = {
+        "stdout": "flash output\nline 2\n",
+        "stderr": "flash error\n",
+    }
+
+    def fake_run(cmd, cwd, check, capture_output, text):
+        assert check is True
+        assert capture_output is True
+        assert text is True
+        raise subprocess.CalledProcessError(
+            returncode=1,
+            cmd=cmd,
+            output=messages["stdout"],
+            stderr=messages["stderr"],
+        )
+
+    monkeypatch.setattr(setup_bmcu.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError):
+        setup_bmcu._flash_firmware(tmp_path, flash_device=None, dry_run=False)
+
+    captured = capsys.readouterr()
+    assert messages["stdout"].strip() in captured.err
+    assert messages["stderr"].strip() in captured.err

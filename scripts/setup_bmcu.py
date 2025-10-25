@@ -175,9 +175,22 @@ def _flash_firmware(klipper_path: Path, flash_device: str | None, dry_run: bool)
         print("[dry-run] skipping make flash execution")
         return
 
-    result = subprocess.run(cmd, cwd=klipper_path)
-    if result.returncode != 0:
-        raise RuntimeError("make flash failed")
+    try:
+        subprocess.run(
+            cmd,
+            cwd=klipper_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        if exc.stdout:
+            print("--- make flash stdout ---", file=sys.stderr)
+            print(exc.stdout, file=sys.stderr, end="" if exc.stdout.endswith("\n") else "\n")
+        if exc.stderr:
+            print("--- make flash stderr ---", file=sys.stderr)
+            print(exc.stderr, file=sys.stderr, end="" if exc.stderr.endswith("\n") else "\n")
+        raise RuntimeError("make flash failed") from exc
 
 
 
