@@ -45,10 +45,7 @@ l'hôte soit un **CB2** (carte d'appoint Bambu) ou un **Raspberry Pi**.
 
 ### 1.5 Fonctions manquantes ou à compléter
 
-* Le module ADC est actuellement un *stub* qui déclenche un `shutdown()` dès l'appel, empêchant toute lecture de capteurs
-  analogiques (courant, photodiodes IR).【F:klipper/src/ch32v20x/adc.c†L1-L33】
-* Le pilote PWM matériel est également un *stub* ; il faudra implémenter la configuration des timers (TIM3/TIM4) avant de
-  pouvoir piloter la LED RGB ou d'autres sorties proportionnelles.【F:klipper/src/ch32v20x/hard_pwm.c†L1-L20】
+* Le module ADC (`adc.c`) est fonctionnel mais nécessite une calibration fine pour des lectures précises.
 * L'option USB FS est déclarée dans le Kconfig mais aucun driver n'est encore fourni – toute sélection de l'USB conduit à
   une erreur de build ; privilégiez pour l'instant l'USART1.
 
@@ -73,7 +70,7 @@ l'hôte soit un **CB2** (carte d'appoint Bambu) ou un **Raspberry Pi**.
    * Micro-controller Architecture : `WCH CH32V20x`.
    * Processor model : `CH32V203C8`.
    * Communication interface : `USART1 (PA9/PA10)`.
-   * Baud rate : 250000 (ou la valeur retenue côté hôte).
+   * Baud rate : `1250000` (recommandé pour le bambubus) ou `250000`.
    * Conservez `Enable extra low-level configuration options` désactivé tant que l'USB n'est pas implémenté.
 4. **Compiler** :
    ```bash

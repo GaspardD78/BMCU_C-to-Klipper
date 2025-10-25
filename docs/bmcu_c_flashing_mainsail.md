@@ -16,7 +16,9 @@ Ce guide décrit la marche à suivre pour rendre un BMCU-C opérationnel sous Kl
    * **Micro-controller Architecture** : `CH32V203` (entrée `MACH_CH32V20X`).
    * **Processor model** : `CH32V203C8`.
    * **Clock Reference** : `Internal 8 MHz crystal`.
-   * Activez `Enable extra low-level configuration options` puis assurez-vous que l'UART `MCU_TX/MCU_RX` est configuré avec la bonne vitesse (250 000 bauds par défaut) et que `CONFIG_WANT_ADC` reste activé pour la télémétrie courant/capteurs.【F:klipper/src/ch32v20x/Kconfig†L6-L19】
+   * **Communication interface** : `USART1 (PA9/PA10)`.
+   * **Baud rate for serial port** : `1250000` (pour le protocole bambubus) ou `250000` (pour un usage Klipper standard).
+   * Activez `Enable extra low-level configuration options` puis assurez-vous que `CONFIG_WANT_ADC` reste activé pour la télémétrie courant/capteurs.【F:klipper/src/ch32v20x/Kconfig†L6-L19】
 4. **Sauvegarder la configuration** : le menu `Save Configuration` génère `out/klipper.dict` ainsi que le binaire `out/klipper.bin` ciblant le CH32V203.
 
 ## 2. Flasher le CH32V203 du BMCU-C

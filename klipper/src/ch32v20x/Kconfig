@@ -37,6 +37,10 @@ choice
 config CH32V20X_SERIAL1
     bool "USART1 (PA9/PA10)"
     select SERIAL
+config SERIAL_BAUD
+    int "Baud rate for serial port"
+    default 250000
+    depends on CH32V20X_SERIAL1
 config CH32V20X_USB
     bool "USB FS (PA11/PA12)" if LOW_LEVEL_OPTIONS
     select USBSERIAL
