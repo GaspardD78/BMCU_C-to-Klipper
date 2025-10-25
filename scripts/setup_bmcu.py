@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,15 +40,37 @@ def _ensure_includes(lines: List[str], includes: Iterable[str]) -> Tuple[List[st
     return result, updated
 
 
-def _ensure_mcu_section(lines: List[str]) -> Tuple[List[str], bool]:
+def _detect_serial_symlink() -> Optional[str]:
+    base = Path("/dev/serial/by-id")
+    if not base.exists():
+        return None
+
+    preferred_patterns = ["usb-klipper_ch32v203*", "*klipper*", "*"]
+    for pattern in preferred_patterns:
+        matches = sorted(base.glob(pattern))
+        if not matches:
+            continue
+        if len(matches) == 1:
+            return str(matches[0])
+        # If multiple matches exist for a given pattern, take the first one
+        # for the most specific patterns (to avoid falling back to a generic
+        # device when several Klipper devices are connected).
+        if pattern != "*":
+            return str(matches[0])
+    return None
+
+
+def _ensure_mcu_section(lines: List[str], serial_path: Optional[str]) -> Tuple[List[str], bool]:
     marker = "[mcu bmcu_c]"
     for line in lines:
         if line.strip().lower() == marker:
             return lines, False
+
+    serial_value = serial_path or "/dev/serial/by-id/usb-klipper_ch32v203-if00"
     template = [
         "\n",
         "[mcu bmcu_c]\n",
-        "serial: /dev/serial/by-id/usb-klipper_ch32v203-if00\n",
+        f"serial: {serial_value}\n",
         "restart_method: command\n",
         "baud: 1250000\n",
         "# use_custom_baudrate: True  # Uncomment si PySerial expose set_custom_baudrate()\n",
@@ -60,7 +82,12 @@ def _ensure_mcu_section(lines: List[str]) -> Tuple[List[str], bool]:
     return result, True
 
 
-def _update_printer_cfg(printer_cfg: Path, dry_run: bool, create_backup: bool) -> None:
+def _update_printer_cfg(
+    printer_cfg: Path,
+    dry_run: bool,
+    create_backup: bool,
+    serial_path: Optional[str],
+) -> None:
     if not printer_cfg.exists():
         raise FileNotFoundError(f"printer.cfg not found: {printer_cfg}")
 
@@ -68,7 +95,7 @@ def _update_printer_cfg(printer_cfg: Path, dry_run: bool, create_backup: bool) -
     content, added_includes = _ensure_includes(
         content, ["[include bmcu_config.cfg]", "[include bmcu_macros.cfg]"]
     )
-    content, added_mcu = _ensure_mcu_section(content)
+    content, added_mcu = _ensure_mcu_section(content, serial_path)
 
     if not (added_includes or added_mcu):
         print("printer.cfg already contains BMCU sections; no changes needed.")
@@ -117,6 +144,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--printer-config", type=Path, help="Chemin vers printer.cfg pour y injecter les includes BMCU"
+    )
+    parser.add_argument(
+        "--serial-path",
+        help=(
+            "Chemin vers le lien /dev/serial/by-id/ du BMCU. Si omis, une détection automatique est tentée."
+        ),
     )
     parser.add_argument(
         "--firmware-variant",
@@ -185,9 +218,15 @@ def main() -> int:
         _copy_file(src, dest, args.dry_run)
 
     if args.printer_config:
+        serial_path: Optional[str] = args.serial_path
+        if serial_path is None:
+            detected = _detect_serial_symlink()
+            if detected:
+                print(f"Lien série détecté automatiquement : {detected}")
+            serial_path = detected
         printer_cfg = args.printer_config.expanduser().resolve()
         try:
-            _update_printer_cfg(printer_cfg, args.dry_run, not args.no_backup)
+            _update_printer_cfg(printer_cfg, args.dry_run, not args.no_backup, serial_path)
         except FileNotFoundError as exc:
             print(f"Erreur : {exc}", file=sys.stderr)
             return 1
