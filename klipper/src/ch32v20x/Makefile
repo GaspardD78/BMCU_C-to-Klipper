@@ -25,5 +25,24 @@ CFLAGS_klipper.elf += -T $(OUT)src/ch32v20x/ch32v20x_link.ld -lgcc
 target-y += $(OUT)klipper.bin
 
 $(OUT)klipper.bin: $(OUT)klipper.elf
-@echo "  Creating bin file $@"
-$(Q)$(OBJCOPY) -O binary $< $@
+	@echo "  Creating bin file $@"
+	$(Q)$(OBJCOPY) -O binary $< $@
+
+flash: $(OUT)klipper.bin
+	@if [ -z "$(FLASH_DEVICE)" ]; then \
+		echo "Please specify FLASH_DEVICE=wch-link-swd ou FLASH_DEVICE=/dev/ttyUSBx"; \
+		exit 1; \
+	fi
+	@if ! command -v wchisp >/dev/null 2>&1; then \
+		echo "L'outil 'wchisp' est introuvable. Installez-le via 'pip3 install wchisp'."; \
+		exit 1; \
+	fi
+	@echo "  Flashing $< to $(FLASH_DEVICE) via wchisp"
+	$(Q)cmd="wchisp flash $< --chip ch32v203 --device \"$(FLASH_DEVICE)\""; \
+	if [ -n "$(FLASH_BAUD)" ]; then \
+		cmd="$$cmd --baud $(FLASH_BAUD)"; \
+	fi; \
+	if [ -n "$(FLASH_EXTRA_OPTS)" ]; then \
+		cmd="$$cmd $(FLASH_EXTRA_OPTS)"; \
+	fi; \
+	eval "$$cmd"
