@@ -6,6 +6,9 @@ set -euo pipefail
 # Se déplacer à la racine du projet
 cd "$(dirname "$0")/.."
 
+# Afficher le logo
+cat firmware/ascii_art.txt
+
 # Vérifier si le firmware a été compilé
 if [ ! -f "klipper/out/klipper.bin" ]; then
     echo "  Le firmware n'a pas été trouvé. Veuillez d'abord lancer firmware/build.sh"

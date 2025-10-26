@@ -86,6 +86,17 @@ CHECKLIST_ITEMS = [
 # Fonctions d'interaction utilisateur
 # ---------------------------------------------------------------------------
 
+def print_header() -> None:
+    """Affiche le logo ASCII du projet."""
+    try:
+        art_path = Path(__file__).resolve().with_name("ascii_art.txt")
+        art = art_path.read_text("utf-8")
+        print(colorize(art, Colors.OKCYAN))
+    except OSError:
+        # En cas d'erreur (ex: fichier non trouvé), on n'affiche rien
+        # pour ne pas bloquer l'exécution.
+        pass
+
 
 def print_block(message: str) -> None:
     """Affiche un bloc de texte avec indentation homogène."""
@@ -163,6 +174,7 @@ def ensure_firmware_path(path_str: str) -> Path:
 
 def gather_user_choices() -> UserChoices:
     """Collecte toutes les informations nécessaires."""
+    print_header()
     intro_text = f"""
 {colorize("Bienvenue dans l'assistant de flash du BMCU-C vers Klipper.", f"{Colors.BOLD}{Colors.OKBLUE}")}
 

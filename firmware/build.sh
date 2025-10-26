@@ -6,6 +6,9 @@ set -euo pipefail
 # Se déplacer à la racine du projet
 cd "$(dirname "$0")/.."
 
+# Afficher le logo
+cat firmware/ascii_art.txt
+
 # Copier la configuration Klipper
 echo " copie de la configuration..."
 cp firmware/klipper.config klipper/.config
