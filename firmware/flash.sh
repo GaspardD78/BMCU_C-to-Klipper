@@ -1,10 +1,18 @@
 #!/bin/bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOGO_FILE="${SCRIPT_DIR}/../logo/banner.txt"
+
+if [[ -f "${LOGO_FILE}" ]]; then
+    cat "${LOGO_FILE}"
+    echo
+fi
+
 # Script pour flasher le firmware Klipper sur le BMCU-C
 
 # Se déplacer à la racine du projet
-cd "$(dirname "$0")/.."
+cd "${SCRIPT_DIR}/.."
 
 # Vérifier si le firmware a été compilé
 if [ ! -f "klipper/out/klipper.bin" ]; then

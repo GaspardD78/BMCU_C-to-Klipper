@@ -9,6 +9,14 @@
 # SECTION DE CONFIGURATION
 # Modifiez ces variables pour correspondre à votre environnement.
 # ==============================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOGO_FILE="${SCRIPT_DIR}/logo/banner.txt"
+
+if [[ -f "${LOGO_FILE}" ]]; then
+    cat "${LOGO_FILE}"
+    echo
+fi
+
 readonly BMCU_IP="192.168.1.100"
 readonly BMCU_USER="root"
 readonly BMCU_PASS="votre_mot_de_passe"

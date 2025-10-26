@@ -46,6 +46,25 @@ def colorize(text: str, color: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Bannière de démarrage
+# ---------------------------------------------------------------------------
+
+
+def display_logo() -> None:
+    """Affiche le logo ASCII si disponible."""
+
+    logo_path = Path(__file__).resolve().parents[1] / "logo" / "banner.txt"
+    try:
+        logo = logo_path.read_text(encoding="utf-8").rstrip()
+    except FileNotFoundError:
+        return
+
+    if logo:
+        print(logo)
+        print()
+
+
+# ---------------------------------------------------------------------------
 # Structures de données
 # ---------------------------------------------------------------------------
 
@@ -412,6 +431,8 @@ def generate_assistance_prompt(
 
 
 def main() -> int:
+    display_logo()
+
     try:
         choices = gather_user_choices()
     except KeyboardInterrupt:
