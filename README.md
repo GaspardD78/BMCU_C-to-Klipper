@@ -164,4 +164,6 @@ Les contributions sont les bienvenues ! Ouvrez une issue ou soumettez une pull r
 
 ## Licence
 
-Ce projet n'a pas encore de licence définie. Veuillez en ajouter une avant toute redistribution ou dérivation.
+Ce projet est distribué sous la licence GNU General Public License v3 (GPLv3).
+
+Le texte complet de la licence est disponible dans le fichier [LICENSE](./LICENSE) à la racine de ce dépôt. En résumé, cette licence vous autorise à utiliser, modifier et distribuer ce logiciel, à condition que tout projet dérivé soit également distribué sous la même licence.
