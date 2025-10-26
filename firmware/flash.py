@@ -1,4 +1,19 @@
 #!/usr/bin/env python3
+# Copyright (C) 2024 Gaspard Douté
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 """Interface interactive pour faciliter l'usage du script d'automatisation.
 
 Ce module fournit une CLI conviviale autour de
@@ -43,6 +58,25 @@ def colorize(text: str, color: str) -> str:
     if not sys.stdout.isatty():
         return text
     return f"{color}{text}{Colors.ENDC}"
+
+
+# ---------------------------------------------------------------------------
+# Bannière de démarrage
+# ---------------------------------------------------------------------------
+
+
+def display_logo() -> None:
+    """Affiche le logo ASCII si disponible."""
+
+    logo_path = Path(__file__).resolve().parents[1] / "logo" / "banner.txt"
+    try:
+        logo = logo_path.read_text(encoding="utf-8").rstrip()
+    except FileNotFoundError:
+        return
+
+    if logo:
+        print(logo)
+        print()
 
 
 # ---------------------------------------------------------------------------
@@ -412,6 +446,8 @@ def generate_assistance_prompt(
 
 
 def main() -> int:
+    display_logo()
+
     try:
         choices = gather_user_choices()
     except KeyboardInterrupt:

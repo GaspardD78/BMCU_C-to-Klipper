@@ -1,4 +1,19 @@
 #!/bin/bash
+# Copyright (C) 2024 Gaspard Douté
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 #
 # Script d'automatisation pour le flashage et la validation d'un firmware sur un BMCU.
 #
@@ -9,6 +24,14 @@
 # SECTION DE CONFIGURATION
 # Modifiez ces variables pour correspondre à votre environnement.
 # ==============================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOGO_FILE="${SCRIPT_DIR}/logo/banner.txt"
+
+if [[ -f "${LOGO_FILE}" ]]; then
+    cat "${LOGO_FILE}"
+    echo
+fi
+
 readonly BMCU_IP="192.168.1.100"
 readonly BMCU_USER="root"
 readonly BMCU_PASS="votre_mot_de_passe"

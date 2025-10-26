@@ -1,4 +1,19 @@
 #!/usr/bin/env python3
+# Copyright (C) 2024 Gaspard Douté
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 """Automatisation complète du flash du BMCU-C.
 
 Ce script orchestre de bout en bout la procédure de mise à jour du BMCU
@@ -34,6 +49,25 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Iterable, Optional
+
+
+# ---------------------------------------------------------------------------
+# Bannière de démarrage
+# ---------------------------------------------------------------------------
+
+
+def display_logo() -> None:
+    """Affiche le logo ASCII si disponible."""
+
+    logo_path = Path(__file__).resolve().parents[1] / "logo" / "banner.txt"
+    try:
+        logo = logo_path.read_text(encoding="utf-8").rstrip()
+    except FileNotFoundError:
+        return
+
+    if logo:
+        print(logo)
+        print()
 
 
 # ---------------------------------------------------------------------------
@@ -636,6 +670,8 @@ def parse_arguments(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    display_logo()
+
     args = parse_arguments(argv)
 
     timestamp = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="240" viewBox="0 0 720 240" role="img" aria-labelledby="title desc">
+  <title id="title">Logo BMCU C to Klipper</title>
+  <desc id="desc">Motif minimaliste représentant l'intégration du BMCU-C vers Klipper.</desc>
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="accentGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+  </defs>
+  <rect width="720" height="240" rx="24" fill="url(#bgGradient)" />
+  <g transform="translate(40,60)">
+    <rect width="140" height="120" rx="18" fill="#0ea5e9" opacity="0.12" />
+    <path d="M20 40h100M20 60h100M20 80h70" stroke="#38bdf8" stroke-width="6" stroke-linecap="round" opacity="0.8" />
+  </g>
+  <g transform="translate(220,60)">
+    <rect width="140" height="120" rx="18" fill="#a855f7" opacity="0.12" />
+    <path d="M40 40l60 60M100 40l-60 60" stroke="#c084fc" stroke-width="8" stroke-linecap="round" opacity="0.7" />
+  </g>
+  <path d="M380 120h110" stroke="url(#accentGradient)" stroke-width="10" stroke-linecap="round" />
+  <polygon points="490,120 470,106 470,134" fill="#a855f7" />
+  <g transform="translate(520,60)">
+    <rect width="140" height="120" rx="18" fill="#0ea5e9" opacity="0.12" />
+    <path d="M40 80h60M40 50h60" stroke="#38bdf8" stroke-width="8" stroke-linecap="round" opacity="0.7" />
+    <circle cx="100" cy="80" r="8" fill="#38bdf8" />
+  </g>
+  <text x="60" y="210" fill="#e2e8f0" font-family="'Montserrat', 'Segoe UI', sans-serif" font-size="42" font-weight="600">BMCU-C → Klipper</text>
+  <text x="60" y="238" fill="#94a3b8" font-family="'Montserrat', 'Segoe UI', sans-serif" font-size="22" letter-spacing="3">COMMUNITY BRIDGE</text>
+</svg>

@@ -1,5 +1,9 @@
 # Intégration du BMCU-C avec Klipper et Happy Hare
 
+<p align="center">
+  <img src="logo/bmcu_logo.svg" alt="Logo BMCU-C vers Klipper" width="420" />
+</p>
+
 > ⚠️ **Statut : preuve de concept.** L'intégration n'a pas encore été validée sur un BMCU-C réel. Ce dépôt s'adresse aux développeurs et « makers » souhaitant contribuer aux tests matériels et logiciels.
 
 Ce projet open-source fournit deux briques complémentaires pour piloter un BMCU-C (clone communautaire de l'AMS Bambu Lab) depuis Klipper via Happy Hare :
@@ -164,4 +168,6 @@ Les contributions sont les bienvenues ! Ouvrez une issue ou soumettez une pull r
 
 ## Licence
 
-Ce projet n'a pas encore de licence définie. Veuillez en ajouter une avant toute redistribution ou dérivation.
+Ce projet est distribué sous la licence GNU General Public License v3 (GPLv3).
+
+Le texte complet de la licence est disponible dans le fichier [LICENSE](./LICENSE) à la racine de ce dépôt. En résumé, cette licence vous autorise à utiliser, modifier et distribuer ce logiciel, à condition que tout projet dérivé soit également distribué sous la même licence.
