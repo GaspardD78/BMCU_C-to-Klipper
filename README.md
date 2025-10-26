@@ -37,15 +37,13 @@ Ce dépôt inclut désormais tout le nécessaire pour compiler et flasher le fir
    ./firmware/build.sh
    ```
 2. **Flasher le firmware :**
-   Deux options sont disponibles :
-   - interface interactive avec checklist et génération automatique d'un prompt d'assistance en cas d'erreur :
-     ```bash
-     ./firmware/flashBMCUtoKlipper_interface.py
-     ```
-   - lancement direct du script d'automatisation (mode non interactif) :
-     ```bash
-     ./firmware/flash.sh
-     ```
+   La méthode recommandée est d'utiliser l'assistant interactif. Il vous guidera à travers les étapes de sécurité et lancera le processus de flash de manière sécurisée.
+
+   ```bash
+   ./firmware/flash.py
+   ```
+
+   Pour les utilisateurs avancés ou les besoins d'automatisation, il est possible d'utiliser directement le script d'automatisation sous-jacent : `./firmware/flashBMCUtoKlipper_automation.py`. L'ancien script `./firmware/flash.sh` reste disponible pour un flashage manuel de bas niveau.
 
 📄 **Documentation annexe :** [Procédure de flash du BMCU-C](./docs/flash_procedure.md)
 
