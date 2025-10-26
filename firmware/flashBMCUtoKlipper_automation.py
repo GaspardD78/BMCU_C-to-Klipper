@@ -52,6 +52,25 @@ from typing import Iterable, Optional
 
 
 # ---------------------------------------------------------------------------
+# Bannière de démarrage
+# ---------------------------------------------------------------------------
+
+
+def display_logo() -> None:
+    """Affiche le logo ASCII si disponible."""
+
+    logo_path = Path(__file__).resolve().parents[1] / "logo" / "banner.txt"
+    try:
+        logo = logo_path.read_text(encoding="utf-8").rstrip()
+    except FileNotFoundError:
+        return
+
+    if logo:
+        print(logo)
+        print()
+
+
+# ---------------------------------------------------------------------------
 # Exceptions personnalisées
 # ---------------------------------------------------------------------------
 
@@ -651,6 +670,8 @@ def parse_arguments(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    display_logo()
+
     args = parse_arguments(argv)
 
     timestamp = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

@@ -1,5 +1,9 @@
 # Intégration du BMCU-C avec Klipper et Happy Hare
 
+<p align="center">
+  <img src="logo/bmcu_logo.svg" alt="Logo BMCU-C vers Klipper" width="420" />
+</p>
+
 > ⚠️ **Statut : preuve de concept.** L'intégration n'a pas encore été validée sur un BMCU-C réel. Ce dépôt s'adresse aux développeurs et « makers » souhaitant contribuer aux tests matériels et logiciels.
 
 Ce projet open-source fournit deux briques complémentaires pour piloter un BMCU-C (clone communautaire de l'AMS Bambu Lab) depuis Klipper via Happy Hare :
