@@ -24,6 +24,7 @@ import argparse
 import datetime as _dt
 import importlib.util
 import logging
+from logging.handlers import RotatingFileHandler
 import shlex
 import shutil
 import subprocess
@@ -98,8 +99,14 @@ def configure_logging(log_file: Path) -> None:
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
 
-    # Handler fichier : niveau DEBUG pour conserver tous les détails.
-    file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    # Handler fichier : niveau DEBUG pour conserver tous les détails avec rotation (5 Mo, 4 sauvegardes).
+    file_handler = RotatingFileHandler(
+        log_file,
+        mode="a",
+        maxBytes=5 * 1024 * 1024,
+        backupCount=4,
+        encoding="utf-8",
+    )
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT, DATE_FORMAT))
 
@@ -397,6 +404,15 @@ def step_preparation(args: argparse.Namespace, context: ExecutionContext) -> Non
             )
         logging.info("Empreinte SHA-256 attendue confirmée")
 
+    if args.backup_command:
+        logging.info("Exécution de la commande de sauvegarde avant le flash")
+        logging.debug("Commande de sauvegarde : %s", args.backup_command)
+        backup_result = run_remote_command(context, args.backup_command)
+        if backup_result.stdout:
+            logging.info("Sortie de la sauvegarde :\n%s", backup_result.stdout.rstrip())
+        if backup_result.stderr:
+            logging.info("Sortie d'erreur de la sauvegarde :\n%s", backup_result.stderr.rstrip())
+
     if args.pre_update_command:
         logging.debug("Commande de mise en maintenance : %s", args.pre_update_command)
         run_remote_command(context, args.pre_update_command)
@@ -571,13 +587,22 @@ def parse_arguments(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--expected-final-version",
+        "--target-version",
+        dest="expected_final_version",
         default="",
         help="Version de firmware attendue après flash. Laisse vide pour désactiver la vérification.",
     )
     parser.add_argument(
         "--firmware-sha256",
+        "--firmware-checksum",
+        dest="firmware_sha256",
         default="",
         help="Empreinte SHA-256 attendue du firmware local pour vérifier l'intégrité.",
+    )
+    parser.add_argument(
+        "--backup-command",
+        default="",
+        help="Commande distante pour réaliser une sauvegarde avant le flash.",
     )
     parser.add_argument(
         "--dry-run",

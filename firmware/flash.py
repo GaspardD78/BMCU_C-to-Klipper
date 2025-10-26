@@ -164,7 +164,7 @@ def ensure_firmware_path(path_str: str) -> Path:
 def gather_user_choices() -> UserChoices:
     """Collecte toutes les informations nécessaires."""
     intro_text = f"""
-{colorize('Bienvenue dans l\'assistant de flash du BMCU-C vers Klipper.', f'{Colors.BOLD}{Colors.OKBLUE}')}
+{colorize("Bienvenue dans l'assistant de flash du BMCU-C vers Klipper.", f"{Colors.BOLD}{Colors.OKBLUE}")}
 
 Ce guide interactif va :
   • rappeler les points de contrôle indispensables ;
@@ -174,7 +174,7 @@ Ce guide interactif va :
   • en cas d'échec, générer un prompt prêt à l'emploi pour demander
     de l'aide.
 
-{colorize('⚠️ Cette procédure peut rendre le module inopérant si elle est interrompue ou mal paramétrée. Assurez-vous de comprendre chaque étape avant de poursuivre.', Colors.WARNING)}
+{colorize("⚠️ Cette procédure peut rendre le module inopérant si elle est interrompue ou mal paramétrée. Assurez-vous de comprendre chaque étape avant de poursuivre.", Colors.WARNING)}
 """
     print_block(intro_text)
 
