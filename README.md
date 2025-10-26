@@ -92,6 +92,27 @@ Tout le nécessaire pour compiler et flasher le firmware Klipper se trouve dans 
 
 > 📄 Une procédure détaillée avec captures et conseils de dépannage est disponible dans [docs/flash_procedure.md](./docs/flash_procedure.md).
 
+### 1.5 Automatiser le flash
+
+Pour un flash totalement piloté par script (usage en CI, en atelier ou pour répéter la procédure sur plusieurs BMCU-C), vous pouvez utiliser `firmware/flashBMCUtoKlipper_automation.py`.
+
+1. **Vérifiez les dépendances système** : par défaut, le script exige `ipmitool`, `sshpass`, `scp` et `ping`. Ajustez la liste avec `--required-commands` si nécessaire.
+2. **Préparez le firmware** : assurez-vous que le fichier binaire généré (`klipper/out/klipper.bin`) est accessible depuis la machine d'orchestration.
+3. **Lancez l'automatisation** avec les paramètres adaptés à votre installation :
+   ```bash
+   python3 firmware/flashBMCUtoKlipper_automation.py \
+       --bmc-host 192.168.1.100 \
+       --bmc-user root \
+       --bmc-password "mot_de_passe" \
+       --firmware-file klipper/out/klipper.bin \
+       --wait-for-reboot \
+       --firmware-sha256 "<hash_attendu>" \
+       --expected-final-version "vX.Y.Z"
+   ```
+   Les options `--firmware-sha256` et `--expected-final-version` sont facultatives mais recommandées pour valider l'intégrité du binaire et la version cible.
+4. **Mode test** : ajoutez `--dry-run` pour vérifier la configuration sans exécuter d'opérations distantes.
+5. **Consultez les journaux** : chaque exécution crée un dossier horodaté dans `logs/flash_test_*` contenant `debug.log` et un éventuel rapport d'échec.
+
 ---
 
 ## 2. Addon Python pour Klipper (Happy Hare)
