@@ -1,13 +1,48 @@
 # Intégration du BMCU-C avec Klipper et Happy Hare
 
-> ⚠️ **Statut : preuve de concept.** L'intégration n'a pas encore été validée sur un BMCU-C réel. Ce dépôt s'adresse aux développeurs et "makers" souhaitant contribuer aux tests matériels et logiciels.
+> ⚠️ **Statut : preuve de concept.** L'intégration n'a pas encore été validée sur un BMCU-C réel. Ce dépôt s'adresse aux développeurs et « makers » souhaitant contribuer aux tests matériels et logiciels.
 
 Ce projet open-source fournit deux briques complémentaires pour piloter un BMCU-C (clone communautaire de l'AMS Bambu Lab) depuis Klipper via Happy Hare :
 
-1. **(1) Flashage du BMCU-C** — scripts et configurations pour compiler puis charger Klipper sur le microcontrôleur.
-2. **(2) Addon Python pour Klipper** — module, macros et documentation permettant à Happy Hare de dialoguer avec le BMCU-C.
+1. **Flashage du BMCU-C** — scripts et configurations pour compiler puis charger Klipper sur le microcontrôleur.
+2. **Addon Python pour Klipper** — module, macros et documentation permettant à Happy Hare de dialoguer avec le BMCU-C.
 
 Les deux volets peuvent être utilisés ensemble ou séparément selon votre besoin (par exemple : vous pouvez ne déployer que l'addon Python si vous disposez déjà d'un BMCU-C flashé avec Klipper).
+
+---
+
+## Sommaire
+
+1. [Pré-requis](#pré-requis)
+2. [Flashage du BMCU-C (firmware)](#flashage-du-bmcu-c-firmware)
+   1. [Préparer l'environnement](#préparer-lenvironnement)
+   2. [Compiler Klipper](#compiler-klipper)
+   3. [Flasher le microcontrôleur](#flasher-le-microcontrôleur)
+   4. [Vérifier le flash](#vérifier-le-flash)
+3. [Addon Python pour Klipper (Happy Hare)](#addon-python-pour-klipper-happy-hare)
+   1. [Copier les fichiers nécessaires](#copier-les-fichiers-nécessaires)
+   2. [Configurer Happy Hare](#configurer-happy-hare)
+   3. [Valider la communication](#valider-la-communication)
+4. [Structure du dépôt](#structure-du-dépôt)
+5. [Contribuer](#contribuer)
+6. [Licence](#licence)
+
+---
+
+## Pré-requis
+
+Avant de démarrer, assurez-vous de disposer des éléments suivants :
+
+- Une machine hôte équipée de Python 3.10 ou plus récent.
+- Les outils de compilation RISC-V (`gcc-riscv64-unknown-elf` et `picolibc-riscv64-unknown-elf`).
+- L'accès en lecture/écriture au port série utilisé par le BMCU-C (généralement via l'appartenance au groupe `dialout`).
+- Le sous-module `klipper/` initialisé :
+  ```bash
+  git submodule update --init --recursive
+  ```
+- Les scripts du dépôt marqués comme exécutables (`chmod +x firmware/*.sh`).
+
+> ℹ️ Pour une liste complète des versions minimales supportées, consultez [AGENTS.md](./AGENTS.md).
 
 ---
 
@@ -15,41 +50,81 @@ Les deux volets peuvent être utilisés ensemble ou séparément selon votre bes
 
 Tout le nécessaire pour compiler et flasher le firmware Klipper se trouve dans le répertoire `firmware/`.
 
-### Étapes rapides
+### 1.1 Préparer l'environnement
 
-1. **Compiler le firmware**
+1. Installez les dépendances système requises pour le cross-compilateur RISC-V.
+2. Ouvrez un terminal et placez-vous à la racine du dépôt :
+   ```bash
+   cd /chemin/vers/BMCU_C-to-Klipper
+   ```
+3. Vérifiez que le sous-module Klipper est initialisé :
+   ```bash
+   git submodule status
+   ```
+   Le commit référencé ne doit pas être préfixé par un signe `-`.
+
+### 1.2 Compiler Klipper
+
+1. Lancez la compilation depuis le script dédié :
    ```bash
    ./firmware/build.sh
    ```
-2. **Flasher le microcontrôleur** (assistant interactif recommandé)
+2. Patientez jusqu'à la fin de la compilation. Le firmware généré (`klipper.bin`) se trouvera dans `klipper/out/`.
+3. Si la compilation échoue, vérifiez les messages d'erreur pour confirmer la présence des dépendances et la configuration de `CROSS_PREFIX`.
+
+### 1.3 Flasher le microcontrôleur
+
+1. Connectez le BMCU-C à votre machine via USB et placez-le en mode bootloader si nécessaire.
+2. Exécutez l'assistant interactif de flash :
    ```bash
    ./firmware/flash.py
    ```
-   - Pour l'automatisation : `./firmware/flashBMCUtoKlipper_automation.py`
-   - Pour un flash manuel bas niveau : `./firmware/flash.sh`
+3. Suivez les questions affichées par le script (sélection du port série, confirmation du firmware, etc.).
+4. Pour des scénarios avancés :
+   - Automatisation : `./firmware/flashBMCUtoKlipper_automation.py`
+   - Flash bas niveau : `./firmware/flash.sh`
 
-### Documentation dédiée
+### 1.4 Vérifier le flash
 
-- 📄 [Procédure de flash du BMCU-C](./docs/flash_procedure.md)
-- ✅ Vérifiez les prérequis matériels et logiciels listés dans [AGENTS.md](./AGENTS.md) avant toute manipulation.
+1. Redémarrez le BMCU-C en mode normal.
+2. Ouvrez un terminal série (ex. `screen /dev/ttyUSB0 115200`) pour vérifier que Klipper initialise correctement le périphérique.
+3. Consultez les journaux de Klipper pour confirmer que le microcontrôleur est détecté sans erreur.
+
+> 📄 Une procédure détaillée avec captures et conseils de dépannage est disponible dans [docs/flash_procedure.md](./docs/flash_procedure.md).
 
 ---
 
 ## 2. Addon Python pour Klipper (Happy Hare)
 
-Le dossier `bmcu_addon/` regroupe le code et la configuration pour intégrer le BMCU-C à Happy Hare.
+Le dossier `bmcu_addon/` regroupe le code et la configuration nécessaires à l'intégration du BMCU-C.
 
-### Contenu principal
+### 2.1 Copier les fichiers nécessaires
 
-- `bmcu_addon/bmcu.py` : module Klipper gérant la communication RS-485 et les commandes G-code (`BMCU_SELECT_GATE`, `BMCU_HOME`, etc.).
-- `bmcu_addon/config/` : macros et paramètres à inclure dans votre `printer.cfg`.
-- `docs/setup.md` : guide pas-à-pas pour installer et activer l'addon.
+1. Transférez le module principal dans l'instance Klipper cible :
+   ```bash
+   cp bmcu_addon/bmcu.py <chemin_klipper>/klippy/extras/
+   ```
+2. Copiez les macros et configurations associées :
+   ```bash
+   cp -r bmcu_addon/config/* <chemin_klipper>/config/
+   ```
 
-### Mise en place
+### 2.2 Configurer Happy Hare
 
-1. Copier `bmcu_addon/bmcu.py` vers `klippy/extras/` dans votre instance Klipper.
-2. Importer les fichiers de `bmcu_addon/config/` dans votre configuration Happy Hare.
-3. Suivre les indications détaillées du [guide d'installation](./docs/setup.md) pour finaliser l'intégration.
+1. Éditez votre `printer.cfg` (ou le fichier d'inclusion Happy Hare) pour inclure les macros fournies.
+2. Ajustez les paramètres de communication (port RS-485, vitesse, identifiants de gate) selon votre installation.
+3. Redémarrez Klipper pour charger le module `bmcu` et valider la configuration.
+
+### 2.3 Valider la communication
+
+1. Depuis l'interface de contrôle (Fluidd, Mainsail, etc.), envoyez la commande :
+   ```
+   BMCU_SELECT_GATE GATE=1
+   ```
+2. Vérifiez que la sélection est reconnue et qu'aucune erreur ne remonte dans les logs.
+3. Testez les autres macros (`BMCU_HOME`, `BMCU_STATUS`) pour confirmer le dialogue complet.
+
+> 📘 Le guide d'installation détaillé est disponible dans [docs/setup.md](./docs/setup.md).
 
 ---
 
