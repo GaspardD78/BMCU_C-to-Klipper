@@ -1,7 +1,7 @@
 # Intégration du BMCU-C avec Klipper et Happy Hare
 
 <p align="center">
-  <img src="logo/bmcu_logo.svg" alt="Logo BMCU-C vers Klipper" width="210" />
+  <img src="logo/bmcu_logo.png" alt="Logo BMCU-C vers Klipper" width="110" />
 </p>
 
 > ⚠️ **Statut : preuve de concept.** L'intégration n'a pas encore été validée sur un BMCU-C réel. Ce dépôt s'adresse aux développeurs et « makers » souhaitant contribuer aux tests matériels et logiciels.
