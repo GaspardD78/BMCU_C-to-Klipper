@@ -30,6 +30,7 @@ import subprocess
 import sys
 import textwrap
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -76,6 +77,10 @@ class ExecutionContext:
     remote_firmware_path: str
     initial_version: Optional[str] = None
     final_version: Optional[str] = None
+    dry_run: bool = False
+    firmware_local_path: Optional[Path] = None
+    firmware_size: Optional[int] = None
+    firmware_sha256: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +243,15 @@ def read_bmc_firmware_version(context: ExecutionContext) -> str:
 def run_remote_command(context: ExecutionContext, remote_command: str, *, timeout: Optional[int] = None) -> subprocess.CompletedProcess[str]:
     """Exécute une commande distante via SSH en utilisant sshpass."""
 
+    if context.dry_run:
+        logging.info("Mode test à blanc : la commande distante suivante est simulée : %s", remote_command)
+        return subprocess.CompletedProcess(
+            args=["ssh", "(dry-run)", remote_command],
+            returncode=0,
+            stdout="(dry-run) Commande non exécutée.",
+            stderr="",
+        )
+
     ssh_command = [
         "sshpass",
         "-p",
@@ -254,11 +268,38 @@ def run_remote_command(context: ExecutionContext, remote_command: str, *, timeou
     return run_command(ssh_command, timeout=timeout)
 
 
+def compute_firmware_metadata(firmware_path: Path) -> tuple[int, str]:
+    """Calcule la taille et le hash SHA-256 d'un firmware."""
+
+    try:
+        size = firmware_path.stat().st_size
+    except OSError as err:
+        raise StepError("Préparation du flash", f"Impossible de lire le firmware '{firmware_path}': {err}") from err
+
+    hasher = sha256()
+    try:
+        with firmware_path.open("rb") as firmware_file:
+            for chunk in iter(lambda: firmware_file.read(65536), b""):
+                hasher.update(chunk)
+    except OSError as err:
+        raise StepError("Préparation du flash", f"Impossible de calculer le hash du firmware : {err}") from err
+
+    return size, hasher.hexdigest()
+
+
 def copy_firmware(context: ExecutionContext, firmware_path: Path) -> None:
     """Copie du firmware vers l'équipement distant via SCP."""
 
     if not firmware_path.is_file():
         raise StepError("Préparation du flash", f"Le fichier firmware '{firmware_path}' est introuvable")
+
+    if context.dry_run:
+        logging.info(
+            "Mode test à blanc : la copie du firmware %s est simulée (destination %s)",
+            firmware_path,
+            context.remote_firmware_path,
+        )
+        return
 
     scp_command = [
         "sshpass",
@@ -325,6 +366,11 @@ def step_initialisation(args: argparse.Namespace, context: ExecutionContext) -> 
 def step_precheck(context: ExecutionContext) -> None:
     """Pré-vérifie l'état du BMC en lisant la version du firmware."""
 
+    if context.dry_run:
+        context.initial_version = "(dry-run)"
+        logging.info("Mode test à blanc : la lecture de la version initiale est ignorée")
+        return
+
     context.initial_version = read_bmc_firmware_version(context)
     logging.info("Version initiale enregistrée : %s", context.initial_version)
 
@@ -332,11 +378,30 @@ def step_precheck(context: ExecutionContext) -> None:
 def step_preparation(args: argparse.Namespace, context: ExecutionContext) -> None:
     """Met le BMC en mode maintenance et transfère le firmware."""
 
+    firmware_path = Path(args.firmware_file).resolve()
+    context.firmware_local_path = firmware_path
+
+    size, fingerprint = compute_firmware_metadata(firmware_path)
+    context.firmware_size = size
+    context.firmware_sha256 = fingerprint
+
+    logging.info("Firmware local : %s (taille : %s octets)", firmware_path, size)
+    logging.info("Empreinte SHA-256 calculée : %s", fingerprint)
+
+    if args.firmware_sha256:
+        expected = args.firmware_sha256.strip().lower()
+        if expected != fingerprint.lower():
+            raise StepError(
+                "Préparation du flash",
+                "Le hash SHA-256 du firmware ne correspond pas à la valeur attendue",
+            )
+        logging.info("Empreinte SHA-256 attendue confirmée")
+
     if args.pre_update_command:
         logging.debug("Commande de mise en maintenance : %s", args.pre_update_command)
         run_remote_command(context, args.pre_update_command)
 
-    copy_firmware(context, Path(args.firmware_file).resolve())
+    copy_firmware(context, firmware_path)
     logging.info(
         "Firmware transféré vers %s:%s",
         context.bmc_host,
@@ -365,12 +430,33 @@ def step_flash(args: argparse.Namespace, context: ExecutionContext) -> None:
 def step_post_verification(args: argparse.Namespace, context: ExecutionContext) -> None:
     """Attend le redémarrage du BMC et valide la version flashée."""
 
+    if context.dry_run:
+        context.final_version = "(dry-run)"
+        if args.wait_for_reboot:
+            logging.info("Mode test à blanc : l'attente de redémarrage est ignorée")
+        logging.info("Mode test à blanc : aucune lecture de version finale n'est effectuée")
+        if args.expected_final_version:
+            logging.warning(
+                "Impossible de vérifier la version cible '%s' en mode test à blanc",
+                args.expected_final_version,
+            )
+        return
+
     if args.wait_for_reboot:
         logging.info("Attente du redémarrage du BMC (%ss maximum)", args.reboot_timeout)
         wait_for_host(context.bmc_host, timeout=args.reboot_timeout, interval=args.reboot_check_interval)
 
     context.final_version = read_bmc_firmware_version(context)
     logging.info("Version finale détectée : %s", context.final_version)
+
+    if args.expected_final_version and context.final_version != args.expected_final_version:
+        raise StepError(
+            "Post-vérification",
+            (
+                "La version finale détectée (%s) ne correspond pas à la version attendue (%s)."
+                % (context.final_version, args.expected_final_version)
+            ),
+        )
 
     if context.initial_version == context.final_version:
         message = (
@@ -484,6 +570,21 @@ def parse_arguments(argv: Optional[list[str]] = None) -> argparse.Namespace:
         help="Ne pas considérer comme une erreur le cas où la version reste inchangée",
     )
     parser.add_argument(
+        "--expected-final-version",
+        default="",
+        help="Version de firmware attendue après flash. Laisse vide pour désactiver la vérification.",
+    )
+    parser.add_argument(
+        "--firmware-sha256",
+        default="",
+        help="Empreinte SHA-256 attendue du firmware local pour vérifier l'intégrité.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Active le mode test à blanc : aucune opération distante n'est exécutée",
+    )
+    parser.add_argument(
         "--log-root",
         default="logs",
         help="Répertoire parent pour les journaux horodatés",
@@ -521,6 +622,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     configure_logging(log_file)
 
     logging.info("Initialisation du processus d'automatisation du flash")
+    if args.dry_run:
+        logging.warning("Mode test à blanc activé : aucune action distante ne sera exécutée")
 
     context = ExecutionContext(
         log_dir=log_dir,
@@ -530,6 +633,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         bmc_password=args.bmc_password,
         ssh_port=args.ssh_port,
         remote_firmware_path=args.remote_firmware_path,
+        dry_run=args.dry_run,
     )
 
     try:
