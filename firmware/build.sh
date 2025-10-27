@@ -19,6 +19,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOGO_FILE="${SCRIPT_DIR}/../logo/banner.txt"
 
+TOOLCHAIN_PREFIX="${CROSS_PREFIX:-riscv64-unknown-elf-}"
+
+require_command() {
+    local cmd="$1"
+    local message="$2"
+    if ! command -v "${cmd}" >/dev/null 2>&1; then
+        echo " erreur : ${message}" >&2
+        exit 1
+    fi
+}
+
 if [[ -f "${LOGO_FILE}" ]]; then
     cat "${LOGO_FILE}"
     echo
@@ -26,8 +37,19 @@ fi
 
 # Script pour compiler le firmware Klipper pour le BMCU-C
 
+require_command "git" "git est requis. Assurez-vous qu'il est installé."
+require_command "patch" "patch est requis. Installez le paquet patch."
+require_command "make" "make est requis. Installez les outils de compilation (build-essential)."
+require_command "${TOOLCHAIN_PREFIX}gcc" \
+    "la chaîne d'outils ${TOOLCHAIN_PREFIX}gcc est absente. Installez 'gcc-riscv64-unknown-elf' ou définissez CROSS_PREFIX."
+
 # Se déplacer à la racine du projet
 cd "${SCRIPT_DIR}/.."
+
+if [[ ! -d "klipper/.git" ]]; then
+    echo " initialisation du sous-module klipper..."
+    git submodule update --init --recursive
+fi
 
 # Copier la configuration Klipper
 echo " copie de la configuration..."
