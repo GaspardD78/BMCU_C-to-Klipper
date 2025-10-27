@@ -186,6 +186,8 @@ python3 flash.py
 
 > ⚠️ **Point de vigilance post-flash :** Gardez une session locale prête à interrompre l'opération (`Ctrl+C`) si la connexion SSH se coupe pendant le flashage et journalisez les logs dans `logs/flash_$(date +%F).log`.
 
+> 🆘 **En cas d'échec :** suivez la [procédure de retour à l'état initial](flash_automation/docs/rollback_procedure.md) pour remettre le poste et le BMCU-C dans un état stable avant de retenter un flash.
+
 ---
 
 ## 🔐 Accès distant et automatisation via SSH
