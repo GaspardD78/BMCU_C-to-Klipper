@@ -33,20 +33,79 @@ Chaque dossier peut vivre comme un dépôt Git indépendant : il contient sa doc
 
 1. **Matériel**
    - Un BMCU-C avec câble USB-C vers USB-A.
-   - Un ordinateur sous Linux (Ubuntu 22.04+ testé) avec accès au port série (`dialout`).
+   - Un ordinateur sous Linux (Ubuntu 22.04+ testé), Raspberry Pi OS 64 bits ou Armbian (BTT CB2) avec accès au port série (`dialout`).
    - Optionnel : un hub USB alimenté pour éviter les coupures pendant le flash.
    > ⚠️ **Point de vigilance matériel :** privilégiez un port USB natif (pas de hub passif) et inspectez visuellement le câble pour éviter les micro-coupures durant le flashage.
-2. **Logiciels / paquets système** (copier-coller les commandes ci-dessous) :
+2. **Logiciels / paquets système** (adapter selon l'architecture) :
 
-   ```bash
-   sudo apt update
-   sudo apt install -y git python3 python3-venv python3-pip make \
-       gcc-riscv32-unknown-elf picolibc-riscv32-unknown-elf
-   ```
+   - **Stations x86_64 (Ubuntu/Debian 22.04+)**
 
-   > ⚠️ **Point de vigilance toolchain :** confirmez la présence de la bonne version avec `riscv32-unknown-elf-gcc --version` et sauvegardez la sortie pour votre rapport d'intervention.
+     ```bash
+     sudo apt update
+     sudo apt install -y git python3 python3-venv python3-pip make \
+         curl tar gcc-riscv32-unknown-elf picolibc-riscv32-unknown-elf
+     ```
 
-   > 💡 Si la toolchain RISC-V n'est pas disponible dans votre distribution, installez le paquet `gcc-riscv32-unknown-elf` depuis [xpack-dev-tools](https://xpack.github.io/dev-tools/riscv-none-elf-gcc/) puis ajoutez-le au `PATH`.
+   - **Raspberry Pi OS 64 bits / Armbian (BTT CB2)**
+
+     ```bash
+     sudo apt update
+     sudo apt install -y git python3 python3-venv python3-pip make \
+         curl tar build-essential coreutils iputils-ping openssh-client \
+         ipmitool sshpass
+     ```
+
+   - **Dépendances Python communes**
+
+     ```bash
+     python3 -m pip install --upgrade pip
+     python3 -m pip install --user wchisp
+     ```
+
+   > ⚠️ **Point de vigilance toolchain :** sur x86_64, `build.sh` télécharge automatiquement la toolchain RISC-V officielle si `riscv32-unknown-elf-gcc` est absent. Sur ARM, référez-vous aux options ci-dessous pour fournir un `CROSS_PREFIX` valide.
+
+   > ℹ️ Après l'installation via `pip --user`, ajoutez `~/.local/bin` à votre `PATH` (`echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc`).
+
+   **Dépendances CLI de `flash_automation`**
+
+   | Composant | Rôle dans les scripts | Installation (Debian/Raspberry Pi OS/Armbian) |
+   | --- | --- | --- |
+   | `git`, `curl`, `tar`, `make`, `python3`, `python3-venv`, `python3-pip` | Compilation de Klipper & environnement Python | `sudo apt install -y git curl tar build-essential python3 python3-venv python3-pip`
+   | `gcc-riscv32-unknown-elf`, `picolibc-riscv32-unknown-elf` | Toolchain native x86_64 | `sudo apt install -y gcc-riscv32-unknown-elf picolibc-riscv32-unknown-elf`
+   | `wchisp` | Flash du CH32V203 (scripts `flash.py` & `flash_automation.sh`) | `python3 -m pip install --user wchisp`
+   | `sha256sum`, `stat` | Vérifications d'intégrité locales | Inclus dans `coreutils` (installé par défaut sur Debian/Ubuntu/Armbian)
+   | `ipmitool`, `sshpass`, `scp`, `ping` | Automatisation distante (`flashBMCUtoKlipper_automation.py`) | `sudo apt install -y ipmitool sshpass openssh-client iputils-ping`
+
+   > ✅ Vérifiez chaque dépendance avec `command -v <outil>` avant d'exécuter les scripts.
+
+   **Installer la toolchain RISC-V sur Raspberry Pi OS / Armbian**
+
+   Sur architecture ARM64, aucune archive officielle n'est téléchargée automatiquement par `build.sh`. Deux approches sont supportées :
+
+   1. **Paquets Debian (si disponibles dans votre distribution)**
+
+      ```bash
+      sudo apt install -y gcc-riscv32-unknown-elf picolibc-riscv32-unknown-elf
+      export CROSS_PREFIX="riscv32-unknown-elf-"
+      ```
+
+      > 💡 Selon la version de votre distribution, ces paquets peuvent être nommés `gcc-riscv-none-elf` ou ne pas exister. Dans ce cas, utilisez l'option xPack.
+
+   2. **Archive multi-architecture xPack (recommandé)**
+
+      ```bash
+      cd /tmp
+      curl -LO https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v15.2.0-1/xpack-riscv-none-elf-gcc-15.2.0-1-linux-arm64.tar.gz
+      sudo mkdir -p /opt/riscv/xpack-15.2.0-1
+      sudo tar -xzf xpack-riscv-none-elf-gcc-15.2.0-1-linux-arm64.tar.gz -C /opt/riscv/xpack-15.2.0-1 --strip-components=1
+      echo 'export PATH=/opt/riscv/xpack-15.2.0-1/bin:$PATH' | sudo tee /etc/profile.d/xpack-riscv.sh
+      echo 'export CROSS_PREFIX=/opt/riscv/xpack-15.2.0-1/bin/riscv-none-elf-' | sudo tee -a /etc/profile.d/xpack-riscv.sh
+      source /etc/profile.d/xpack-riscv.sh
+      ```
+
+      > ✅ Validez l'installation avec `/opt/riscv/xpack-15.2.0-1/bin/riscv-none-elf-gcc --version`.
+
+   Dans les deux cas, exportez `CROSS_PREFIX` dans votre shell ou dans `/etc/profile.d/` pour que `flash_automation/build.sh` utilise la toolchain fournie.
 
 3. **Cloner ce dépôt** :
 
@@ -85,7 +144,7 @@ pip install -r requirements.txt  # installe pyserial & dépendances
 
 > ⚠️ **Point de vigilance environnement :** Activez la virtualenv pour chaque session (`source .venv/bin/activate`). Un oubli peut installer des dépendances au mauvais endroit ou déclencher des conflits de version.
 
-> ℹ️ Le script `build.sh` télécharge la toolchain si elle est absente et clone Klipper dans `flash_automation/.cache/klipper`. Aucune configuration manuelle n'est nécessaire.
+> ℹ️ Sur hôte x86_64, `build.sh` télécharge automatiquement la toolchain si elle est absente et clone Klipper dans `flash_automation/.cache/klipper`. Sur Raspberry Pi OS / Armbian, installez la toolchain manuellement puis exportez `CROSS_PREFIX` avant d'exécuter `./build.sh`.
 
 ### Étape 2 – Compiler Klipper pour le BMCU-C
 
