@@ -12,22 +12,22 @@ Ce document sert de guide pour toute contribution à ce projet. Il définit les 
 
 Le projet est organisé comme suit :
 
-- `bmcu_addon/` : Contient la logique de l'addon Klipper pour l'intégration du BMCU-C.
-- `firmware/` : Regroupe les scripts et configurations pour la compilation et le flashage du firmware Klipper sur le BMCU-C.
-  - `build.sh` : Script pour compiler le firmware.
+- `addon/` : Contient la logique de l'addon Klipper pour l'intégration du BMCU-C.
+- `flash_automation/` : Regroupe les scripts et configurations pour la compilation et le flashage du firmware Klipper sur le BMCU-C.
+  - `build.sh` : Script pour compiler le firmware (télécharge Klipper dans `.cache/`).
   - `flash.py` : Script interactif pour flasher le firmware.
+  - `flash_automation.sh` : Script Shell pour automatiser le flashage en ligne de commande.
   - `klipper.config` : Fichier de configuration Klipper pour le BMCU-C.
-- `klipper/` : Submodule Git contenant le code source de Klipper. **Ne pas modifier directement ce répertoire sans synchroniser avec le dépôt officiel.**
-- `docs/` : Documentation détaillée du projet.
+  - `flashBMCUtoKlipper_automation.py` : Automatisation avancée (CI, ateliers, etc.).
+- `assets/` : Ressources graphiques (logo SVG).
 
 ### Matrice des Zones Sensibles
 
 | Répertoire | Impact potentiel | Recommandations de revue |
 | --- | --- | --- |
-| `firmware/` | Modifie le binaire flashé sur le BMCU-C et peut rendre une machine inutilisable en cas d'erreur. | Exiger au moins un test matériel ou une simulation et une double validation par un reviewer connaissant le matériel. |
-| `bmcu_addon/` | Affecte l'intégration Klipper et peut casser la compatibilité avec certains modules Klipper. | Vérifier la compatibilité avec les versions cibles de Klipper et inclure des tests sur banc ou en environnement réel. |
-| `klipper/` | Submodule synchronisé avec le dépôt officiel, toute divergence peut compliquer les mises à jour futures. | Synchroniser avec le dépôt amont et justifier la nécessité de chaque patch local. |
-| `docs/` | Influence la compréhension utilisateur et la conformité des procédures. | Vérifier la cohérence avec les scripts et scénarios les plus récents. |
+| `flash_automation/` | Modifie le binaire flashé sur le BMCU-C et peut rendre une machine inutilisable en cas d'erreur. | Exiger au moins un test matériel ou une simulation et une double validation par un reviewer connaissant le matériel. |
+| `addon/` | Affecte l'intégration Klipper et peut casser la compatibilité avec certains modules Klipper. | Vérifier la compatibilité avec les versions cibles de Klipper et inclure des tests sur banc ou en environnement réel. |
+| `assets/` | Influence l'identité visuelle et la documentation. | Vérifier la cohérence avec les supports existants. |
 | Scripts `flash_automation.sh` et Python associés | Interagissent directement avec le matériel et les permissions système. | Tester en mode `--dry-run` et vérifier les garde-fous (checksums, confirmations). |
 
 ## 3. Pré-requis et Compatibilité des Outils
@@ -40,13 +40,12 @@ Avant de lancer les workflows, assurez-vous que les outils suivants sont disponi
 | `picolibc-riscv32-unknown-elf` | 1.8 | Bibliothèque standard utilisée lors de la compilation ; installer les headers correspondants. |
 | Python | 3.10 | Requis pour les scripts `flash.py` et les automatisations. Vérifier la présence de `python3` dans le PATH. |
 | `pip` | 23.0 | Utilisé pour installer les dépendances Python (ex. `pyserial`). |
-| `git` | 2.35 | Indispensable pour gérer le submodule `klipper/`. |
+| `git` | 2.35 | Utilisé par `flash_automation/build.sh` pour cloner les sources Klipper. |
 | Accès USB / permissions `dialout` | N/A | Assurez-vous que l'utilisateur appartient au groupe permettant l'accès au port série. |
 
 ✅ **Check-list rapide**
 
 - [ ] Les versions minimales ci-dessus sont installées.
-- [ ] Le sous-module `klipper/` est initialisé (`git submodule update --init --recursive`).
 - [ ] Les scripts sont exécutables (`chmod +x`).
 - [ ] L'utilisateur courant possède les permissions sur le port série ciblé.
 
@@ -75,7 +74,7 @@ Avant de lancer les workflows, assurez-vous que les outils suivants sont disponi
 
 ## 5. Processus de Revue de Code
 
-- **Nombre de reviewers :** Minimum deux reviewers pour tout changement affectant `firmware/` ou `bmcu_addon/`. Un reviewer est suffisant pour les modifications de documentation ou de scripts auxiliaires.
+- **Nombre de reviewers :** Minimum deux reviewers pour tout changement affectant `flash_automation/` ou `addon/`. Un reviewer est suffisant pour les modifications de documentation ou de scripts auxiliaires.
 - **Critères d'acceptation :**
   - Respect des conventions de codage et des prérequis listés ci-dessus.
   - Tests pertinents exécutés (voir section Workflows) et résultats partagés dans la revue.
@@ -103,7 +102,7 @@ Format : `<type>[scope]: <description>`
   - `test` : Ajout ou modification de tests.
   - `chore` : Tâches de maintenance (mise à jour de dépendances, etc.).
 
-Exemple : `feat(firmware): add checksum validation to flash.py`
+Exemple : `feat(flash_automation): add checksum validation to flash.py`
 
 ### Versionnement du Firmware
 
@@ -119,21 +118,21 @@ La version du firmware est gérée à l'aide de **tags Git**.
 
 ### Compilation du Firmware
 
-1.  **Naviguer vers le bon répertoire :** `cd firmware/`
+1.  **Naviguer vers le bon répertoire :** `cd flash_automation/`
 2.  **Lancer le script de build :** `./build.sh`
-3.  **Vérifier la sortie :** Le firmware compilé (`klipper.bin`) sera disponible dans `klipper/out/`.
+3.  **Vérifier la sortie :** Le firmware compilé (`klipper.bin`) sera disponible dans `.cache/klipper/out/`.
 
 #### Dépannage
 
 - **Erreur : `riscv32-unknown-elf-gcc: command not found`** → Vérifier que le compilateur est installé et que le PATH contient le dossier des binaires.
-- **Erreur de permission sur `build.sh`** → Donner les droits d'exécution : `chmod +x firmware/build.sh`.
-- **Sous-module Klipper non initialisé** → Exécuter `git submodule update --init --recursive` avant la compilation.
+- **Erreur de permission sur `build.sh`** → Donner les droits d'exécution : `chmod +x flash_automation/build.sh`.
+- **Téléchargement de Klipper impossible** → Vérifier la connexion réseau et ajuster `KLIPPER_REPO_URL`/`KLIPPER_REF`.
 
 ### Flashage du Firmware
 
 Le flashage doit être effectué avec le script interactif pour minimiser les risques.
 
-1.  **Naviguer vers le bon répertoire :** `cd firmware/`
+1.  **Naviguer vers le bon répertoire :** `cd flash_automation/`
 2.  **Lancer le script de flashage :** `python3 flash.py`
 3.  **Suivre les instructions :** Le script guidera l'utilisateur à travers les étapes de vérification et de confirmation.
 
@@ -141,24 +140,24 @@ Le flashage doit être effectué avec le script interactif pour minimiser les ri
 
 - **Accès refusé au périphérique USB (`Permission denied`)** → Ajouter l'utilisateur au groupe `dialout` ou ajuster les règles `udev`.
 - **`python3` introuvable** → Vérifier l'installation de Python 3 et le lien symbolique `python3` dans `/usr/bin`.
-- **Firmware non détecté** → Vérifier le câble USB et relancer le microcontrôleur en mode bootloader.
+- **Firmware non détecté** → Vérifier la présence de `.cache/klipper/out/klipper.bin`, le câble USB et relancer le microcontrôleur en mode bootloader.
 
 ### Nettoyage des Artefacts
 
 Pour nettoyer les fichiers générés par la compilation :
 
-1.  **Naviguer vers le répertoire Klipper :** `cd klipper/`
+1.  **Naviguer vers le répertoire Klipper :** `cd flash_automation/.cache/klipper/`
 2.  **Exécuter la commande de nettoyage :** `make clean` ou `rm -rf out/`
 
 #### Dépannage
 
 - **`make` introuvable** → Installer les outils de développement (`build-essential` sous Debian/Ubuntu).
-- **Sous-module verrouillé en lecture seule** → Vérifier que le submodule n'a pas de modifications locales ou exécuter `git submodule foreach git clean -xfd`.
+- **Dépôt Klipper verrouillé** → Vérifier les permissions de `flash_automation/.cache/klipper` ou supprimer le dossier avant de relancer `./build.sh`.
 - **Dossier `out/` inaccessible** → S'assurer que le répertoire n'est pas utilisé par un processus (`lsof`) avant la suppression.
 
 ## 8. Points d'Attention Particuliers
 
-- **Submodule Klipper :** Le répertoire `klipper/` est un submodule. Pour le mettre à jour, utilisez les commandes `git submodule sync` et `git submodule update --init --recursive`.
+- **Sources Klipper :** Le dépôt est cloné dans `flash_automation/.cache/klipper/` à chaque exécution de `build.sh`. Ne versionnez pas ce dossier dans le dépôt principal.
 - **Protocole "bambubus" :** Il s'agit d'un protocole de communication série complexe et non standard. Toute modification liée à ce protocole nécessite une compréhension approfondie de son fonctionnement (baud rate de 1,250,000, checksums CRC8 DVB-S2 et CRC16 custom).
 - **Environnement de Compilation :** La compilation pour le microcontrôleur CH32V203 requiert `gcc-riscv32-unknown-elf` et `picolibc-riscv32-unknown-elf`. La variable `CROSS_PREFIX` dans `klipper/src/ch32v20x/Makefile` doit être correctement définie (`riscv32-unknown-elf-`).
 - **Documentation externe recommandée :**

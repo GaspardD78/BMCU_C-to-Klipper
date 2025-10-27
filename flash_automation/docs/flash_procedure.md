@@ -8,33 +8,29 @@ Ce document détaille la procédure complète pour compiler et flasher le firmwa
    - Une instance Klipper fonctionnelle avec accès SSH.
    - Une interface d'administration (Mainsail ou Fluidd).
    - Le module Happy Hare installé.
-  - Les toolchains `gcc-riscv32-unknown-elf`, `picolibc-riscv32-unknown-elf` et l'outil de flash `wchisp` installés sur la machine qui exécutera le flash. Le script `firmware/build.sh` peut télécharger automatiquement la toolchain RV32 officielle si nécessaire.
-2. Récupérez ce dépôt ainsi que ses sous-modules :
-   ```bash
-   git clone --recurse-submodules https://github.com/GaspardD78/BMCU_C-to-Klipper.git
-   cd BMCU_C-to-Klipper
-   ```
+  - Les toolchains `gcc-riscv32-unknown-elf`, `picolibc-riscv32-unknown-elf` et l'outil de flash `wchisp` installés sur la machine qui exécutera le flash. Le script `build.sh` peut télécharger automatiquement la toolchain RV32 officielle si nécessaire.
+2. Placez-vous dans le dossier `flash_automation/` (copié ou cloné depuis son dépôt dédié).
 
 ## 2. Compilation du firmware
 
 1. Lancez la construction du firmware Klipper pour le BMCU-C :
    ```bash
-   ./firmware/build.sh
+   ./build.sh
    ```
-2. Le script prépare l'environnement de compilation et produit un binaire `klipper/out/klipper.bin` qui sera ensuite flashé sur le BMCU-C.
+2. Le script prépare l'environnement de compilation et produit un binaire `.cache/klipper/out/klipper.bin` qui sera ensuite flashé sur le BMCU-C.
 
 ## 3. Mise en mode bootloader et flash
 
 1. Démarrez le script de flash :
    ```bash
-   ./firmware/flash_automation.sh
+   ./flash_automation.sh
    ```
 2. Le script vérifie la présence du fichier `klipper.bin`, puis vous invite à placer manuellement le module en mode bootloader :
    1. Maintenez le bouton **BOOT0** enfoncé.
    2. Appuyez puis relâchez le bouton **RESET**.
    3. Relâchez le bouton **BOOT0**.
    4. Revenez dans le terminal et appuyez sur Entrée pour lancer `wchisp`.
-3. L'utilitaire `wchisp` programme ensuite la puce avec la commande `wchisp -d 30 -c ch32v20x flash klipper/out/klipper.bin` et affiche un message de confirmation en fin d'opération.
+3. L'utilitaire `wchisp` programme ensuite la puce avec la commande `wchisp -d 30 -c ch32v20x flash .cache/klipper/out/klipper.bin` et affiche un message de confirmation en fin d'opération.
 
 ## 4. Variantes sans bouton BOOT / connecteur USB-C
 
@@ -45,7 +41,7 @@ Certaines cartes BMCU-C récentes sont dépourvues de bouton **BOOT0** et **RESE
    - *Chip Model* : `CH32V203`
    - *Download Type* : `Serial Port`
    - *DI – Baud Rate* : `1M`
-   - *User File* : sélectionnez le firmware `klipper/out/klipper.bin` généré à l'étape précédente.
+   - *User File* : sélectionnez le firmware `.cache/klipper/out/klipper.bin` généré à l'étape précédente.
    - Cochez l'option **Serial Auto DI**.
 3. **Enchaînez les actions dans l'ordre suivant** jusqu'à obtenir un flash réussi : `Remove Protect` → `Download` → `Remove Protect` → `Download`.
    - Il est normal que la première itération échoue ; le second passage aboutit généralement.

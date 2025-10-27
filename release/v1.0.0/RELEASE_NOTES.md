@@ -8,14 +8,13 @@ Cette version fournit les briques logicielles nécessaires pour flasher le firmw
 
 Cette version est distribuée en trois archives distinctes pour répondre à différents besoins :
 
-### 1. `bmcu_addon_v1.0.0.zip`
+### 1. `addon_v1.0.0.zip`
 
 Cette archive contient les fichiers nécessaires pour intégrer un BMCU-C déjà flashé avec Klipper dans votre configuration Happy Hare.
 
 **Contenu :**
 - `bmcu.py` : Le module Klipper `[extra]` à placer dans `klipper/klippy/extras/`.
-- `bmcu_config.cfg` : Fichier de configuration d'exemple.
-- `bmcu_macros.cfg` : Macros Klipper pour piloter le BMCU-C.
+- `config/` : Fichiers de configuration et macros Happy Hare.
 
 **Installation :**
 Suivez les instructions de la section "Addon Python pour Klipper (Happy Hare)" du fichier `README.md`.
@@ -25,7 +24,7 @@ Suivez les instructions de la section "Addon Python pour Klipper (Happy Hare)" d
 Cette archive contient les scripts et la configuration nécessaires pour compiler et flasher manuellement le firmware Klipper sur votre BMCU-C.
 
 **Contenu :**
-- `build.sh` : Script pour compiler le firmware Klipper.
+- `build.sh` : Script pour compiler le firmware Klipper (clone Klipper dans `.cache/`).
 - `flash.py` : Assistant interactif pour flasher le firmware.
 - `flash_automation.sh` : Script de flashage bas niveau avec journalisation (pour utilisateurs avancés).
 - `klipper.config` : Fichier de configuration Klipper pour le BMCU-C.
@@ -33,7 +32,7 @@ Cette archive contient les scripts et la configuration nécessaires pour compile
 **Installation :**
 Suivez la procédure décrite dans la section "Flashage du BMCU-C (firmware)" du `README.md`.
 
-### 3. `auto_flash_v1.0.0.zip`
+### 3. `flash_automation_ci_v1.0.0.zip`
 
 Cette archive est destinée aux utilisateurs avancés souhaitant automatiser le processus de flashage du firmware.
 
