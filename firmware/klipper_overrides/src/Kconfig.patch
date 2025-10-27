@@ -1,0 +1,21 @@
+diff --git a/src/Kconfig b/src/Kconfig
+index 6740946..dcfda2b 100644
+--- a/src/Kconfig
++++ b/src/Kconfig
+@@ -10,6 +10,8 @@ config LOW_LEVEL_OPTIONS
+ 
+ choice
+     prompt "Micro-controller Architecture"
++    config MACH_CH32V20X
++        bool "WCH CH32V20x (RISC-V)"
+     config MACH_AVR
+         bool "Atmega AVR"
+     config MACH_ATSAM
+@@ -39,6 +41,7 @@ source "src/atsam/Kconfig"
+ source "src/atsamd/Kconfig"
+ source "src/lpc176x/Kconfig"
+ source "src/stm32/Kconfig"
++source "src/ch32v20x/Kconfig"
+ source "src/hc32f460/Kconfig"
+ source "src/rp2040/Kconfig"
+ source "src/pru/Kconfig"
