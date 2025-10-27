@@ -29,9 +29,9 @@ LOGO_FILE="${FLASH_ROOT}/banner.txt"
 OVERRIDES_DIR="${FLASH_ROOT}/klipper_overrides"
 TOOLCHAIN_PREFIX="${CROSS_PREFIX:-riscv32-unknown-elf-}"
 TOOLCHAIN_CACHE_DIR="${CACHE_ROOT}/toolchains"
-TOOLCHAIN_RELEASE="2025.10.18"
-TOOLCHAIN_ARCHIVE_X86_64="riscv32-elf-ubuntu-22.04-gcc.tar.xz"
-TOOLCHAIN_BASE_URL="https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/${TOOLCHAIN_RELEASE}"
+TOOLCHAIN_RELEASE="${TOOLCHAIN_RELEASE:-2025.10.18}"
+TOOLCHAIN_ARCHIVE_X86_64="${TOOLCHAIN_ARCHIVE_X86_64:-riscv32-elf-ubuntu-22.04-gcc.tar.xz}"
+TOOLCHAIN_BASE_URL="${TOOLCHAIN_BASE_URL:-https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/${TOOLCHAIN_RELEASE}}"
 HOST_ARCH="$(uname -m)"
 SUPPORTED_AUTO_TOOLCHAIN_ARCHS=("x86_64" "amd64")
 AUTO_TOOLCHAIN_SUPPORTED="false"
@@ -123,26 +123,39 @@ bootstrap_toolchain() {
         print_info "Archive toolchain déjà présente, réutilisation de ${archive_path}"
     fi
 
-    local temp_dir
-    temp_dir="$(mktemp -d)"
-    print_info "Extraction de la toolchain dans ${TOOLCHAIN_INSTALL_DIR}"
-    if ! tar -xf "${archive_path}" -C "${temp_dir}"; then
-        rm -rf "${temp_dir}"
+    rm -rf "${TOOLCHAIN_INSTALL_DIR}"
+    mkdir -p "${TOOLCHAIN_INSTALL_DIR}"
+
+    local tar_args=(-xf "${archive_path}" --strip-components=1 -C "${TOOLCHAIN_INSTALL_DIR}")
+    tar_args+=("--exclude=*/share/doc/*" "--exclude=*/share/info/*" "--exclude=*/share/man/*")
+
+    print_info "Extraction de la toolchain dans ${TOOLCHAIN_INSTALL_DIR} (compression .xz multi-threads si disponible)"
+
+    local extraction_status=0
+    if [[ "${archive_path}" == *.tar.xz && -z "${XZ_OPT:-}" ]]; then
+        if command -v xz >/dev/null 2>&1; then
+            if ! XZ_OPT="--threads=0" tar "${tar_args[@]}"; then
+                extraction_status=$?
+            fi
+        elif ! tar "${tar_args[@]}"; then
+            extraction_status=$?
+        fi
+    elif ! tar "${tar_args[@]}"; then
+        extraction_status=$?
+    fi
+
+    if (( extraction_status != 0 )); then
+        rm -rf "${TOOLCHAIN_INSTALL_DIR}"
         print_error "Échec lors de l'extraction de la toolchain"
         exit 1
     fi
-
-    rm -rf "${TOOLCHAIN_INSTALL_DIR}"
-    mkdir -p "${TOOLCHAIN_INSTALL_DIR}"
-    mv "${temp_dir}/riscv" "${TOOLCHAIN_INSTALL_DIR}/"
-    rm -rf "${temp_dir}"
-
-    export PATH="${TOOLCHAIN_BIN_DIR}:${PATH}"
 
     if [[ ! -x "${toolchain_gcc}" ]]; then
         print_error "La toolchain téléchargée ne contient pas ${TOOLCHAIN_PREFIX}gcc. Vérifiez l'archive (${TOOLCHAIN_URL})."
         exit 1
     fi
+
+    export PATH="${TOOLCHAIN_BIN_DIR}:${PATH}"
 
     print_info "Toolchain RISC-V installée localement dans ${TOOLCHAIN_INSTALL_DIR}"
 }
