@@ -31,16 +31,19 @@ Ce document détaille la procédure complète pour compiler et flasher le firmwa
 
 ## 3. Mise en mode bootloader et flash
 
-1. Démarrez le script de flash :
+1. Lancez l'assistant interactif :
    ```bash
-   ./flash_automation.sh
+   python3 flash.py
    ```
-2. Le script vérifie la présence du fichier `klipper.bin`, puis vous invite à placer manuellement le module en mode bootloader :
+   Utilisez l'option `--dry-run` pour valider le parcours sans écrire sur la carte. L'assistant rappelle les prérequis (connexion réseau/USB, sauvegardes, checksum du firmware), puis enchaîne automatiquement les vérifications avant de déclencher `wchisp`.
+2. Lorsque le programme vous le demande, placez manuellement le module en mode bootloader :
    1. Maintenez le bouton **BOOT0** enfoncé.
    2. Appuyez puis relâchez le bouton **RESET**.
    3. Relâchez le bouton **BOOT0**.
    4. Revenez dans le terminal et appuyez sur Entrée pour lancer `wchisp`.
-3. L'utilitaire `wchisp` programme ensuite la puce avec la commande `wchisp -d 30 -c ch32v20x flash ${KLIPPER_FIRMWARE_PATH:-.cache/klipper/out/klipper.bin}` et affiche un message de confirmation en fin d'opération. Si le firmware est stocké ailleurs, exportez `KLIPPER_FIRMWARE_PATH` avant de lancer le script.
+3. L'assistant exécute ensuite `wchisp` (commande par défaut : `wchisp -d 30 -c ch32v20x flash ${KLIPPER_FIRMWARE_PATH:-.cache/klipper/out/klipper.bin}`) et affiche un message de confirmation en fin d'opération. Si le firmware est stocké ailleurs, exportez `KLIPPER_FIRMWARE_PATH` avant de lancer `python3 flash.py`.
+
+> 💡 Besoin d'un mode totalement non interactif ? Le script `./flash_automation.sh` reste disponible ; il applique les mêmes vérifications mais sans guidage étape par étape.
 
 ## 4. Variantes sans bouton BOOT / connecteur USB-C
 
