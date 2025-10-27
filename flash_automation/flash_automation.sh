@@ -49,7 +49,12 @@ readonly DEFAULT_FIRMWARE_RELATIVE_PATH=".cache/klipper/out/klipper.bin"
 FIRMWARE_DISPLAY_PATH="${KLIPPER_FIRMWARE_PATH:-${DEFAULT_FIRMWARE_RELATIVE_PATH}}"
 readonly FIRMWARE_DISPLAY_PATH
 readonly FIRMWARE_FILE="$(resolve_path_relative_to_flash_root "${FIRMWARE_DISPLAY_PATH}")"
-readonly WCHISP_BIN="${WCHISP_BIN:-wchisp}"
+readonly TOOLS_ROOT="${CACHE_ROOT}/tools"
+readonly WCHISP_CACHE_DIR="${TOOLS_ROOT}/wchisp"
+readonly WCHISP_RELEASE="${WCHISP_RELEASE:-v0.3.0}"
+readonly WCHISP_AUTO_INSTALL="${WCHISP_AUTO_INSTALL:-true}"
+readonly WCHISP_BASE_URL="${WCHISP_BASE_URL:-https://github.com/ch32-rs/wchisp/releases/download}"
+WCHISP_COMMAND="${WCHISP_BIN:-wchisp}"
 readonly WCHISP_TARGET="${WCHISP_TARGET:-ch32v20x}"
 readonly WCHISP_DELAY="${WCHISP_DELAY:-30}"
 
@@ -108,12 +113,94 @@ function command_exists() {
     fi
 }
 
+ensure_wchisp() {
+    if command_exists "${WCHISP_COMMAND}"; then
+        return
+    fi
+
+    if [[ "${WCHISP_AUTO_INSTALL}" != "true" ]]; then
+        log_message "ERROR" "wchisp est introuvable et l'installation automatique est désactivée."
+        echo "La dépendance 'wchisp' est introuvable. Exportez WCHISP_BIN ou activez WCHISP_AUTO_INSTALL=true pour autoriser le téléchargement automatique."
+        exit 1
+    fi
+
+    if ! command_exists curl; then
+        log_message "ERROR" "Impossible d'installer wchisp automatiquement: curl est absent."
+        echo "curl est requis pour installer automatiquement wchisp. Installez curl ou wchisp manuellement."
+        exit 1
+    fi
+
+    if ! command_exists tar; then
+        log_message "ERROR" "Impossible d'installer wchisp automatiquement: tar est absent."
+        echo "tar est requis pour installer automatiquement wchisp. Installez tar ou wchisp manuellement."
+        exit 1
+    fi
+
+    local arch asset url
+    arch="$(uname -m)"
+
+    case "${arch}" in
+        x86_64|amd64)
+            asset="wchisp-${WCHISP_RELEASE}-linux-x64.tar.gz"
+            ;;
+        aarch64|arm64)
+            asset="wchisp-${WCHISP_RELEASE}-linux-aarch64.tar.gz"
+            ;;
+        *)
+            log_message "ERROR" "Aucun binaire wchisp pré-compilé disponible pour ${arch}."
+            echo "Aucun binaire wchisp pré-compilé n'est disponible pour l'architecture ${arch}. Installez l'outil manuellement et re-lancez."
+            exit 1
+            ;;
+    esac
+
+    url="${WCHISP_BASE_URL}/${WCHISP_RELEASE}/${asset}"
+    mkdir -p "${WCHISP_CACHE_DIR}"
+    local archive_path="${WCHISP_CACHE_DIR}/${asset}"
+
+    if [[ ! -f "${archive_path}" ]]; then
+        log_message "INFO" "Téléchargement de wchisp (${url})."
+        if ! curl --fail --location --progress-bar "${url}" -o "${archive_path}"; then
+            rm -f "${archive_path}"
+            log_message "ERROR" "Échec du téléchargement de wchisp depuis ${url}."
+            echo "Échec du téléchargement de wchisp (${url}). Installez wchisp manuellement."
+            exit 1
+        fi
+    else
+        log_message "INFO" "Archive wchisp déjà présente (${archive_path})."
+    fi
+
+    local install_dir="${WCHISP_CACHE_DIR}/${WCHISP_RELEASE}-${arch}"
+    rm -rf "${install_dir}"
+    mkdir -p "${install_dir}"
+
+    log_message "INFO" "Extraction de wchisp dans ${install_dir}."
+    if ! tar -xf "${archive_path}" --strip-components=1 -C "${install_dir}"; then
+        rm -rf "${install_dir}"
+        log_message "ERROR" "Échec de l'extraction de wchisp depuis ${archive_path}."
+        echo "Impossible d'extraire wchisp. Vérifiez l'archive ou installez l'outil manuellement."
+        exit 1
+    fi
+
+    local candidate="${install_dir}/wchisp"
+    if [[ ! -x "${candidate}" ]]; then
+        log_message "ERROR" "Le binaire wchisp est introuvable après extraction (${candidate})."
+        echo "Le binaire wchisp est manquant après extraction. Installez l'outil manuellement."
+        exit 1
+    fi
+
+    WCHISP_COMMAND="${candidate}"
+    log_message "INFO" "wchisp disponible localement via ${WCHISP_COMMAND}."
+    echo "wchisp installé automatiquement dans ${install_dir}."
+}
+
 function verify_dependencies() {
     CURRENT_STEP="Étape 0: Initialisation"
     echo "=== ${CURRENT_STEP} ==="
     log_message "INFO" "Vérification des dépendances."
 
-    local dependencies=("${WCHISP_BIN}" "sha256sum" "stat")
+    ensure_wchisp
+
+    local dependencies=("${WCHISP_COMMAND}" "sha256sum" "stat")
     for dep in "${dependencies[@]}"; do
         if ! command_exists "${dep}"; then
             log_message "ERROR" "Dépendance manquante: ${dep}"
@@ -169,9 +256,9 @@ INSTRUCTIONS
 function flash_firmware() {
     CURRENT_STEP="Étape 3: Flashage du firmware"
     echo "=== ${CURRENT_STEP} ==="
-    log_message "INFO" "Début de la commande de flashage via ${WCHISP_BIN}."
+    log_message "INFO" "Début de la commande de flashage via ${WCHISP_COMMAND}."
 
-    local cmd=("${WCHISP_BIN}" -d "${WCHISP_DELAY}" -c "${WCHISP_TARGET}" flash "${FIRMWARE_FILE}")
+    local cmd=("${WCHISP_COMMAND}" -d "${WCHISP_DELAY}" -c "${WCHISP_TARGET}" flash "${FIRMWARE_FILE}")
     log_message "DEBUG" "Commande exécutée: ${cmd[*]}"
 
     echo "Flashage du firmware..."

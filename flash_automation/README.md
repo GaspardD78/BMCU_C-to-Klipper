@@ -9,6 +9,10 @@ flash (manuel ou distant).
 - Linux/macOS récent avec `bash`, `git`, `python3` (≥ 3.10) et `pip`.
 - Accès réseau/USB au BMCU-C.
 - Outils additionnels pour le flash local : `wchisp`, `sha256sum`, `stat`.
+  - `flash_automation.sh` télécharge automatiquement `wchisp` depuis les
+    releases GitHub officielles (`.cache/tools/wchisp/`) lorsque l'outil est
+    absent du système et que `WCHISP_AUTO_INSTALL` vaut `true` (comportement
+    par défaut).
 - Outils additionnels pour l'automatisation distante : `ipmitool`, `sshpass`,
   `scp`, `ping`.
 
@@ -16,7 +20,9 @@ flash (manuel ou distant).
 > dans `.cache/` si elles sont absentes.
 > ⚠️ Sur Raspberry Pi OS / Armbian (ARM64), installez manuellement une toolchain compatible
 > puis exportez `CROSS_PREFIX` (voir le README principal pour des commandes détaillées).
-> 💡 Installez `wchisp` via `python3 -m pip install --user wchisp` si l'outil n'est pas encore disponible.
+> 💡 Désactivez l'installation automatique en exportant `WCHISP_AUTO_INSTALL=false`
+> si vous préférez gérer manuellement l'outil (paquet distribution, build
+> local, etc.).
 
 ## 🚀 Démarrage rapide
 
@@ -48,6 +54,12 @@ python3 flash.py
 | `KLIPPER_SRC_DIR` | Répertoire Klipper à réutiliser (aucun clone/checkout automatique) | `flash_automation/.cache/klipper` |
 | `KLIPPER_FIRMWARE_PATH` | Firmware attendu par `flash_automation.sh` | `.cache/klipper/out/klipper.bin` |
 | `CROSS_PREFIX` | Toolchain RISC-V installée manuellement | `riscv32-unknown-elf-` |
+| `TOOLCHAIN_RELEASE` | Tag de la toolchain RISC-V officielle à télécharger | `2025.10.18` |
+| `TOOLCHAIN_ARCHIVE_X86_64` | Nom d'archive utilisé pour `TOOLCHAIN_RELEASE` | `riscv32-elf-ubuntu-22.04-gcc.tar.xz` |
+| `TOOLCHAIN_BASE_URL` | Base des téléchargements toolchain (concaténée avec l'archive) | `https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/${TOOLCHAIN_RELEASE}` |
+| `WCHISP_AUTO_INSTALL` | Autoriser le téléchargement automatique de `wchisp` | `true` |
+| `WCHISP_RELEASE` | Tag GitHub utilisé pour récupérer `wchisp` | `v0.3.0` |
+| `WCHISP_BASE_URL` | Base des URL de téléchargement `wchisp` | `https://github.com/ch32-rs/wchisp/releases/download` |
 
 Les journaux et rapports d'échec sont écrits dans `logs/` avec horodatage.
 
