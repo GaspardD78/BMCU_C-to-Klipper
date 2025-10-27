@@ -10,6 +10,7 @@ CFLAGS += -Isrc/ch32v20x -Isrc/generic -DCH32V20X
 
 src-y += generic/riscv_start.S generic/riscv_irq.c generic/timer_irq.c
 src-y += generic/crc16_ccitt.c generic/alloc.c generic/stdlib.c generic/setjmp.c
+src-y += generic/byteswap_compat.c generic/ctz_compat.c
 src-y += ch32v20x/system.c ch32v20x/main.c ch32v20x/clock.c
 src-y += ch32v20x/gpio.c ch32v20x/timer.c
 src-$(CONFIG_SERIAL) += ch32v20x/usart.c generic/serial_irq.c
