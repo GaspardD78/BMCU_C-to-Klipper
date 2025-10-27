@@ -107,12 +107,25 @@ Chaque dossier peut vivre comme un dépôt Git indépendant : il contient sa doc
 
    Dans les deux cas, exportez `CROSS_PREFIX` dans votre shell ou dans `/etc/profile.d/` pour que `flash_automation/build.sh` utilise la toolchain fournie.
 
-3. **Cloner ce dépôt** :
+3. **Récupérer les scripts nécessaires** :
 
-   ```bash
-   git clone https://github.com/bambulabs-community/BMCU_C-to-Klipper.git
-   cd BMCU_C-to-Klipper
-   ```
+   - **Option complète** – cloner tout le dépôt :
+
+     ```bash
+    git clone https://github.com/GaspardD78/BMCU_C-to-Klipper.git
+     cd BMCU_C-to-Klipper
+     ```
+
+   - **Option minimale** – ne récupérer que `flash_automation/` pour le flashage :
+
+     ```bash
+    git clone --depth 1 --filter=blob:none --sparse \
+      https://github.com/GaspardD78/BMCU_C-to-Klipper.git bmcu-flash
+     cd bmcu-flash
+     git sparse-checkout set flash_automation
+     ```
+
+     > 📦 Les scripts de flash et leurs dépendances se trouvent alors dans le sous-dossier `flash_automation/` sans télécharger le reste du dépôt.
 
    > ⚠️ **Point de vigilance Git :** si vous exécutez ces commandes via une session SSH (voir section dédiée), chargez votre clé dans l'agent (`ssh-add ~/.ssh/id_ed25519`) avant `git clone` pour éviter un échec d'authentification.
 
