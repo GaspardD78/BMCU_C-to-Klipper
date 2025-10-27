@@ -27,7 +27,7 @@ Ce document détaille la procédure complète pour compiler et flasher le firmwa
 
 1. Démarrez le script de flash :
    ```bash
-   ./firmware/flash.sh
+   ./firmware/flash_automation.sh
    ```
 2. Le script vérifie la présence du fichier `klipper.bin`, puis vous invite à placer manuellement le module en mode bootloader :
    1. Maintenez le bouton **BOOT0** enfoncé.
@@ -59,4 +59,4 @@ Certaines cartes BMCU-C récentes sont dépourvues de bouton **BOOT0** et **RESE
 
 ⚠️ Évitez de brancher ou débrancher la BMCU pendant que l'imprimante est sous tension. Pour les tests, suivez la séquence : éteindre l'imprimante, connecter la BMCU, allumer l'imprimante, vérifier la détection de l'AMS, éteindre l'imprimante, puis déconnecter la BMCU.
 
-Ces indications complètent la méthode de flash automatique (`flash.sh`) et doivent être utilisées lorsque la mise en mode bootloader physique n'est pas possible.
+Ces indications complètent la méthode de flash automatique (`flash_automation.sh`) et doivent être utilisées lorsque la mise en mode bootloader physique n'est pas possible.

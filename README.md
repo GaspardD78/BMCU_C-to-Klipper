@@ -133,7 +133,7 @@ Tout le nécessaire pour compiler et flasher le firmware Klipper se trouve dans 
 3. Suivez les questions affichées par le script (sélection du port série, confirmation du firmware, etc.).
 4. Pour des scénarios avancés :
    - Automatisation : `python3 firmware/flashBMCUtoKlipper_automation.py`
-   - Flash bas niveau : `./firmware/flash.sh`
+   - Flash bas niveau : `./firmware/flash_automation.sh`
 
 ### 1.4 Vérifier le flash
 

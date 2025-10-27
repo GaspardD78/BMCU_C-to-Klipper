@@ -27,7 +27,7 @@ Cette archive contient les scripts et la configuration nécessaires pour compile
 **Contenu :**
 - `build.sh` : Script pour compiler le firmware Klipper.
 - `flash.py` : Assistant interactif pour flasher le firmware.
-- `flash.sh` : Script de flashage bas niveau (pour utilisateurs avancés).
+- `flash_automation.sh` : Script de flashage bas niveau avec journalisation (pour utilisateurs avancés).
 - `klipper.config` : Fichier de configuration Klipper pour le BMCU-C.
 
 **Installation :**
@@ -39,7 +39,7 @@ Cette archive est destinée aux utilisateurs avancés souhaitant automatiser le 
 
 **Contenu :**
 - `flashBMCUtoKlipper_automation.py` : Script Python pour l'automatisation du flash.
-- `flash_automation.sh` : Script shell d'exemple utilisant le script Python.
+- `flash_automation.sh` : Script shell d'exemple utilisant le script Python ou exécutable en mode autonome.
 
 **Utilisation :**
 Consultez la section "Automatiser le flash" dans le `README.md` pour les détails sur les paramètres et l'utilisation.
