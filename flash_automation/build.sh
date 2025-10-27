@@ -25,8 +25,26 @@ OVERRIDES_DIR="${FLASH_ROOT}/klipper_overrides"
 TOOLCHAIN_PREFIX="${CROSS_PREFIX:-riscv32-unknown-elf-}"
 TOOLCHAIN_CACHE_DIR="${CACHE_ROOT}/toolchains"
 TOOLCHAIN_RELEASE="2025.10.18"
-TOOLCHAIN_ARCHIVE="riscv32-elf-ubuntu-22.04-gcc.tar.xz"
-TOOLCHAIN_URL="https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/${TOOLCHAIN_RELEASE}/${TOOLCHAIN_ARCHIVE}"
+TOOLCHAIN_ARCHIVE_X86_64="riscv32-elf-ubuntu-22.04-gcc.tar.xz"
+TOOLCHAIN_BASE_URL="https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/${TOOLCHAIN_RELEASE}"
+HOST_ARCH="$(uname -m)"
+SUPPORTED_AUTO_TOOLCHAIN_ARCHS=("x86_64" "amd64")
+AUTO_TOOLCHAIN_SUPPORTED="false"
+for arch in "${SUPPORTED_AUTO_TOOLCHAIN_ARCHS[@]}"; do
+    if [[ "${HOST_ARCH}" == "${arch}" ]]; then
+        AUTO_TOOLCHAIN_SUPPORTED="true"
+        break
+    fi
+done
+
+if [[ "${AUTO_TOOLCHAIN_SUPPORTED}" == "true" ]]; then
+    TOOLCHAIN_ARCHIVE="${TOOLCHAIN_ARCHIVE_X86_64}"
+    TOOLCHAIN_URL="${TOOLCHAIN_BASE_URL}/${TOOLCHAIN_ARCHIVE}"
+else
+    TOOLCHAIN_ARCHIVE=""
+    TOOLCHAIN_URL=""
+fi
+
 TOOLCHAIN_INSTALL_DIR="${TOOLCHAIN_CACHE_DIR}/riscv32-elf-${TOOLCHAIN_RELEASE}"
 TOOLCHAIN_BIN_DIR="${TOOLCHAIN_INSTALL_DIR}/riscv/bin"
 KLIPPER_REPO_URL="${KLIPPER_REPO_URL:-https://github.com/Klipper3d/klipper.git}"
@@ -59,11 +77,16 @@ print_error() {
 
 bootstrap_toolchain() {
     if [[ -n "${CROSS_PREFIX:-}" ]]; then
-        print_error "${TOOLCHAIN_PREFIX}gcc est introuvable et CROSS_PREFIX est défini. Veuillez installer la toolchain correspondante ou corriger CROSS_PREFIX."
+        print_error "${TOOLCHAIN_PREFIX}gcc est introuvable alors que CROSS_PREFIX est défini. Installez la toolchain pointée par CROSS_PREFIX ou ajustez sa valeur (voir README pour les options ARM)."
         exit 1
     fi
 
     local toolchain_gcc="${TOOLCHAIN_BIN_DIR}/${TOOLCHAIN_PREFIX}gcc"
+
+    if [[ "${AUTO_TOOLCHAIN_SUPPORTED}" != "true" ]]; then
+        print_error "Téléchargement automatique indisponible sur l'architecture ${HOST_ARCH}. Installez une toolchain RISC-V compatible puis relancez en exportant CROSS_PREFIX vers son préfixe binaire (ex. /opt/riscv/bin/riscv-none-elf-)."
+        exit 1
+    fi
 
     if [[ -x "${toolchain_gcc}" ]]; then
         export PATH="${TOOLCHAIN_BIN_DIR}:${PATH}"

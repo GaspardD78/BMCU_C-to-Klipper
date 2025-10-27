@@ -12,8 +12,11 @@ flash (manuel ou distant).
 - Outils additionnels pour l'automatisation distante : `ipmitool`, `sshpass`,
   `scp`, `ping`.
 
-> 💡 La toolchain RISC-V et les sources Klipper sont téléchargées automatiquement
+> 💡 Sur hôte x86_64, la toolchain RISC-V et les sources Klipper sont téléchargées automatiquement
 > dans `.cache/` si elles sont absentes.
+> ⚠️ Sur Raspberry Pi OS / Armbian (ARM64), installez manuellement une toolchain compatible
+> puis exportez `CROSS_PREFIX` (voir le README principal pour des commandes détaillées).
+> 💡 Installez `wchisp` via `python3 -m pip install --user wchisp` si l'outil n'est pas encore disponible.
 
 ## 🚀 Démarrage rapide
 
