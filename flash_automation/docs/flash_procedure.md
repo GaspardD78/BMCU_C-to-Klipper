@@ -17,7 +17,7 @@ Ce document détaille la procédure complète pour compiler et flasher le firmwa
    ```bash
    ./build.sh
    ```
-2. Le script prépare l'environnement de compilation et produit un binaire `.cache/klipper/out/klipper.bin` qui sera ensuite flashé sur le BMCU-C.
+2. Le script prépare l'environnement de compilation et produit un binaire `.cache/klipper/out/klipper.bin` (chemin par défaut). Sur un hôte disposant déjà d'une installation Klipper fonctionnelle, exportez `KLIPPER_SRC_DIR=/chemin/vers/klipper` avant d'exécuter `./build.sh` pour réutiliser cette arborescence.
 
 ## 3. Mise en mode bootloader et flash
 
@@ -30,7 +30,7 @@ Ce document détaille la procédure complète pour compiler et flasher le firmwa
    2. Appuyez puis relâchez le bouton **RESET**.
    3. Relâchez le bouton **BOOT0**.
    4. Revenez dans le terminal et appuyez sur Entrée pour lancer `wchisp`.
-3. L'utilitaire `wchisp` programme ensuite la puce avec la commande `wchisp -d 30 -c ch32v20x flash .cache/klipper/out/klipper.bin` et affiche un message de confirmation en fin d'opération.
+3. L'utilitaire `wchisp` programme ensuite la puce avec la commande `wchisp -d 30 -c ch32v20x flash ${KLIPPER_FIRMWARE_PATH:-.cache/klipper/out/klipper.bin}` et affiche un message de confirmation en fin d'opération. Si le firmware est stocké ailleurs, exportez `KLIPPER_FIRMWARE_PATH` avant de lancer le script.
 
 ## 4. Variantes sans bouton BOOT / connecteur USB-C
 
@@ -41,7 +41,7 @@ Certaines cartes BMCU-C récentes sont dépourvues de bouton **BOOT0** et **RESE
    - *Chip Model* : `CH32V203`
    - *Download Type* : `Serial Port`
    - *DI – Baud Rate* : `1M`
-   - *User File* : sélectionnez le firmware `.cache/klipper/out/klipper.bin` généré à l'étape précédente.
+   - *User File* : sélectionnez le firmware `${KLIPPER_FIRMWARE_PATH:-.cache/klipper/out/klipper.bin}` généré à l'étape précédente.
    - Cochez l'option **Serial Auto DI**.
 3. **Enchaînez les actions dans l'ordre suivant** jusqu'à obtenir un flash réussi : `Remove Protect` → `Download` → `Remove Protect` → `Download`.
    - Il est normal que la première itération échoue ; le second passage aboutit généralement.

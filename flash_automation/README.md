@@ -30,7 +30,10 @@ python3 flash.py
 - `build.sh` clone Klipper depuis `$KLIPPER_REPO_URL` (défaut : dépôt officiel)
   et applique les correctifs présents dans `klipper_overrides/` avant de lancer
   la compilation.
-- Le binaire généré est disponible dans `.cache/klipper/out/klipper.bin`.
+- Par défaut, le binaire généré est disponible dans `.cache/klipper/out/klipper.bin`.
+  Si Klipper est déjà installé ailleurs, exportez `KLIPPER_SRC_DIR=/chemin/vers/klipper`
+  avant `./build.sh` pour réutiliser cet environnement et `KLIPPER_FIRMWARE_PATH`
+  pour pointer `flash_automation.sh` vers le firmware compilé.
 - `flash.py` propose une interface interactive haut-niveau ;
   `flash_automation.sh` fournit une version minimale (terminal) ;
   `flashBMCUtoKlipper_automation.py` permet l'orchestration distante (CI/batch).
@@ -42,6 +45,8 @@ python3 flash.py
 | `KLIPPER_REPO_URL` | URL du dépôt Klipper à cloner | `https://github.com/Klipper3d/klipper.git` |
 | `KLIPPER_REF` | Branche/tag/commit à utiliser | `master` |
 | `KLIPPER_CLONE_DEPTH` | Profondeur du clone `git` | `1` |
+| `KLIPPER_SRC_DIR` | Répertoire Klipper à réutiliser (aucun clone/checkout automatique) | `flash_automation/.cache/klipper` |
+| `KLIPPER_FIRMWARE_PATH` | Firmware attendu par `flash_automation.sh` | `.cache/klipper/out/klipper.bin` |
 | `CROSS_PREFIX` | Toolchain RISC-V installée manuellement | `riscv32-unknown-elf-` |
 
 Les journaux et rapports d'échec sont écrits dans `logs/` avec horodatage.
