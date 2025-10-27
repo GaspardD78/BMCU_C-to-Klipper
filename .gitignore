@@ -15,6 +15,8 @@ dist/
 # Local toolchains & artefacts
 .toolchains/
 flash_automation/.cache/
+flash_automation/out/
+flash_automation/**/out/
 flash_automation/logs/
 
 # macOS/Windows cruft
