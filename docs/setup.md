@@ -10,6 +10,7 @@ Ce document décrit **l'unique procédure** nécessaire pour mettre en service l
   - Klipper : <https://www.klipper3d.org/Installation.html>
   - Happy Hare : <https://github.com/moggieuk/Happy-Hare>
 - Outils de compilation pour RISC-V : `gcc-riscv64-unknown-elf`, `picolibc-riscv64-unknown-elf`.
+  - Si la toolchain n'est pas installée, le script `firmware/build.sh` télécharge automatiquement une version officielle et l'utilise localement.
 - Outil de flashage : `wchisp`.
 
 ## 2. Récupérer les fichiers de l'addon

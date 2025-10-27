@@ -80,6 +80,7 @@ Avant de démarrer, assurez-vous de disposer des éléments suivants :
 
 - Une machine hôte équipée de Python 3.10 ou plus récent.
 - Les outils de compilation RISC-V (`gcc-riscv64-unknown-elf` et `picolibc-riscv64-unknown-elf`).
+  - ✅ Si ces outils ne sont pas disponibles sur la machine, `./firmware/build.sh` peut télécharger automatiquement une toolchain officielle RISC-V et l'utiliser localement.
 - L'accès en lecture/écriture au port série utilisé par le BMCU-C (généralement via l'appartenance au groupe `dialout`).
 - Le sous-module `klipper/` initialisé :
   ```bash
