@@ -49,6 +49,7 @@ Les journaux et rapports d'échec sont écrits dans `logs/` avec horodatage.
 ## 📚 Documentation
 
 - [Procédure complète de flash](./docs/flash_procedure.md)
+- [Retour à l'état initial après échec](./docs/rollback_procedure.md)
 - [Configuration Klipper de référence](./klipper.config)
 - [Correctifs appliqués automatiquement](./klipper_overrides)
 
