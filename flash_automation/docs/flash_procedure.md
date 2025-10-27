@@ -9,7 +9,17 @@ Ce document détaille la procédure complète pour compiler et flasher le firmwa
    - Une interface d'administration (Mainsail ou Fluidd).
    - Le module Happy Hare installé.
   - Les toolchains `gcc-riscv32-unknown-elf`, `picolibc-riscv32-unknown-elf` et l'outil de flash `wchisp` installés sur la machine qui exécutera le flash. Le script `build.sh` peut télécharger automatiquement la toolchain RV32 officielle si nécessaire.
-2. Placez-vous dans le dossier `flash_automation/` (copié ou cloné depuis son dépôt dédié).
+2. Récupérez uniquement le dossier `flash_automation/` si vous ne souhaitez pas cloner tout le dépôt :
+
+   ```bash
+   git clone --depth 1 --filter=blob:none --sparse \
+     https://github.com/GaspardD78/BMCU_C-to-Klipper.git bmcu-flash
+   cd bmcu-flash
+   git sparse-checkout set flash_automation
+   cd flash_automation
+   ```
+
+   > 💡 Si vous disposez déjà d'une copie du dépôt complet, placez-vous simplement dans le dossier `flash_automation/` correspondant.
 
 ## 2. Compilation du firmware
 
