@@ -43,6 +43,8 @@ python3 flash.py
 - `flash.py` propose une interface interactive haut-niveau ;
   `flash_automation.sh` fournit une version minimale (terminal) ;
   `flashBMCUtoKlipper_automation.py` permet l'orchestration distante (CI/batch).
+  `automation_cli.py` centralise ces procédures dans un menu inspiré de KIAUH
+  et consigne toutes les étapes dans `logs/automation_cli.log`.
 
 ## ⚙️ Paramètres utiles
 
