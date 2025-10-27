@@ -265,6 +265,57 @@ fi
 print_info "Copie de la configuration Klipper..."
 cp "${SCRIPT_DIR}/klipper.config" "${KLIPPER_DIR}/.config"
 
+update_cross_prefix() {
+    local config_file="${KLIPPER_DIR}/.config"
+    local normalized_prefix="${TOOLCHAIN_PREFIX}"
+
+    if [[ -z "${normalized_prefix}" ]]; then
+        return
+    fi
+
+    if [[ "${normalized_prefix}" != *- ]]; then
+        normalized_prefix="${normalized_prefix}-"
+    fi
+
+    TOOLCHAIN_PREFIX="${normalized_prefix}"
+
+    if command -v python3 >/dev/null 2>&1; then
+        CONFIG_PATH="${config_file}" \
+        CONFIG_PREFIX="${normalized_prefix}" \
+        python3 - <<'PY'
+import os
+from pathlib import Path
+
+config_path = Path(os.environ["CONFIG_PATH"])
+prefix = os.environ["CONFIG_PREFIX"]
+
+lines = config_path.read_text(encoding="utf-8").splitlines()
+updated = []
+found = False
+
+for line in lines:
+    if line.startswith("CONFIG_CROSS_PREFIX="):
+        if line != f'CONFIG_CROSS_PREFIX="{prefix}"':
+            found = True
+        updated.append(f'CONFIG_CROSS_PREFIX="{prefix}"')
+    else:
+        updated.append(line)
+
+if not any(l.startswith("CONFIG_CROSS_PREFIX=") for l in updated):
+    updated.append(f'CONFIG_CROSS_PREFIX="{prefix}"')
+    found = True
+
+if found:
+    config_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+PY
+    else
+        print_error "python3 est requis pour ajuster CONFIG_CROSS_PREFIX. Veuillez l'installer ou mettre à jour ${config_file} manuellement."
+        exit 1
+    fi
+}
+
+update_cross_prefix
+
 apply_patch() {
     local patch_file="$1"
 
@@ -307,6 +358,6 @@ copy_tree "${OVERRIDES_DIR}/config/boards" "${KLIPPER_DIR}/config/boards"
 print_info "Compilation du firmware Klipper..."
 cd "${KLIPPER_DIR}"
 make clean
-make
+make CROSS_PREFIX="${TOOLCHAIN_PREFIX}"
 
 print_success "Compilation terminée. Le firmware se trouve dans ${KLIPPER_DIR}/out/klipper.bin"
