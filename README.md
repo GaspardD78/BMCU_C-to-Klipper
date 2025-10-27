@@ -23,7 +23,7 @@ Ce guide condense toutes les commandes indispensables pour un premier test. Chaq
    ```bash
    sudo apt update && sudo apt install -y git python3 python3-pip \
        gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf screen
-   git clone https://github.com/BambuMods/BMCU_C-to-Klipper.git
+   git clone --recurse-submodules https://github.com/GaspardD78/BMCU_C-to-Klipper.git
    cd BMCU_C-to-Klipper
    git submodule update --init --recursive
    chmod +x firmware/*.sh
