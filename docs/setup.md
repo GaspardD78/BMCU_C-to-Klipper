@@ -29,9 +29,9 @@ cd BMCU_C-to-Klipper
    ```
 
 2. **Flasher le firmware :**
-   Le script `flash.sh` vous guidera pour mettre le BMCU-C en mode bootloader et flasher le firmware.
+   Le script `flash_automation.sh` vous guidera pour mettre le BMCU-C en mode bootloader et flasher le firmware tout en générant un journal détaillé.
    ```bash
-   ./firmware/flash.sh
+   ./firmware/flash_automation.sh
    ```
 
 ## 4. Installer l'addon sur Klipper
