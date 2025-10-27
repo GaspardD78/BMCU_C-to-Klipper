@@ -15,10 +15,27 @@ Chaque dossier peut vivre comme un dépôt Git indépendant : il contient sa doc
 
 ## ⚙️ Pré-requis matériels & logiciels
 
+```text
+┌──────────────────────────────────────────────┐
+│ Checklist de préparation                     │
+├───────────────────────┬──────────────────────┤
+│ Matériel              │ BMCU-C + USB-C ↔ USB-A │
+│                       │ Hub USB alimenté (opt.) │
+├───────────────────────┼──────────────────────┤
+│ Poste de travail      │ Linux 22.04+ avec accès │
+│                       │ au groupe dialout       │
+├───────────────────────┼──────────────────────┤
+│ Toolchain             │ gcc/picolibc RISC-V OK  │
+├───────────────────────┼──────────────────────┤
+│ Réseau & sauvegarde   │ SSH prêt, script backup │
+└───────────────────────┴──────────────────────┘
+```
+
 1. **Matériel**
    - Un BMCU-C avec câble USB-C vers USB-A.
    - Un ordinateur sous Linux (Ubuntu 22.04+ testé) avec accès au port série (`dialout`).
    - Optionnel : un hub USB alimenté pour éviter les coupures pendant le flash.
+   > ⚠️ **Point de vigilance matériel :** privilégiez un port USB natif (pas de hub passif) et inspectez visuellement le câble pour éviter les micro-coupures durant le flashage.
 2. **Logiciels / paquets système** (copier-coller les commandes ci-dessous) :
 
    ```bash
@@ -26,6 +43,8 @@ Chaque dossier peut vivre comme un dépôt Git indépendant : il contient sa doc
    sudo apt install -y git python3 python3-venv python3-pip make \
        gcc-riscv32-unknown-elf picolibc-riscv32-unknown-elf
    ```
+
+   > ⚠️ **Point de vigilance toolchain :** confirmez la présence de la bonne version avec `riscv32-unknown-elf-gcc --version` et sauvegardez la sortie pour votre rapport d'intervention.
 
    > 💡 Si la toolchain RISC-V n'est pas disponible dans votre distribution, installez le paquet `gcc-riscv32-unknown-elf` depuis [xpack-dev-tools](https://xpack.github.io/dev-tools/riscv-none-elf-gcc/) puis ajoutez-le au `PATH`.
 
@@ -35,6 +54,8 @@ Chaque dossier peut vivre comme un dépôt Git indépendant : il contient sa doc
    git clone https://github.com/bambulabs-community/BMCU_C-to-Klipper.git
    cd BMCU_C-to-Klipper
    ```
+
+   > ⚠️ **Point de vigilance Git :** si vous exécutez ces commandes via une session SSH (voir section dédiée), chargez votre clé dans l'agent (`ssh-add ~/.ssh/id_ed25519`) avant `git clone` pour éviter un échec d'authentification.
 
 ---
 
@@ -62,6 +83,8 @@ source .venv/bin/activate
 pip install -r requirements.txt  # installe pyserial & dépendances
 ```
 
+> ⚠️ **Point de vigilance environnement :** Activez la virtualenv pour chaque session (`source .venv/bin/activate`). Un oubli peut installer des dépendances au mauvais endroit ou déclencher des conflits de version.
+
 > ℹ️ Le script `build.sh` télécharge la toolchain si elle est absente et clone Klipper dans `flash_automation/.cache/klipper`. Aucune configuration manuelle n'est nécessaire.
 
 ### Étape 2 – Compiler Klipper pour le BMCU-C
@@ -71,6 +94,8 @@ pip install -r requirements.txt  # installe pyserial & dépendances
 ```
 
 Attendez la fin de la compilation : le firmware généré (`.cache/klipper/out/klipper.bin`) sera utilisé automatiquement par les scripts de flash.
+
+> ⚠️ **Point de vigilance compilation :** Conservez la sortie du script (`./build.sh | tee build.log`) et calculez `sha256sum .cache/klipper/out/klipper.bin` pour attester de l'intégrité du binaire.
 
 ### Étape 3 – Flasher le microcontrôleur (mode guidé recommandé)
 
@@ -82,6 +107,9 @@ python3 flash.py
 2. Vérifiez le résumé affiché par le script.
 3. Confirmez avec `y` pour lancer le flash.
 4. Attendez le redémarrage du BMCU-C (log « Flash complete »).
+
+> ⚠️ **Point de vigilance sauvegarde :** Dans l'assistant, renseignez la « Commande distante de mise en maintenance » pour lancer un script de sauvegarde (ex. `sudo /opt/bin/backup_bmcu.sh`). Pour une exécution sans interaction, utilisez `flashBMCUtoKlipper_automation.py --backup-command "sudo /opt/bin/backup_bmcu.sh"` afin de capturer l'état avant écriture.
+> ⚠️ **Point de vigilance alimentation :** Évitez la mise en veille de la machine et surveillez la tension USB si vous êtes sur batterie ; une coupure peut corrompre le microcontrôleur.
 
 > Alternative : `./flash_automation.sh` offre un mode non interactif (utilisez `--help` pour la liste des options).
 
@@ -97,9 +125,79 @@ python3 flash.py
 
 - Consultez le guide détaillé : [`flash_automation/docs/flash_procedure.md`](./flash_automation/docs/flash_procedure.md).
 
+> ⚠️ **Point de vigilance post-flash :** Gardez une session locale prête à interrompre l'opération (`Ctrl+C`) si la connexion SSH se coupe pendant le flashage et journalisez les logs dans `logs/flash_$(date +%F).log`.
+
+---
+
+## 🔐 Accès distant et automatisation via SSH
+
+1. **Préparer l'hôte distant**
+   ```bash
+   sudo apt install -y openssh-server
+   sudo systemctl enable --now ssh
+   ```
+   > ⚠️ **Point de vigilance sécurité :** Utilisez exclusivement l'authentification par clé (`PasswordAuthentication no`) et appliquez `chmod 600 ~/.ssh/authorized_keys`.
+
+2. **Valider votre identité**
+   ```bash
+   ssh-keygen -t ed25519 -C "bmcu-maintenance"
+   ssh-copy-id utilisateur@hote-distant
+   ```
+   > ⚠️ **Point de vigilance clé privée :** Stockez les clés temporaires sur un volume chiffré et détruisez-les (`shred`) après l'intervention.
+
+3. **Ouvrir un tunnel sécurisé pour le port série**
+   ```bash
+   ssh -NL 3333:/dev/ttyACM0 utilisateur@hote-distant
+   ```
+   - `-N` évite l'ouverture d'un shell, `-L` expose `/dev/ttyACM0` via le port local `3333`.
+   - Si l'hôte distant ne supporte pas le direct, lancez `socat TCP-LISTEN:3333,reuseaddr,fork FILE:/dev/ttyACM0,raw,echo=0`.
+   > ⚠️ **Point de vigilance device lock :** Coupez les services utilisant déjà `/dev/ttyACM0` (`sudo systemctl stop klipper`) avant l'ouverture du tunnel.
+
+4. **Automatiser build & flash à distance**
+   ```bash
+   ssh utilisateur@hote-distant "cd /opt/BMCU_C-to-Klipper/flash_automation && ./build.sh | tee -a /var/log/bmcu_flash/build.log"
+   ssh -t utilisateur@hote-distant "cd /opt/BMCU_C-to-Klipper/flash_automation && python3 flash.py"
+   ```
+
+   > 💡 **Mode test à blanc :** Activez l'option lorsque l'assistant vous la propose. Pour un run 100 % non interactif, préparez un fichier de paramètres ou appelez directement `python3 flashBMCUtoKlipper_automation.py` avec `--dry-run`, `--backup-command` et les options réseau adaptées.
+
+   Exemple d'automatisation complète :
+
+   ```bash
+   ssh utilisateur@hote-distant "cd /opt/BMCU_C-to-Klipper/flash_automation && python3 flashBMCUtoKlipper_automation.py \
+       --bmc-host 192.168.10.50 \
+       --bmc-user root \
+       --bmc-password '***' \
+       --firmware-file .cache/klipper/out/klipper.bin \
+       --remote-firmware-path /tmp/klipper.bin \
+       --flash-command 'socflash -s {firmware}' \
+       --backup-command '/opt/bin/backup_bmcu.sh' \
+       --dry-run"
+   ```
+   > ⚠️ **Point de vigilance audit :** Archivez les journaux dans `/var/log/bmcu_flash/` avec un horodatage ISO8601 pour chaque passage.
+
+5. **Fermer proprement la session**
+   - `exit` pour fermer la session interactive.
+   - `lsof /dev/ttyACM0` pour vérifier que le port série est libéré.
+   > ⚠️ **Point de vigilance nettoyage :** Supprimez les clés temporaires et réactivez les services (`sudo systemctl start klipper`) seulement après validation du flash.
+
 ---
 
 ## 🐍 Addon Happy Hare (dépôt `addon/`)
+
+```text
+┌────────────────────────────────────────────────────────────┐
+│ Validation Happy Hare                                       │
+├─────────────────────┬───────────────────────────────────────┤
+│ Module chargé       │ bmcu.py détecté par Klipper            │
+├─────────────────────┼───────────────────────────────────────┤
+│ Menus interface     │ Sections BMCU visibles dans Happy Hare │
+├─────────────────────┼───────────────────────────────────────┤
+│ Journal Klipper     │ Pas d'erreur « MCU 'bmcu' shutdown »   │
+├─────────────────────┼───────────────────────────────────────┤
+│ Version firmware    │ Correspond à la build fraîchement flashée │
+└─────────────────────┴───────────────────────────────────────┘
+```
 
 ### Étape 1 – Copier le module dans Klipper
 
@@ -129,6 +227,8 @@ baud: 1250000
 3. Depuis l'interface Happy Hare, assurez-vous que les menus BMCU sont présents.
 
 > Tout le guide d'intégration (dépannage, personnalisation des profils) est disponible dans [`addon/docs/setup.md`](./addon/docs/setup.md).
+
+> ⚠️ **Point de vigilance Klipper :** Surveillez les occurrences de `MCU 'bmcu' shutdown` dans `/tmp/klippy.log` et assurez-vous que la version de firmware signalée correspond à celle fraîchement flashée.
 
 ---
 
