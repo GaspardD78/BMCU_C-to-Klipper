@@ -18,6 +18,7 @@ Chaque dossier peut être versionné séparément ; la documentation et les scri
 3. [Accès distant & automatisation](#accès-distant--automatisation)
 4. [Addon Happy Hare (`addon/`)](#addon-happy-hare-addon)
 5. [Exporter les sous-projets](#exporter-les-sous-projets)
+6. [Changelog & politique de stockage](#changelog--politique-de-stockage)
 
 ---
 
@@ -310,6 +311,15 @@ git commit -m "feat: initial import"
 ```
 
 Les historiques pourront ensuite être fusionnés via `git subtree split` ou `git filter-repo` si nécessaire.
+
+---
+
+## Changelog & politique de stockage
+
+- Le [changelog](./docs/CHANGELOG.md) récapitule les suppressions notables et leur impact sur les utilisateurs.
+- La [politique interne de stockage](./docs/storage_policy.md) décrit les répertoires ignorés, les formats interdits et la commande CI à exécuter avant une Pull Request.
+
+Consultez ces documents avant toute contribution majeure afin de respecter les nouvelles règles de conservation des artefacts.
 
 ---
 
