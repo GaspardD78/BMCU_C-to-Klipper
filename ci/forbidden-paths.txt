@@ -1,0 +1,10 @@
+# Glob patterns describing files or directories that must never be committed.
+# Keep this list focused to avoid blocking legitimate assets.
+flash_automation/.cache/**
+flash_automation/out/**
+flash_automation/**/out/**
+flash_automation/logs/**
+logs/**
+*.bin
+*.elf
+*.hex

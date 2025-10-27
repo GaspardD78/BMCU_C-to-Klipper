@@ -18,6 +18,7 @@ flash_automation/.cache/
 flash_automation/out/
 flash_automation/**/out/
 flash_automation/logs/
+logs/
 
 # macOS/Windows cruft
 .DS_Store
