@@ -121,7 +121,7 @@ Chaque dossier peut vivre comme un dépôt Git indépendant : il contient sa doc
      ```bash
     git clone --depth 1 --filter=blob:none --sparse \
       https://github.com/GaspardD78/BMCU_C-to-Klipper.git bmcu-flash
-     cd bmcu-flash
+      cd bmcu-flash
      git sparse-checkout set flash_automation
      ```
 
