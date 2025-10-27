@@ -15,14 +15,55 @@ Les deux volets peuvent être utilisés ensemble ou séparément selon votre bes
 
 ---
 
+## 🧭 Guide pas à pas (copier-coller prêt à l'emploi)
+
+Ce guide condense toutes les commandes indispensables pour un premier test. Chaque étape peut être copiée et collée telle quelle dans un terminal Linux récent.
+
+1. **Cloner le dépôt et préparer l'environnement**
+   ```bash
+   sudo apt update && sudo apt install -y git python3 python3-pip \
+       gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf screen
+   git clone --recurse-submodules https://github.com/GaspardD78/BMCU_C-to-Klipper.git
+   cd BMCU_C-to-Klipper
+   git submodule update --init --recursive
+   chmod +x firmware/*.sh
+   ```
+
+2. **Compiler le firmware Klipper pour le BMCU-C**
+   ```bash
+   ./firmware/build.sh
+   ls klipper/out/klipper.bin
+   ```
+
+3. **Flasher le microcontrôleur**
+   ```bash
+   python3 firmware/flash.py
+   ```
+   > Répondez aux questions affichées (port série, confirmation du firmware, etc.).
+
+4. **(Optionnel) Installer l'addon Klipper côté Happy Hare**
+   ```bash
+   cp bmcu_addon/bmcu.py <chemin_klipper>/klippy/extras/
+   cp -r bmcu_addon/config/* <chemin_klipper>/config/
+   ```
+
+5. **(Optionnel) Vérifier la communication dans Klipper**
+   ```
+   BMCU_SELECT_GATE GATE=1
+   ```
+   > À saisir dans l'interface Fluidd/Mainsail ou via la console `REPL` de Klipper.
+
+---
+
 ## Sommaire
 
-1. [Pré-requis](#pré-requis)
+1. [Pré-requis détaillés](#pré-requis-détaillés)
 2. [Flashage du BMCU-C (firmware)](#flashage-du-bmcu-c-firmware)
    1. [Préparer l'environnement](#préparer-lenvironnement)
    2. [Compiler Klipper](#compiler-klipper)
    3. [Flasher le microcontrôleur](#flasher-le-microcontrôleur)
    4. [Vérifier le flash](#vérifier-le-flash)
+   5. [Automatiser le flash](#automatiser-le-flash)
 3. [Addon Python pour Klipper (Happy Hare)](#addon-python-pour-klipper-happy-hare)
    1. [Copier les fichiers nécessaires](#copier-les-fichiers-nécessaires)
    2. [Configurer Happy Hare](#configurer-happy-hare)
@@ -33,7 +74,7 @@ Les deux volets peuvent être utilisés ensemble ou séparément selon votre bes
 
 ---
 
-## Pré-requis
+## Pré-requis détaillés
 
 Avant de démarrer, assurez-vous de disposer des éléments suivants :
 
@@ -56,8 +97,11 @@ Tout le nécessaire pour compiler et flasher le firmware Klipper se trouve dans 
 
 ### 1.1 Préparer l'environnement
 
-1. Installez les dépendances système requises pour le cross-compilateur RISC-V.
-2. Ouvrez un terminal et placez-vous à la racine du dépôt :
+1. Installez les dépendances système requises pour le cross-compilateur RISC-V (exemple Debian/Ubuntu) :
+   ```bash
+   sudo apt update && sudo apt install -y gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf git python3 python3-pip screen
+   ```
+2. Placez-vous à la racine du dépôt :
    ```bash
    cd /chemin/vers/BMCU_C-to-Klipper
    ```
@@ -65,7 +109,7 @@ Tout le nécessaire pour compiler et flasher le firmware Klipper se trouve dans 
    ```bash
    git submodule status
    ```
-   Le commit référencé ne doit pas être préfixé par un signe `-`.
+   Le commit référencé ne doit pas être préfixé par un signe `-` (submodule absent).
 
 ### 1.2 Compiler Klipper
 
@@ -73,7 +117,10 @@ Tout le nécessaire pour compiler et flasher le firmware Klipper se trouve dans 
    ```bash
    ./firmware/build.sh
    ```
-2. Patientez jusqu'à la fin de la compilation. Le firmware généré (`klipper.bin`) se trouvera dans `klipper/out/`.
+2. Vérifiez la présence du binaire généré :
+   ```bash
+   ls klipper/out/klipper.bin
+   ```
 3. Si la compilation échoue, vérifiez les messages d'erreur pour confirmer la présence des dépendances et la configuration de `CROSS_PREFIX`.
 
 ### 1.3 Flasher le microcontrôleur
@@ -81,11 +128,11 @@ Tout le nécessaire pour compiler et flasher le firmware Klipper se trouve dans 
 1. Connectez le BMCU-C à votre machine via USB et placez-le en mode bootloader si nécessaire.
 2. Exécutez l'assistant interactif de flash :
    ```bash
-   ./firmware/flash.py
+   python3 firmware/flash.py
    ```
 3. Suivez les questions affichées par le script (sélection du port série, confirmation du firmware, etc.).
 4. Pour des scénarios avancés :
-   - Automatisation : `./firmware/flashBMCUtoKlipper_automation.py`
+   - Automatisation : `python3 firmware/flashBMCUtoKlipper_automation.py`
    - Flash bas niveau : `./firmware/flash.sh`
 
 ### 1.4 Vérifier le flash
