@@ -18,6 +18,7 @@ flash_automation/.cache/
 flash_automation/out/
 flash_automation/**/out/
 flash_automation/logs/
+flash_automation/flash_profile.json
 logs/
 
 # macOS/Windows cruft

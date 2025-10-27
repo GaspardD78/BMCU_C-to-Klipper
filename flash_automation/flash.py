@@ -14,24 +14,29 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-"""Interface interactive pour faciliter l'usage du script d'automatisation.
+"""Interface interactive simplifiée pour la préparation et le flash.
 
-Ce module fournit une CLI conviviale autour de
-``flashBMCUtoKlipper_automation.py``. L'objectif est de guider
-l'utilisateur pas-à-pas, de rappeler les prérequis critiques avant de
-lancer le flash et de générer automatiquement un *prompt* d'assistance en
-cas d'échec. Ce *prompt* peut être copié/collé dans une discussion avec un
-assistant afin d'accélérer le diagnostic.
+Ce module fournit une CLI légère autour de
+``flashBMCUtoKlipper_automation.py`` et ``build.sh``. L'objectif est de
+proposer, dès le clonage du dépôt, un point d'entrée unique pour :
+
+* préparer le firmware Klipper ;
+* lancer le flash via l'hôte passerelle (Raspberry Pi ou CB2) ;
+* limiter au maximum les questions longues ou répétitives.
+
+Les réglages essentiels sont mémorisés pour les exécutions suivantes et
+une assistance reste disponible en cas d'échec.
 """
 
 from __future__ import annotations
 
 import getpass
+import json
 import shlex
 import subprocess
 import sys
 import textwrap
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -108,12 +113,46 @@ class UserChoices:
 
 
 CHECKLIST_ITEMS = [
-    "Le BMCU-C est alimenté et connecté au réseau (ping possible).",
-    "Vous disposez des identifiants SSH/IPMI (utilisateur et mot de passe).",
-    "Le firmware Klipper cible a été généré et son chemin local est connu.",
-    "Toutes les imprimantes/enclos dépendant du BMCU-C sont à l'arrêt.",
-    "Vous avez sauvegardé la configuration actuelle du BMCU-C si nécessaire.",
+    "BMCU branché au Raspberry/CB2.",
+    "Accès SSH fonctionnel vers la passerelle.",
+    "Firmware Klipper disponible (ou à générer).",
 ]
+
+
+CONFIG_FILE = Path(__file__).resolve().with_name("flash_profile.json")
+
+
+@dataclass
+class QuickProfile:
+    """Préférences simplifiées mémorisées entre deux exécutions."""
+
+    gateway_host: str = ""
+    gateway_user: str = "pi"
+    remote_firmware_path: str = "/tmp/klipper_firmware.bin"
+    log_root: str = "logs"
+    wait_for_reboot: bool = True
+
+
+def load_profile() -> QuickProfile:
+    """Charge le profil utilisateur si disponible."""
+
+    if not CONFIG_FILE.exists():
+        return QuickProfile()
+    try:
+        data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return QuickProfile()
+
+    return QuickProfile(**{**asdict(QuickProfile()), **data})
+
+
+def save_profile(profile: QuickProfile) -> None:
+    """Sauvegarde le profil utilisateur."""
+
+    try:
+        CONFIG_FILE.write_text(json.dumps(asdict(profile), indent=2), encoding="utf-8")
+    except OSError as err:
+        print(colorize(f"Impossible d'enregistrer le profil : {err}", Colors.WARNING))
 
 
 # ---------------------------------------------------------------------------
@@ -168,16 +207,6 @@ def ask_text(question: str, *, default: str | None = None, required: bool = True
         return value
 
 
-def ask_int(question: str, *, default: int) -> int:
-    """Demande un entier avec validation."""
-    while True:
-        answer = ask_text(question, default=str(default), required=True)
-        try:
-            return int(answer)
-        except ValueError:
-            print(colorize("Merci de saisir une valeur numérique valide.", Colors.WARNING))
-
-
 def ask_password(question: str) -> str:
     """Demande un mot de passe sans l'afficher."""
     while True:
@@ -195,96 +224,116 @@ def ensure_firmware_path(path_str: str) -> Path:
     return firmware_path
 
 
-def gather_user_choices() -> UserChoices:
-    """Collecte toutes les informations nécessaires."""
+def find_default_firmware() -> Path | None:
+    """Tente de localiser automatiquement le firmware généré."""
+
+    base_dir = Path(__file__).resolve().parent
+    candidates = [
+        base_dir / ".cache/klipper/out/klipper.bin",
+        base_dir / "klipper.bin",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def ask_menu(options: list[str], *, default_index: int = 0) -> int:
+    """Propose un menu numéroté simple."""
+
+    for index, option in enumerate(options, start=1):
+        print(f"  {index}. {option}")
+
+    prompt = colorize("Choix", Colors.OKCYAN) + f" [{default_index + 1}] : "
+    while True:
+        answer = input(prompt).strip()
+        if not answer:
+            return default_index
+        if answer.isdigit():
+            value = int(answer)
+            if 1 <= value <= len(options):
+                return value - 1
+        print(colorize("Merci d'entrer un numéro valide.", Colors.WARNING))
+
+
+def gather_user_choices(profile: QuickProfile) -> UserChoices:
+    """Collecte les informations essentielles en mode simplifié."""
+
     intro_text = f"""
-{colorize("Bienvenue dans l'assistant de flash du BMCU-C vers Klipper.", f"{Colors.BOLD}{Colors.OKBLUE}")}
+{colorize("Assistant BMCU → Klipper", f"{Colors.BOLD}{Colors.OKBLUE}")}
 
-Ce guide interactif va :
-  • rappeler les points de contrôle indispensables ;
-  • collecter les paramètres nécessaires au script
-    `flashBMCUtoKlipper_automation.py` ;
-  • lancer le processus et analyser le résultat ;
-  • en cas d'échec, générer un prompt prêt à l'emploi pour demander
-    de l'aide.
+1. Vérifie trois prérequis.
+2. Récupère les infos minimales.
+3. Lance l'automatisation.
 
-{colorize("⚠️ Cette procédure peut rendre le module inopérant si elle est interrompue ou mal paramétrée. Assurez-vous de comprendre chaque étape avant de poursuivre.", Colors.WARNING)}
+Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
 """
     print_block(intro_text)
 
-    print(colorize("Checklist des prérequis :", Colors.HEADER))
+    print(colorize("Vérifications express :", Colors.HEADER))
     for index, item in enumerate(CHECKLIST_ITEMS, start=1):
         print(f"  {index}. {item}")
     print()
 
-    if not ask_yes_no("Avez-vous validé chacun des points ci-dessus ?", default=True):
-        print(colorize("Veuillez préparer l'environnement puis relancer l'assistant.", Colors.WARNING))
+    if not ask_yes_no("Tout est OK ?", default=True):
+        print(colorize("Préparez l'installation puis relancez l'assistant.", Colors.WARNING))
         sys.exit(0)
 
     print()
-    print(colorize("Paramètres de connexion :", Colors.HEADER))
-    bmc_host = ask_text("Adresse IP ou nom d'hôte du BMC", required=True)
-    bmc_user = ask_text("Utilisateur SSH/IPMI", default="root")
-    bmc_password = ask_password("Mot de passe SSH/IPMI")
-    ssh_port = ask_int("Port SSH", default=22)
-
-    print()
-    print(colorize("Configuration du firmware :", Colors.HEADER))
-    while True:
-        firmware_input = ask_text("Chemin local du firmware Klipper", required=True)
-        try:
-            firmware_file = ensure_firmware_path(firmware_input)
-            break
-        except FileNotFoundError as err:
-            print(err)
-
-    remote_firmware_path = ask_text(
-        "Chemin de destination sur le BMC",
-        default="/tmp/klipper_firmware.bin",
-    )
-    expected_final_version = ask_text(
-        "Version finale attendue (laisser vide pour ignorer)",
-        default="",
-        required=False,
-    )
-    firmware_sha256 = ask_text(
-        "Empreinte SHA-256 attendue (laisser vide pour ignorer)",
-        default="",
-        required=False,
-    )
-
-    print()
-    print(colorize("Commandes et timeouts :", Colors.HEADER))
-    pre_update_command = ask_text(
-        "Commande distante de mise en maintenance (laisser vide pour ignorer)",
-        default="",
-        required=False,
-    )
-    flash_command = ask_text(
-        "Commande de flash (utiliser {firmware} comme placeholder)",
-        default="socflash -s {firmware}",
-    )
-    flash_timeout = ask_int("Timeout de la commande de flash (secondes)", default=1800)
-
-    print()
-    print(colorize("Options de post-vérification :", Colors.HEADER))
-    wait_for_reboot = ask_yes_no("Attendre automatiquement le redémarrage du BMC ?", default=True)
-    if wait_for_reboot:
-        reboot_timeout = ask_int("Timeout de redémarrage (secondes)", default=600)
-        reboot_check_interval = ask_int("Intervalle entre deux vérifications (secondes)", default=10)
+    print(colorize("Connexion passerelle :", Colors.HEADER))
+    host_question = "IP/nom du Raspberry ou CB2"
+    if profile.gateway_host:
+        bmc_host = ask_text(host_question, default=profile.gateway_host)
     else:
-        reboot_timeout = 600
-        reboot_check_interval = 10
+        bmc_host = ask_text(host_question, required=True)
+    profile.gateway_host = bmc_host
 
-    allow_same_version = ask_yes_no(
-        "Accepter que la version finale soit identique à l'initiale ?",
-        default=False,
-    )
+    if profile.gateway_user:
+        bmc_user = ask_text("Utilisateur SSH", default=profile.gateway_user)
+    else:
+        bmc_user = ask_text("Utilisateur SSH", default="pi")
+    profile.gateway_user = bmc_user
+
+    bmc_password = ask_password("Mot de passe SSH")
+    ssh_port = 22
 
     print()
-    print(colorize("Configuration de l'assistant :", Colors.HEADER))
-    dry_run = ask_yes_no("Activer le mode test à blanc (aucune action distante) ?", default=False)
-    log_root_input = ask_text("Répertoire où stocker les journaux", default="logs")
+    print(colorize("Firmware :", Colors.HEADER))
+    detected_firmware = find_default_firmware()
+    firmware_file: Path
+    if detected_firmware and ask_yes_no(
+        f"Utiliser {detected_firmware}?", default=True
+    ):
+        firmware_file = detected_firmware
+    else:
+        while True:
+            firmware_input = ask_text("Chemin du firmware", required=True)
+            try:
+                firmware_file = ensure_firmware_path(firmware_input)
+                break
+            except FileNotFoundError as err:
+                print(err)
+
+    if profile.remote_firmware_path:
+        remote_firmware_path = ask_text(
+            "Chemin distant (SSH)", default=profile.remote_firmware_path
+        )
+    else:
+        remote_firmware_path = ask_text(
+            "Chemin distant (SSH)", default="/tmp/klipper_firmware.bin"
+        )
+    profile.remote_firmware_path = remote_firmware_path
+
+    wait_for_reboot = ask_yes_no(
+        "Attendre le reboot automatique ?", default=profile.wait_for_reboot
+    )
+    profile.wait_for_reboot = wait_for_reboot
+    reboot_timeout = 600
+    reboot_check_interval = 10
+
+    log_default = profile.log_root or "logs"
+    log_root_input = ask_text("Dossier de logs", default=log_default)
+    profile.log_root = log_root_input
     log_root = Path(log_root_input).expanduser().resolve()
 
     return UserChoices(
@@ -294,36 +343,33 @@ Ce guide interactif va :
         firmware_file=firmware_file,
         remote_firmware_path=remote_firmware_path,
         ssh_port=ssh_port,
-        pre_update_command=pre_update_command,
-        flash_command=flash_command,
-        flash_timeout=flash_timeout,
+        pre_update_command="",
+        flash_command="socflash -s {firmware}",
+        flash_timeout=1800,
         wait_for_reboot=wait_for_reboot,
         reboot_timeout=reboot_timeout,
         reboot_check_interval=reboot_check_interval,
-        allow_same_version=allow_same_version,
-        expected_final_version=expected_final_version,
-        firmware_sha256=firmware_sha256,
-        dry_run=dry_run,
+        allow_same_version=False,
+        expected_final_version="",
+        firmware_sha256="",
+        dry_run=False,
         log_root=log_root,
     )
 
 
 def summarize_choices(choices: UserChoices) -> None:
-    """Affiche un résumé des paramètres retenus."""
-    summary = f"""
-    {colorize('Récapitulatif de la configuration sélectionnée :', f'{Colors.BOLD}{Colors.OKBLUE}')}
+    """Affiche un résumé compact des paramètres retenus."""
 
-      • {colorize('BMC', Colors.BOLD)}                  : {choices.bmc_user}@{choices.bmc_host}:{choices.ssh_port}
-      • {colorize('Firmware local', Colors.BOLD)}       : {choices.firmware_file}
-      • {colorize('Chemin distant', Colors.BOLD)}       : {choices.remote_firmware_path}
-      • {colorize('Commande flash', Colors.BOLD)}       : {choices.flash_command}
-      • {colorize('Timeout flash', Colors.BOLD)}        : {choices.flash_timeout} s
-      • {colorize('Attendre reboot', Colors.BOLD)}      : {colorize('oui' if choices.wait_for_reboot else 'non', Colors.OKGREEN if choices.wait_for_reboot else Colors.WARNING)}
-      • {colorize('Autoriser même version', Colors.BOLD)}: {colorize('oui' if choices.allow_same_version else 'non', Colors.WARNING if choices.allow_same_version else Colors.OKGREEN)}
-      • {colorize('Version attendue', Colors.BOLD)}     : {choices.expected_final_version or 'non définie'}
-      • {colorize('Empreinte SHA-256', Colors.BOLD)}    : {choices.firmware_sha256 or 'non vérifiée'}
-      • {colorize('Mode test à blanc', Colors.BOLD)}    : {colorize('oui' if choices.dry_run else 'non', Colors.WARNING if choices.dry_run else Colors.OKGREEN)}
-      • {colorize('Répertoire de logs', Colors.BOLD)}   : {choices.log_root}
+    summary = f"""
+    {colorize('Récapitulatif rapide :', f'{Colors.BOLD}{Colors.OKBLUE}')}
+
+      • {colorize('Passerelle', Colors.BOLD)}     : {choices.bmc_user}@{choices.bmc_host}:{choices.ssh_port}
+      • {colorize('Firmware', Colors.BOLD)}       : {choices.firmware_file}
+      • {colorize('Copie distante', Colors.BOLD)} : {choices.remote_firmware_path}
+      • {colorize('Commande', Colors.BOLD)}       : {choices.flash_command}
+      • {colorize('Timeout', Colors.BOLD)}        : {choices.flash_timeout} s
+      • {colorize('Attendre reboot', Colors.BOLD)}: {colorize('oui' if choices.wait_for_reboot else 'non', Colors.OKGREEN if choices.wait_for_reboot else Colors.WARNING)}
+      • {colorize('Logs', Colors.BOLD)}           : {choices.log_root}
     """
     print_block(summary)
 
@@ -361,6 +407,67 @@ def build_command(choices: UserChoices) -> list[str]:
         command.append("--dry-run")
 
     return command
+
+
+def run_build() -> bool:
+    """Lance le script de build et retourne le succès."""
+
+    build_script = Path(__file__).resolve().with_name("build.sh")
+    if not build_script.exists():
+        print(colorize("Script build.sh introuvable.", Colors.FAIL))
+        return False
+
+    print(colorize("Compilation du firmware Klipper…", Colors.OKBLUE))
+    try:
+        subprocess.run([str(build_script)], check=True)
+    except subprocess.CalledProcessError as err:
+        print(colorize(f"La compilation a échoué (code {err.returncode}).", Colors.FAIL))
+        return False
+
+    print(colorize("✅ Build terminé.", Colors.OKGREEN))
+    return True
+
+
+def run_flash_flow(profile: QuickProfile) -> int:
+    """Enchaîne la collecte d'infos puis le flash."""
+
+    try:
+        choices = gather_user_choices(profile)
+    except KeyboardInterrupt:
+        print(colorize("\nInterruption utilisateur.", Colors.WARNING))
+        return 1
+
+    save_profile(profile)
+    summarize_choices(choices)
+
+    if not ask_yes_no("On lance le flash ?", default=True):
+        print(colorize("Opération annulée.", Colors.WARNING))
+        return 0
+
+    choices.log_root.mkdir(parents=True, exist_ok=True)
+    command = build_command(choices)
+    result = run_automation(command)
+    latest_log_dir = find_latest_log_dir(choices.log_root)
+
+    if result.returncode == 0:
+        print(colorize("\n✅ Flash terminé avec succès !", f"{Colors.BOLD}{Colors.OKGREEN}"))
+        if latest_log_dir is not None:
+            print(f"Journaux : {latest_log_dir}")
+        return 0
+
+    print(colorize(
+        f"\n❌ Le script d'automatisation a signalé une erreur (code de sortie {result.returncode}).",
+        f"{Colors.BOLD}{Colors.FAIL}",
+    ))
+    if latest_log_dir is not None:
+        print(f"Consultez le journal : {latest_log_dir / 'debug.log'}")
+
+    prompt = generate_assistance_prompt(choices, command, latest_log_dir, result.returncode)
+    print(colorize("\n--- Prompt d'assistance suggéré ---", Colors.HEADER))
+    print(prompt)
+    print(colorize("--- Fin du prompt ---", Colors.HEADER) + "\n")
+
+    return result.returncode
 
 
 def run_automation(command: list[str]) -> subprocess.CompletedProcess[None]:
@@ -446,41 +553,43 @@ def generate_assistance_prompt(
 
 
 def main() -> int:
+    """Point d'entrée CLI."""
+
     display_logo()
+    profile = load_profile()
 
-    try:
-        choices = gather_user_choices()
-    except KeyboardInterrupt:
-        print(colorize("\nInterruption par l'utilisateur. Fin de l'assistant.", Colors.WARNING))
-        return 1
+    intro_text = """
+    Bienvenue ! Choisissez une action :
+      1. Construire le firmware Klipper.
+      2. Lancer le flash.
+      3. Quitter.
 
-    summarize_choices(choices)
+    Appuyez sur Entrée pour le choix par défaut.
+    """
+    print_block(intro_text)
 
-    if not ask_yes_no("Confirmez-vous le lancement du flash ?", default=True):
-        print(colorize("Opération annulée. Aucun flash n'a été lancé.", Colors.WARNING))
+    while True:
+        print(colorize("Menu rapide :", Colors.HEADER))
+        selection = ask_menu(
+            [
+                "Préparer le firmware (build.sh)",
+                "Flasher le BMCU",
+                "Quitter",
+            ],
+            default_index=0,
+        )
+
+        if selection == 0:
+            build_success = run_build()
+            if build_success and ask_yes_no("Enchaîner avec le flash ?", default=True):
+                return run_flash_flow(profile)
+            continue
+
+        if selection == 1:
+            return run_flash_flow(profile)
+
+        print(colorize("À bientôt !", Colors.OKBLUE))
         return 0
-
-    choices.log_root.mkdir(parents=True, exist_ok=True)
-    command = build_command(choices)
-    result = run_automation(command)
-    latest_log_dir = find_latest_log_dir(choices.log_root)
-
-    if result.returncode == 0:
-        print(colorize("\n✅ Flash terminé avec succès !", f"{Colors.BOLD}{Colors.OKGREEN}"))
-        if latest_log_dir is not None:
-            print(f"Journaux disponibles dans : {latest_log_dir}")
-        return 0
-
-    print(colorize(f"\n❌ Le script d'automatisation a signalé une erreur (code de sortie {result.returncode}).", f"{Colors.BOLD}{Colors.FAIL}"))
-    if latest_log_dir is not None:
-        print(f"Consultez le journal : {latest_log_dir / 'debug.log'}")
-
-    prompt = generate_assistance_prompt(choices, command, latest_log_dir, result.returncode)
-    print(colorize("\n--- Prompt d'assistance suggéré ---", Colors.HEADER))
-    print(prompt)
-    print(colorize("--- Fin du prompt ---", Colors.HEADER) + "\n")
-
-    return result.returncode
 
 
 if __name__ == "__main__":  # pragma: no cover - point d'entrée CLI
