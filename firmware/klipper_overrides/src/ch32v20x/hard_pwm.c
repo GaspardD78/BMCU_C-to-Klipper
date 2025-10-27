@@ -3,6 +3,7 @@
 #include "compiler.h"
 #include "command.h"
 #include "gpio.h"
+#include "sched.h" // sched_shutdown
 
 #define PWM_MAX 0x10000U
 DECL_CONSTANT("PWM_MAX", PWM_MAX);

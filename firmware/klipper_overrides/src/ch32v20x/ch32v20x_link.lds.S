@@ -1,31 +1,55 @@
+#include "autoconf.h"
+
+#ifndef CONFIG_FLASH_APPLICATION_ADDRESS
+#define CONFIG_FLASH_APPLICATION_ADDRESS 0x00000000
+#endif
+
+#ifndef CONFIG_RAM_START
+#define CONFIG_RAM_START 0x20000000
+#endif
+
+OUTPUT_FORMAT("elf32-littleriscv", "elf32-littleriscv", "elf32-littleriscv")
+OUTPUT_ARCH(riscv)
+ENTRY(_start)
+
 MEMORY
 {
-    FLASH (rx) : ORIGIN = 0x00000000, LENGTH = CONFIG_FLASH_SIZE
-    RAM   (rwx): ORIGIN = 0x20000000, LENGTH = CONFIG_RAM_SIZE
+    flash (rx) : ORIGIN = CONFIG_FLASH_APPLICATION_ADDRESS, LENGTH = CONFIG_FLASH_SIZE
+    ram   (rwx) : ORIGIN = CONFIG_RAM_START, LENGTH = CONFIG_RAM_SIZE
 }
-
-ENTRY(_start)
 
 SECTIONS
 {
     .text : {
+        . = ALIGN(4);
         *(.init)
-        *(.text*)
-        *(.rodata*)
-    } > FLASH
+        *(.text .text.*)
+        *(.rodata .rodata*)
+    } > flash
 
-    .data : AT (ADDR(.text) + SIZEOF(.text)) {
+    . = ALIGN(4);
+    _data_flash = .;
+
+    .data : AT(_data_flash) {
+        . = ALIGN(4);
         _sdata = .;
-        *(.data*)
+        *(.data .data.*)
+        . = ALIGN(4);
         _edata = .;
-    } > RAM
+    } > ram
 
+    . = ALIGN(4);
+    _sbss = .;
     .bss (NOLOAD) : {
-        _sbss = .;
-        *(.bss*)
+        *(.bss .bss.*)
         *(COMMON)
+        . = ALIGN(4);
         _ebss = .;
-    } > RAM
+    } > ram
 
-    _stack_top = ORIGIN(RAM) + LENGTH(RAM);
+    . = ALIGN(4);
+    _end = .;
 }
+
+_stack_top = ORIGIN(ram) + LENGTH(ram);
+PROVIDE(__stack = _stack_top);

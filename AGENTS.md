@@ -36,8 +36,8 @@ Avant de lancer les workflows, assurez-vous que les outils suivants sont disponi
 
 | Outil / Dépendance | Version minimale recommandée | Notes de compatibilité |
 | --- | --- | --- |
-| `gcc-riscv64-unknown-elf` | 13.2.0 | Nécessaire pour compiler le firmware CH32V203. Vérifier que `CROSS_PREFIX` pointe vers `riscv64-unknown-elf-`. |
-| `picolibc-riscv64-unknown-elf` | 1.8 | Bibliothèque standard utilisée lors de la compilation ; installer les headers correspondants. |
+| `gcc-riscv32-unknown-elf` | 13.2.0 | Nécessaire pour compiler le firmware CH32V203. Vérifier que `CROSS_PREFIX` pointe vers `riscv32-unknown-elf-`. |
+| `picolibc-riscv32-unknown-elf` | 1.8 | Bibliothèque standard utilisée lors de la compilation ; installer les headers correspondants. |
 | Python | 3.10 | Requis pour les scripts `flash.py` et les automatisations. Vérifier la présence de `python3` dans le PATH. |
 | `pip` | 23.0 | Utilisé pour installer les dépendances Python (ex. `pyserial`). |
 | `git` | 2.35 | Indispensable pour gérer le submodule `klipper/`. |
@@ -125,7 +125,7 @@ La version du firmware est gérée à l'aide de **tags Git**.
 
 #### Dépannage
 
-- **Erreur : `riscv64-unknown-elf-gcc: command not found`** → Vérifier que le compilateur est installé et que le PATH contient le dossier des binaires.
+- **Erreur : `riscv32-unknown-elf-gcc: command not found`** → Vérifier que le compilateur est installé et que le PATH contient le dossier des binaires.
 - **Erreur de permission sur `build.sh`** → Donner les droits d'exécution : `chmod +x firmware/build.sh`.
 - **Sous-module Klipper non initialisé** → Exécuter `git submodule update --init --recursive` avant la compilation.
 
@@ -160,7 +160,7 @@ Pour nettoyer les fichiers générés par la compilation :
 
 - **Submodule Klipper :** Le répertoire `klipper/` est un submodule. Pour le mettre à jour, utilisez les commandes `git submodule sync` et `git submodule update --init --recursive`.
 - **Protocole "bambubus" :** Il s'agit d'un protocole de communication série complexe et non standard. Toute modification liée à ce protocole nécessite une compréhension approfondie de son fonctionnement (baud rate de 1,250,000, checksums CRC8 DVB-S2 et CRC16 custom).
-- **Environnement de Compilation :** La compilation pour le microcontrôleur CH32V203 requiert `gcc-riscv64-unknown-elf` et `picolibc-riscv64-unknown-elf`. La variable `CROSS_PREFIX` dans `klipper/src/ch32v20x/Makefile` doit être correctement définie (`riscv64-unknown-elf-`).
+- **Environnement de Compilation :** La compilation pour le microcontrôleur CH32V203 requiert `gcc-riscv32-unknown-elf` et `picolibc-riscv32-unknown-elf`. La variable `CROSS_PREFIX` dans `klipper/src/ch32v20x/Makefile` doit être correctement définie (`riscv32-unknown-elf-`).
 - **Documentation externe recommandée :**
   - Protocole bambubus : [https://github.com/bambulab/BambuBus-protocol](https://github.com/bambulab/BambuBus-protocol)
   - Microcontrôleur CH32V203 : [https://www.wch-ic.com/products/CH32V203.html](https://www.wch-ic.com/products/CH32V203.html)
