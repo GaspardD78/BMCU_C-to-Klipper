@@ -8,7 +8,7 @@ Ce document détaille la procédure complète pour compiler et flasher le firmwa
    - Une instance Klipper fonctionnelle avec accès SSH.
    - Une interface d'administration (Mainsail ou Fluidd).
    - Le module Happy Hare installé.
-   - Les toolchains `gcc-riscv64-unknown-elf`, `picolibc-riscv64-unknown-elf` et l'outil de flash `wchisp` installés sur la machine qui exécutera le flash.
+  - Les toolchains `gcc-riscv32-unknown-elf`, `picolibc-riscv32-unknown-elf` et l'outil de flash `wchisp` installés sur la machine qui exécutera le flash. Le script `firmware/build.sh` peut télécharger automatiquement la toolchain RV32 officielle si nécessaire.
 2. Récupérez ce dépôt ainsi que ses sous-modules :
    ```bash
    git clone --recurse-submodules https://github.com/GaspardD78/BMCU_C-to-Klipper.git

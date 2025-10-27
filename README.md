@@ -20,14 +20,13 @@ Les deux volets peuvent être utilisés ensemble ou séparément selon votre bes
 Ce guide condense toutes les commandes indispensables pour un premier test. Chaque étape peut être copiée et collée telle quelle dans un terminal Linux récent.
 
 1. **Cloner le dépôt et préparer l'environnement**
-   ```bash
-   sudo apt update && sudo apt install -y git python3 python3-pip \
-       gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf screen
-   git clone --recurse-submodules https://github.com/GaspardD78/BMCU_C-to-Klipper.git
-   cd BMCU_C-to-Klipper
-   git submodule update --init --recursive
-   chmod +x firmware/*.sh
-   ```
+  ```bash
+  sudo apt update && sudo apt install -y git python3 python3-pip screen
+  git clone --recurse-submodules https://github.com/GaspardD78/BMCU_C-to-Klipper.git
+  cd BMCU_C-to-Klipper
+  git submodule update --init --recursive
+  chmod +x firmware/*.sh
+  ```
 
 2. **Compiler le firmware Klipper pour le BMCU-C**
    ```bash
@@ -79,8 +78,8 @@ Ce guide condense toutes les commandes indispensables pour un premier test. Chaq
 Avant de démarrer, assurez-vous de disposer des éléments suivants :
 
 - Une machine hôte équipée de Python 3.10 ou plus récent.
-- Les outils de compilation RISC-V (`gcc-riscv64-unknown-elf` et `picolibc-riscv64-unknown-elf`).
-  - ✅ Si ces outils ne sont pas disponibles sur la machine, `./firmware/build.sh` peut télécharger automatiquement une toolchain officielle RISC-V et l'utiliser localement.
+- Les outils de compilation RISC-V bare-metal (`gcc-riscv32-unknown-elf` et `picolibc-riscv32-unknown-elf`).
+  - ✅ Si ces outils ne sont pas disponibles sur la machine, `./firmware/build.sh` peut télécharger automatiquement une toolchain officielle RV32 et l'utiliser localement.
 - L'accès en lecture/écriture au port série utilisé par le BMCU-C (généralement via l'appartenance au groupe `dialout`).
 - Le sous-module `klipper/` initialisé :
   ```bash
@@ -100,7 +99,7 @@ Tout le nécessaire pour compiler et flasher le firmware Klipper se trouve dans 
 
 1. Installez les dépendances système requises pour le cross-compilateur RISC-V (exemple Debian/Ubuntu) :
    ```bash
-   sudo apt update && sudo apt install -y gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf git python3 python3-pip screen
+   sudo apt update && sudo apt install -y git python3 python3-pip screen
    ```
 2. Placez-vous à la racine du dépôt :
    ```bash

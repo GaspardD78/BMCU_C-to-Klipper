@@ -3,6 +3,7 @@
 #include "command.h"
 #include "compiler.h"
 #include "gpio.h"
+#include "sched.h" // sched_shutdown
 
 DECL_CONSTANT("ADC_MAX", 4095);
 

@@ -44,7 +44,7 @@ irq_poll(void)
 {
 }
 
-static void
+void
 clear_active_irq(void)
 {
     // The ECLIC automatically clears the current vector when the

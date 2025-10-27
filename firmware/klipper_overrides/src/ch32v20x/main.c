@@ -6,7 +6,7 @@
 
 extern void SystemInit(void);
 
-void __attribute__((noreturn))
+void __attribute__((noreturn, used))
 riscv_main(void)
 {
     SystemInit();

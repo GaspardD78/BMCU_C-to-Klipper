@@ -12,6 +12,7 @@
 #include "gpio.h"
 #include "i2ccmds.h" // I2C_BUS_SUCCESS
 #include "pins_bmcu_c.h"
+#include "sched.h" // sched_shutdown
 
 DECL_ENUMERATION_RANGE("pin", "PA0", GPIO('A', 0), 16);
 DECL_ENUMERATION_RANGE("pin", "PB0", GPIO('B', 0), 16);

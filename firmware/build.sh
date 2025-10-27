@@ -21,12 +21,12 @@ REPO_ROOT="${SCRIPT_DIR}/.."
 KLIPPER_DIR="${REPO_ROOT}/klipper"
 LOGO_FILE="${REPO_ROOT}/logo/banner.txt"
 OVERRIDES_DIR="${SCRIPT_DIR}/klipper_overrides"
-TOOLCHAIN_PREFIX="${CROSS_PREFIX:-riscv64-unknown-elf-}"
+TOOLCHAIN_PREFIX="${CROSS_PREFIX:-riscv32-unknown-elf-}"
 TOOLCHAIN_CACHE_DIR="${REPO_ROOT}/.toolchains"
 TOOLCHAIN_RELEASE="2025.10.18"
-TOOLCHAIN_ARCHIVE="riscv64-elf-ubuntu-22.04-gcc.tar.xz"
+TOOLCHAIN_ARCHIVE="riscv32-elf-ubuntu-22.04-gcc.tar.xz"
 TOOLCHAIN_URL="https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/${TOOLCHAIN_RELEASE}/${TOOLCHAIN_ARCHIVE}"
-TOOLCHAIN_INSTALL_DIR="${TOOLCHAIN_CACHE_DIR}/riscv64-elf-${TOOLCHAIN_RELEASE}"
+TOOLCHAIN_INSTALL_DIR="${TOOLCHAIN_CACHE_DIR}/riscv32-elf-${TOOLCHAIN_RELEASE}"
 TOOLCHAIN_BIN_DIR="${TOOLCHAIN_INSTALL_DIR}/riscv/bin"
 
 if [[ -t 1 ]]; then
@@ -151,12 +151,11 @@ ensure_toolchain
 
 declare -A REQUIRED_COMMANDS=(
     [git]="git est requis. Assurez-vous qu'il est installé."
-    [patch]="patch est requis. Installez le paquet patch."
     [make]="make est requis. Installez les outils de compilation (build-essential)."
 )
-REQUIRED_COMMANDS["${TOOLCHAIN_PREFIX}gcc"]="la chaîne d'outils ${TOOLCHAIN_PREFIX}gcc est absente. Installez 'gcc-riscv64-unknown-elf', définissez CROSS_PREFIX ou laissez le script télécharger la toolchain officielle."
+REQUIRED_COMMANDS["${TOOLCHAIN_PREFIX}gcc"]="la chaîne d'outils ${TOOLCHAIN_PREFIX}gcc est absente. Installez 'gcc-riscv32-unknown-elf', définissez CROSS_PREFIX ou laissez le script télécharger la toolchain officielle."
 
-ordered_commands=(git patch make "${TOOLCHAIN_PREFIX}gcc")
+ordered_commands=(git make "${TOOLCHAIN_PREFIX}gcc")
 for cmd in "${ordered_commands[@]}"; do
     require_command "${cmd}" "${REQUIRED_COMMANDS[${cmd}]}"
     print_info "  • ${cmd} ✅"
@@ -186,13 +185,13 @@ apply_patch() {
     local patch_name
     patch_name="$(basename "${patch_file}")"
 
-    if patch -d "${KLIPPER_DIR}" -p1 -R --dry-run --silent < "${patch_file}" 2>/dev/null; then
+    if git -C "${KLIPPER_DIR}" apply --reverse --check "${patch_file}" >/dev/null 2>&1; then
         print_info "Patch ${patch_name} déjà appliqué, passage."
         return
     fi
 
     print_info "Application du patch ${patch_name}..."
-    if ! patch -d "${KLIPPER_DIR}" -p1 -N --silent < "${patch_file}"; then
+    if ! git -C "${KLIPPER_DIR}" apply "${patch_file}"; then
         print_error "Échec lors de l'application de ${patch_name}"
         exit 1
     fi
@@ -209,6 +208,7 @@ copy_tree() {
     fi
 }
 
+apply_patch "${OVERRIDES_DIR}/Makefile.patch"
 apply_patch "${OVERRIDES_DIR}/src/Kconfig.patch"
 copy_tree "${OVERRIDES_DIR}/src/ch32v20x" "${KLIPPER_DIR}/src/ch32v20x"
 copy_tree "${OVERRIDES_DIR}/src/generic" "${KLIPPER_DIR}/src/generic"
