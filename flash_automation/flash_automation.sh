@@ -25,6 +25,17 @@ FLASH_ROOT="${SCRIPT_DIR}"
 CACHE_ROOT="${FLASH_ROOT}/.cache"
 LOGO_FILE="${FLASH_ROOT}/banner.txt"
 
+resolve_path_relative_to_flash_root() {
+    local raw_path="$1"
+    local expanded="${raw_path/#~/${HOME}}"
+
+    if [[ "${expanded}" != /* ]]; then
+        expanded="${FLASH_ROOT}/${expanded}"
+    fi
+
+    printf '%s\n' "${expanded}"
+}
+
 if [[ -f "${LOGO_FILE}" ]]; then
     cat "${LOGO_FILE}"
     echo
@@ -34,8 +45,10 @@ readonly LOG_BASE_DIR="${FLASH_ROOT}/logs"
 readonly LOG_DIR="${LOG_BASE_DIR}/flash_$(date +%Y-%m-%d_%H-%M-%S)"
 readonly LOG_FILE="${LOG_DIR}/flash.log"
 readonly FAILURE_REPORT="${LOG_DIR}/FAILURE_REPORT.txt"
-readonly FIRMWARE_RELATIVE_PATH=".cache/klipper/out/klipper.bin"
-readonly FIRMWARE_FILE="${FLASH_ROOT}/${FIRMWARE_RELATIVE_PATH}"
+readonly DEFAULT_FIRMWARE_RELATIVE_PATH=".cache/klipper/out/klipper.bin"
+FIRMWARE_DISPLAY_PATH="${KLIPPER_FIRMWARE_PATH:-${DEFAULT_FIRMWARE_RELATIVE_PATH}}"
+readonly FIRMWARE_DISPLAY_PATH
+readonly FIRMWARE_FILE="$(resolve_path_relative_to_flash_root "${FIRMWARE_DISPLAY_PATH}")"
 readonly WCHISP_BIN="${WCHISP_BIN:-wchisp}"
 readonly WCHISP_TARGET="${WCHISP_TARGET:-ch32v20x}"
 readonly WCHISP_DELAY="${WCHISP_DELAY:-30}"
@@ -117,12 +130,12 @@ function verify_dependencies() {
 function prepare_firmware() {
     CURRENT_STEP="Étape 1: Vérification du firmware"
     echo "=== ${CURRENT_STEP} ==="
-    log_message "INFO" "Vérification de la présence du firmware (${FIRMWARE_RELATIVE_PATH})."
+    log_message "INFO" "Vérification de la présence du firmware (${FIRMWARE_DISPLAY_PATH})."
 
     if [[ ! -f "${FIRMWARE_FILE}" ]]; then
         log_message "ERROR" "Firmware introuvable: ${FIRMWARE_FILE}"
-        echo "Le firmware n'a pas été trouvé (${FIRMWARE_RELATIVE_PATH})."
-        echo "Veuillez lancer './build.sh' depuis le répertoire flash_automation avant de continuer."
+        echo "Le firmware n'a pas été trouvé (${FIRMWARE_DISPLAY_PATH})."
+        echo "Veuillez lancer './build.sh' depuis le répertoire flash_automation avant de continuer ou ajuster KLIPPER_FIRMWARE_PATH."
         exit 1
     fi
 
@@ -132,7 +145,7 @@ function prepare_firmware() {
     log_message "INFO" "Taille du firmware: ${FIRMWARE_SIZE} octets"
     log_message "INFO" "SHA256 du firmware: ${FIRMWARE_SHA}"
 
-    echo "Firmware détecté: ${FIRMWARE_RELATIVE_PATH}"
+    echo "Firmware détecté: ${FIRMWARE_DISPLAY_PATH}"
     echo "Taille: ${FIRMWARE_SIZE} octets"
     echo "SHA256: ${FIRMWARE_SHA}"
 }
@@ -174,7 +187,7 @@ function post_flash() {
     log_message "INFO" "Processus de flashage terminé."
 
     echo "Résumé :"
-    echo "  - Firmware : ${FIRMWARE_RELATIVE_PATH}"
+    echo "  - Firmware : ${FIRMWARE_DISPLAY_PATH}"
     echo "  - Taille   : ${FIRMWARE_SIZE} octets"
     echo "  - SHA256   : ${FIRMWARE_SHA}"
     echo

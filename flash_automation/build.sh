@@ -19,7 +19,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLASH_ROOT="${SCRIPT_DIR}"
 CACHE_ROOT="${FLASH_ROOT}/.cache"
-KLIPPER_DIR="${CACHE_ROOT}/klipper"
+DEFAULT_KLIPPER_DIR="${CACHE_ROOT}/klipper"
+KLIPPER_DIR="${KLIPPER_SRC_DIR:-${DEFAULT_KLIPPER_DIR}}"
+USE_EXISTING_KLIPPER="false"
+if [[ -n "${KLIPPER_SRC_DIR:-}" ]]; then
+    USE_EXISTING_KLIPPER="true"
+fi
 LOGO_FILE="${FLASH_ROOT}/banner.txt"
 OVERRIDES_DIR="${FLASH_ROOT}/klipper_overrides"
 TOOLCHAIN_PREFIX="${CROSS_PREFIX:-riscv32-unknown-elf-}"
@@ -191,6 +196,32 @@ done
 ensure_klipper_repo() {
     mkdir -p "${CACHE_ROOT}"
 
+    if [[ "${USE_EXISTING_KLIPPER}" == "true" ]]; then
+        local resolved="${KLIPPER_DIR/#\~/${HOME}}"
+
+        if [[ "${resolved}" != /* ]]; then
+            if ! resolved="$(cd "${PWD}" && cd "${resolved}" 2>/dev/null && pwd)"; then
+                print_error "Le répertoire Klipper spécifié (${KLIPPER_DIR}) est introuvable. Vérifiez KLIPPER_SRC_DIR."
+                exit 1
+            fi
+        else
+            if ! resolved="$(cd "${resolved}" 2>/dev/null && pwd)"; then
+                print_error "Le répertoire Klipper spécifié (${KLIPPER_DIR}) est introuvable."
+                exit 1
+            fi
+        fi
+
+        KLIPPER_DIR="${resolved}"
+        print_info "Utilisation du dépôt Klipper existant : ${KLIPPER_DIR}"
+
+        if [[ ! -d "${KLIPPER_DIR}/.git" ]]; then
+            print_error "${KLIPPER_DIR} n'est pas un dépôt Git. Impossible d'appliquer automatiquement les correctifs."
+            exit 1
+        fi
+
+        return
+    fi
+
     if [[ ! -d "${KLIPPER_DIR}/.git" ]]; then
         print_info "Clonage du dépôt Klipper (${KLIPPER_REPO_URL})..."
         if ! git clone \
@@ -221,6 +252,15 @@ ensure_klipper_repo() {
 }
 
 ensure_klipper_repo
+
+if [[ "${USE_EXISTING_KLIPPER}" == "true" && -f "${KLIPPER_DIR}/.config" ]]; then
+    if [[ ! -f "${KLIPPER_DIR}/.config.bmcuc_backup" ]]; then
+        print_info "Sauvegarde de la configuration existante (${KLIPPER_DIR}/.config.bmcuc_backup)..."
+        cp "${KLIPPER_DIR}/.config" "${KLIPPER_DIR}/.config.bmcuc_backup"
+    else
+        print_info "Configuration existante déjà sauvegardée (${KLIPPER_DIR}/.config.bmcuc_backup)."
+    fi
+fi
 
 print_info "Copie de la configuration Klipper..."
 cp "${SCRIPT_DIR}/klipper.config" "${KLIPPER_DIR}/.config"

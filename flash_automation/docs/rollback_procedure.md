@@ -88,12 +88,12 @@ fiable l'est :
    validé vers un emplacement distinct :
    ```bash
    mkdir -p backups
-   cp .cache/klipper/out/klipper.bin backups/klipper_$(date +%F).bin
+   cp "${KLIPPER_FIRMWARE_PATH:-.cache/klipper/out/klipper.bin}" "backups/klipper_$(date +%F).bin"
    ```
 2. Flashez ce binaire connu à l'aide de `flash_automation.sh` en mode
-   interactif :
+   interactif en exportant ponctuellement `KLIPPER_FIRMWARE_PATH` si besoin :
    ```bash
-   ./flash_automation.sh --firmware backups/klipper_YYYY-MM-DD.bin
+   KLIPPER_FIRMWARE_PATH="backups/klipper_YYYY-MM-DD.bin" ./flash_automation.sh
    ```
 3. Vérifiez la version reportée par `flashBMCUtoKlipper_automation.py --dry-run`
    (champ « expected_final_version ») ou via l'interface Klipper (`STATUS`)
