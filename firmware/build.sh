@@ -22,6 +22,12 @@ KLIPPER_DIR="${REPO_ROOT}/klipper"
 LOGO_FILE="${REPO_ROOT}/logo/banner.txt"
 OVERRIDES_DIR="${SCRIPT_DIR}/klipper_overrides"
 TOOLCHAIN_PREFIX="${CROSS_PREFIX:-riscv64-unknown-elf-}"
+TOOLCHAIN_CACHE_DIR="${REPO_ROOT}/.toolchains"
+TOOLCHAIN_RELEASE="2025.10.18"
+TOOLCHAIN_ARCHIVE="riscv64-elf-ubuntu-22.04-gcc.tar.xz"
+TOOLCHAIN_URL="https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/${TOOLCHAIN_RELEASE}/${TOOLCHAIN_ARCHIVE}"
+TOOLCHAIN_INSTALL_DIR="${TOOLCHAIN_CACHE_DIR}/riscv64-elf-${TOOLCHAIN_RELEASE}"
+TOOLCHAIN_BIN_DIR="${TOOLCHAIN_INSTALL_DIR}/riscv/bin"
 
 if [[ -t 1 ]]; then
     readonly COLOR_INFO="\e[34m"
@@ -47,6 +53,83 @@ print_error() {
     printf "%s[ERREUR]%s %s\n" "${COLOR_ERROR}" "${COLOR_RESET}" "$1" >&2
 }
 
+bootstrap_toolchain() {
+    if [[ -n "${CROSS_PREFIX:-}" ]]; then
+        print_error "${TOOLCHAIN_PREFIX}gcc est introuvable et CROSS_PREFIX est défini. Veuillez installer la toolchain correspondante ou corriger CROSS_PREFIX."
+        exit 1
+    fi
+
+    local toolchain_gcc="${TOOLCHAIN_BIN_DIR}/${TOOLCHAIN_PREFIX}gcc"
+
+    if [[ -x "${toolchain_gcc}" ]]; then
+        export PATH="${TOOLCHAIN_BIN_DIR}:${PATH}"
+        print_info "Utilisation de la toolchain locale : ${toolchain_gcc}"
+        return
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        print_error "curl est requis pour télécharger automatiquement la toolchain RISC-V. Installez curl ou la toolchain manuellement."
+        exit 1
+    fi
+
+    if ! command -v tar >/dev/null 2>&1; then
+        print_error "tar est requis pour extraire la toolchain RISC-V. Installez tar ou la toolchain manuellement."
+        exit 1
+    fi
+
+    mkdir -p "${TOOLCHAIN_CACHE_DIR}"
+    local archive_path="${TOOLCHAIN_CACHE_DIR}/${TOOLCHAIN_ARCHIVE}"
+
+    if [[ ! -f "${archive_path}" ]]; then
+        print_info "Téléchargement de la toolchain RISC-V (${TOOLCHAIN_RELEASE})..."
+        if ! curl --fail --location --progress-bar "${TOOLCHAIN_URL}" -o "${archive_path}"; then
+            print_error "Échec du téléchargement de la toolchain depuis ${TOOLCHAIN_URL}"
+            rm -f "${archive_path}"
+            exit 1
+        fi
+    else
+        print_info "Archive toolchain déjà présente, réutilisation de ${archive_path}"
+    fi
+
+    local temp_dir
+    temp_dir="$(mktemp -d)"
+    print_info "Extraction de la toolchain dans ${TOOLCHAIN_INSTALL_DIR}"
+    if ! tar -xf "${archive_path}" -C "${temp_dir}"; then
+        rm -rf "${temp_dir}"
+        print_error "Échec lors de l'extraction de la toolchain"
+        exit 1
+    fi
+
+    rm -rf "${TOOLCHAIN_INSTALL_DIR}"
+    mkdir -p "${TOOLCHAIN_INSTALL_DIR}"
+    mv "${temp_dir}/riscv" "${TOOLCHAIN_INSTALL_DIR}/"
+    rm -rf "${temp_dir}"
+
+    export PATH="${TOOLCHAIN_BIN_DIR}:${PATH}"
+
+    if [[ ! -x "${toolchain_gcc}" ]]; then
+        print_error "La toolchain téléchargée ne contient pas ${TOOLCHAIN_PREFIX}gcc. Vérifiez l'archive (${TOOLCHAIN_URL})."
+        exit 1
+    fi
+
+    print_info "Toolchain RISC-V installée localement dans ${TOOLCHAIN_INSTALL_DIR}"
+}
+
+ensure_toolchain() {
+    local toolchain_cmd="${TOOLCHAIN_PREFIX}gcc"
+
+    if command -v "${toolchain_cmd}" >/dev/null 2>&1; then
+        return
+    fi
+
+    bootstrap_toolchain
+
+    if ! command -v "${toolchain_cmd}" >/dev/null 2>&1; then
+        print_error "${toolchain_cmd} reste introuvable malgré l'installation automatique."
+        exit 1
+    fi
+}
+
 require_command() {
     local cmd="$1"
     local message="$2"
@@ -64,12 +147,14 @@ fi
 
 print_info "Vérification des dépendances..."
 
+ensure_toolchain
+
 declare -A REQUIRED_COMMANDS=(
     [git]="git est requis. Assurez-vous qu'il est installé."
     [patch]="patch est requis. Installez le paquet patch."
     [make]="make est requis. Installez les outils de compilation (build-essential)."
 )
-REQUIRED_COMMANDS["${TOOLCHAIN_PREFIX}gcc"]="la chaîne d'outils ${TOOLCHAIN_PREFIX}gcc est absente. Installez 'gcc-riscv64-unknown-elf' ou définissez CROSS_PREFIX pour pointer vers un préfixe valide."
+REQUIRED_COMMANDS["${TOOLCHAIN_PREFIX}gcc"]="la chaîne d'outils ${TOOLCHAIN_PREFIX}gcc est absente. Installez 'gcc-riscv64-unknown-elf', définissez CROSS_PREFIX ou laissez le script télécharger la toolchain officielle."
 
 ordered_commands=(git patch make "${TOOLCHAIN_PREFIX}gcc")
 for cmd in "${ordered_commands[@]}"; do
