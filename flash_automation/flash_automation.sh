@@ -21,20 +21,21 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${SCRIPT_DIR}/.."
-LOGO_FILE="${REPO_ROOT}/logo/banner.txt"
+FLASH_ROOT="${SCRIPT_DIR}"
+CACHE_ROOT="${FLASH_ROOT}/.cache"
+LOGO_FILE="${FLASH_ROOT}/banner.txt"
 
 if [[ -f "${LOGO_FILE}" ]]; then
     cat "${LOGO_FILE}"
     echo
 fi
 
-readonly LOG_BASE_DIR="${REPO_ROOT}/logs"
+readonly LOG_BASE_DIR="${FLASH_ROOT}/logs"
 readonly LOG_DIR="${LOG_BASE_DIR}/flash_$(date +%Y-%m-%d_%H-%M-%S)"
 readonly LOG_FILE="${LOG_DIR}/flash.log"
 readonly FAILURE_REPORT="${LOG_DIR}/FAILURE_REPORT.txt"
-readonly FIRMWARE_RELATIVE_PATH="klipper/out/klipper.bin"
-readonly FIRMWARE_FILE="${REPO_ROOT}/${FIRMWARE_RELATIVE_PATH}"
+readonly FIRMWARE_RELATIVE_PATH=".cache/klipper/out/klipper.bin"
+readonly FIRMWARE_FILE="${FLASH_ROOT}/${FIRMWARE_RELATIVE_PATH}"
 readonly WCHISP_BIN="${WCHISP_BIN:-wchisp}"
 readonly WCHISP_TARGET="${WCHISP_TARGET:-ch32v20x}"
 readonly WCHISP_DELAY="${WCHISP_DELAY:-30}"
@@ -121,7 +122,7 @@ function prepare_firmware() {
     if [[ ! -f "${FIRMWARE_FILE}" ]]; then
         log_message "ERROR" "Firmware introuvable: ${FIRMWARE_FILE}"
         echo "Le firmware n'a pas été trouvé (${FIRMWARE_RELATIVE_PATH})."
-        echo "Veuillez lancer 'firmware/build.sh' avant de continuer."
+        echo "Veuillez lancer './build.sh' depuis le répertoire flash_automation avant de continuer."
         exit 1
     fi
 

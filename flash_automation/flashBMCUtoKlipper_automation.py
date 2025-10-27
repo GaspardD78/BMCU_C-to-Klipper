@@ -59,7 +59,7 @@ from typing import Iterable, Optional
 def display_logo() -> None:
     """Affiche le logo ASCII si disponible."""
 
-    logo_path = Path(__file__).resolve().parents[1] / "logo" / "banner.txt"
+    logo_path = Path(__file__).resolve().parent / "banner.txt"
     try:
         logo = logo_path.read_text(encoding="utf-8").rstrip()
     except FileNotFoundError:

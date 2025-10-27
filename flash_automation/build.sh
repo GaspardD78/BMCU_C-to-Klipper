@@ -17,17 +17,21 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${SCRIPT_DIR}/.."
-KLIPPER_DIR="${REPO_ROOT}/klipper"
-LOGO_FILE="${REPO_ROOT}/logo/banner.txt"
-OVERRIDES_DIR="${SCRIPT_DIR}/klipper_overrides"
+FLASH_ROOT="${SCRIPT_DIR}"
+CACHE_ROOT="${FLASH_ROOT}/.cache"
+KLIPPER_DIR="${CACHE_ROOT}/klipper"
+LOGO_FILE="${FLASH_ROOT}/banner.txt"
+OVERRIDES_DIR="${FLASH_ROOT}/klipper_overrides"
 TOOLCHAIN_PREFIX="${CROSS_PREFIX:-riscv32-unknown-elf-}"
-TOOLCHAIN_CACHE_DIR="${REPO_ROOT}/.toolchains"
+TOOLCHAIN_CACHE_DIR="${CACHE_ROOT}/toolchains"
 TOOLCHAIN_RELEASE="2025.10.18"
 TOOLCHAIN_ARCHIVE="riscv32-elf-ubuntu-22.04-gcc.tar.xz"
 TOOLCHAIN_URL="https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/${TOOLCHAIN_RELEASE}/${TOOLCHAIN_ARCHIVE}"
 TOOLCHAIN_INSTALL_DIR="${TOOLCHAIN_CACHE_DIR}/riscv32-elf-${TOOLCHAIN_RELEASE}"
 TOOLCHAIN_BIN_DIR="${TOOLCHAIN_INSTALL_DIR}/riscv/bin"
+KLIPPER_REPO_URL="${KLIPPER_REPO_URL:-https://github.com/Klipper3d/klipper.git}"
+KLIPPER_REF="${KLIPPER_REF:-master}"
+KLIPPER_CLONE_DEPTH="${KLIPPER_CLONE_DEPTH:-1}"
 
 if [[ -t 1 ]]; then
     readonly COLOR_INFO="\e[34m"
@@ -161,16 +165,39 @@ for cmd in "${ordered_commands[@]}"; do
     print_info "  • ${cmd} ✅"
 done
 
-print_info "Positionnement à la racine du dépôt"
-cd "${REPO_ROOT}"
+ensure_klipper_repo() {
+    mkdir -p "${CACHE_ROOT}"
 
-if [[ ! -d "${KLIPPER_DIR}/.git" ]]; then
-    print_info "Initialisation du sous-module Klipper..."
-    git submodule update --init --recursive klipper
-else
-    print_info "Synchronisation du sous-module Klipper..."
-    git submodule update --recursive klipper
-fi
+    if [[ ! -d "${KLIPPER_DIR}/.git" ]]; then
+        print_info "Clonage du dépôt Klipper (${KLIPPER_REPO_URL})..."
+        if ! git clone \
+            --depth "${KLIPPER_CLONE_DEPTH}" \
+            --branch "${KLIPPER_REF}" \
+            "${KLIPPER_REPO_URL}" "${KLIPPER_DIR}"; then
+            print_error "Échec du clonage de ${KLIPPER_REPO_URL}"
+            exit 1
+        fi
+        return
+    fi
+
+    print_info "Mise à jour du dépôt Klipper (${KLIPPER_REF})..."
+    if ! git -C "${KLIPPER_DIR}" fetch --tags --prune origin; then
+        print_error "Impossible de récupérer les mises à jour depuis origin"
+        exit 1
+    fi
+
+    if ! git -C "${KLIPPER_DIR}" checkout "${KLIPPER_REF}"; then
+        print_error "Impossible de se positionner sur ${KLIPPER_REF}"
+        exit 1
+    fi
+
+    if ! git -C "${KLIPPER_DIR}" pull --ff-only origin "${KLIPPER_REF}"; then
+        print_error "Impossible de mettre à jour ${KLIPPER_REF}"
+        exit 1
+    fi
+}
+
+ensure_klipper_repo
 
 print_info "Copie de la configuration Klipper..."
 cp "${SCRIPT_DIR}/klipper.config" "${KLIPPER_DIR}/.config"
@@ -219,4 +246,4 @@ cd "${KLIPPER_DIR}"
 make clean
 make
 
-print_success "Compilation terminée. Le firmware se trouve dans klipper/out/klipper.bin"
+print_success "Compilation terminée. Le firmware se trouve dans ${KLIPPER_DIR}/out/klipper.bin"
