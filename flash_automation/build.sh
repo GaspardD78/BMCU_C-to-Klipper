@@ -26,6 +26,13 @@ USE_EXISTING_KLIPPER="false"
 if [[ -n "${KLIPPER_SRC_DIR:-}" ]]; then
     USE_EXISTING_KLIPPER="true"
 fi
+PYTHON_CACHE_DIR="${CACHE_ROOT}/python"
+PYTHON_DEPS_DIR="${PYTHON_CACHE_DIR}/site-packages"
+REQUIREMENTS_FILE="${FLASH_ROOT}/requirements.txt"
+REQUIREMENTS_HASH_FILE="${PYTHON_CACHE_DIR}/requirements.sha256"
+FORCE_DEP_INSTALL="false"
+REFRESH_CLONE="false"
+PYTHON_CACHE_STATUS="not_checked"
 LOGO_FILE="${FLASH_ROOT}/banner.txt"
 OVERRIDES_DIR="${FLASH_ROOT}/klipper_overrides"
 TOOLCHAIN_PREFIX="${CROSS_PREFIX:-riscv32-unknown-elf-}"
@@ -137,6 +144,55 @@ print_success() {
 
 print_error() {
     printf "%s[ERREUR]%s %s\n" "${COLOR_ERROR}" "${COLOR_RESET}" "$1" >&2
+}
+
+usage() {
+    cat <<'EOF'
+Usage: ./build.sh [options]
+
+Options :
+  --refresh        Force la suppression du cache Klipper et reclone le dépôt.
+  --force          Réinstalle les dépendances Python même si le cache est à jour.
+  -h, --help       Affiche cette aide et quitte.
+EOF
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --refresh)
+                REFRESH_CLONE="true"
+                ;;
+            --force)
+                FORCE_DEP_INSTALL="true"
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            --)
+                shift
+                break
+                ;;
+            -*)
+                print_error "Option inconnue : $1"
+                usage
+                exit 1
+                ;;
+            *)
+                print_error "Argument non pris en charge : $1"
+                usage
+                exit 1
+                ;;
+        esac
+        shift
+    done
+
+    if [[ $# -gt 0 ]]; then
+        print_error "Arguments supplémentaires non pris en charge : $*"
+        usage
+        exit 1
+    fi
 }
 
 ensure_logs_dir() {
@@ -669,6 +725,85 @@ ensure_toolchain() {
     fi
 }
 
+ensure_python_requirements() {
+    if [[ ! -f "${REQUIREMENTS_FILE}" ]]; then
+        PYTHON_CACHE_STATUS="absent"
+        return
+    fi
+
+    if ! python3 -m pip --version >/dev/null 2>&1; then
+        print_error "pip pour python3 est requis pour installer les dépendances (${REQUIREMENTS_FILE})."
+        exit 1
+    fi
+
+    mkdir -p "${PYTHON_CACHE_DIR}"
+
+    local current_hash
+    current_hash="$(sha256sum "${REQUIREMENTS_FILE}" | awk '{print $1}')"
+
+    local previous_hash=""
+    if [[ -f "${REQUIREMENTS_HASH_FILE}" ]]; then
+        read -r previous_hash < "${REQUIREMENTS_HASH_FILE}"
+    fi
+
+    local install_needed="false"
+    if [[ "${FORCE_DEP_INSTALL}" == "true" ]]; then
+        install_needed="true"
+        print_info "Installation des dépendances Python forcée (--force)."
+    elif [[ ! -d "${PYTHON_DEPS_DIR}" || -z "$(ls -A "${PYTHON_DEPS_DIR}" 2>/dev/null)" ]]; then
+        install_needed="true"
+        print_info "Initialisation du cache de dépendances Python (${PYTHON_DEPS_DIR})."
+    elif [[ "${current_hash}" != "${previous_hash}" ]]; then
+        install_needed="true"
+        print_info "requirements.txt a été modifié depuis la dernière installation. Mise à jour des dépendances..."
+    fi
+
+    if [[ "${install_needed}" == "true" ]]; then
+        rm -rf "${PYTHON_DEPS_DIR}"
+        mkdir -p "${PYTHON_DEPS_DIR}"
+
+        if ! python3 -m pip install --upgrade --target "${PYTHON_DEPS_DIR}" -r "${REQUIREMENTS_FILE}"; then
+            print_error "Échec de l'installation des dépendances Python (${REQUIREMENTS_FILE})."
+            exit 1
+        fi
+
+        printf '%s\n' "${current_hash}" > "${REQUIREMENTS_HASH_FILE}"
+        PYTHON_CACHE_STATUS="updated"
+    else
+        PYTHON_CACHE_STATUS="reused"
+        print_info "Réutilisation du cache de dépendances Python (${PYTHON_DEPS_DIR})."
+    fi
+
+    if [[ -z "${PYTHONPATH:-}" ]]; then
+        export PYTHONPATH="${PYTHON_DEPS_DIR}"
+    else
+        case ":${PYTHONPATH}:" in
+            *:"${PYTHON_DEPS_DIR}":*) ;;
+            *) export PYTHONPATH="${PYTHON_DEPS_DIR}:${PYTHONPATH}" ;;
+        esac
+    fi
+}
+
+report_python_cache_status() {
+    case "${PYTHON_CACHE_STATUS}" in
+        updated)
+            print_success "Cache Python régénéré (${PYTHON_DEPS_DIR})."
+            ;;
+        reused)
+            print_success "Cache Python réutilisé (${PYTHON_DEPS_DIR})."
+            ;;
+        absent)
+            print_info "Aucun requirements.txt détecté, aucune dépendance Python n'a été installée."
+            ;;
+        not_checked)
+            print_info "Cache Python non vérifié pendant cette exécution."
+            ;;
+        *)
+            print_info "Statut du cache Python : ${PYTHON_CACHE_STATUS}."
+            ;;
+    esac
+}
+
 require_command() {
     local cmd="$1"
     local message="$2"
@@ -760,12 +895,21 @@ ensure_klipper_repo() {
         KLIPPER_DIR="${resolved}"
         print_info "Utilisation du dépôt Klipper existant : ${KLIPPER_DIR}"
 
+        if [[ "${REFRESH_CLONE}" == "true" ]]; then
+            print_info "Option --refresh ignorée : KLIPPER_SRC_DIR pointe vers un dépôt externe."
+        fi
+
         if [[ ! -d "${KLIPPER_DIR}/.git" ]]; then
             print_error "${KLIPPER_DIR} n'est pas un dépôt Git. Impossible d'appliquer automatiquement les correctifs."
             exit 1
         fi
 
         return
+    fi
+
+    if [[ "${REFRESH_CLONE}" == "true" && -d "${KLIPPER_DIR}" ]]; then
+        print_info "Option --refresh détectée : suppression du cache Klipper (${KLIPPER_DIR})."
+        rm -rf "${KLIPPER_DIR}"
     fi
 
     if [[ -d "${KLIPPER_DIR}" && ! -d "${KLIPPER_DIR}/.git" ]]; then
@@ -785,28 +929,24 @@ ensure_klipper_repo() {
         fi
     fi
 
-    print_info "Synchronisation du dépôt Klipper (${KLIPPER_REF})..."
+    print_info "Mise à jour du dépôt Klipper mis en cache (${KLIPPER_DIR}) via git fetch --all && git reset --hard."
     configure_klipper_remote "${KLIPPER_DIR}" "${KLIPPER_REPO_URL}" "${KLIPPER_FETCH_REFSPEC}" "${KLIPPER_LOCAL_TRACKING_REF}"
 
-    if ! git -C "${KLIPPER_DIR}" reset --hard >/dev/null 2>&1; then
-        print_error "Impossible de nettoyer l'état du dépôt Klipper."
-        exit 1
-    fi
-
-    if ! git -C "${KLIPPER_DIR}" fetch --depth "${KLIPPER_CLONE_DEPTH}" --tags --prune origin; then
+    if ! git -C "${KLIPPER_DIR}" fetch --all --tags --prune; then
         print_error "Impossible de récupérer les mises à jour depuis origin"
         exit 1
     fi
 
     if [[ "${KLIPPER_FETCH_REFSPEC}" == refs/heads/* ]]; then
-        if ! git -C "${KLIPPER_DIR}" checkout "${KLIPPER_REF}" >/dev/null 2>&1; then
-            if ! git -C "${KLIPPER_DIR}" checkout -b "${KLIPPER_REF}" "origin/${KLIPPER_REF}" >/dev/null 2>&1; then
-                print_error "Impossible de se positionner sur ${KLIPPER_REF}"
+        local branch="${KLIPPER_FETCH_REFSPEC#refs/heads/}"
+        if ! git -C "${KLIPPER_DIR}" checkout --force "${branch}" >/dev/null 2>&1; then
+            if ! git -C "${KLIPPER_DIR}" checkout -B "${branch}" "origin/${branch}" >/dev/null 2>&1; then
+                print_error "Impossible de se positionner sur ${branch}"
                 exit 1
             fi
         fi
-        if ! git -C "${KLIPPER_DIR}" reset --hard "origin/${KLIPPER_REF}"; then
-            print_error "Impossible de mettre à jour ${KLIPPER_REF}"
+        if ! git -C "${KLIPPER_DIR}" reset --hard "origin/${branch}"; then
+            print_error "Impossible de mettre à jour ${branch}"
             exit 1
         fi
     else
@@ -814,6 +954,15 @@ ensure_klipper_repo() {
             print_error "Impossible de se positionner sur ${KLIPPER_REF}"
             exit 1
         fi
+        if ! git -C "${KLIPPER_DIR}" reset --hard "${KLIPPER_REF}"; then
+            print_error "Impossible de mettre à jour ${KLIPPER_REF}"
+            exit 1
+        fi
+    fi
+
+    if ! git -C "${KLIPPER_DIR}" clean -fd; then
+        print_error "Impossible de supprimer les fichiers non suivis dans ${KLIPPER_DIR}."
+        exit 1
     fi
 }
 
@@ -1106,6 +1255,8 @@ copy_tree() {
     fi
 }
 
+parse_args "$@"
+
 if [[ -f "${LOGO_FILE}" ]]; then
     cat "${LOGO_FILE}"
     echo
@@ -1140,6 +1291,8 @@ if start_step "dependencies"; then
         require_command "${cmd}" "${REQUIRED_COMMANDS[${cmd}]}"
         print_info "  • ${cmd} ✅"
     done
+
+    ensure_python_requirements
 
     finish_step "dependencies"
 fi
@@ -1278,6 +1431,8 @@ if start_step "finalize"; then
     else
         print_success "Firmware disponible : ${FINAL_BIN_PATH} (SHA256 ${FINAL_BIN_SHA:0:12})."
     fi
+
+    report_python_cache_status
 
     finish_step "finalize"
 fi
