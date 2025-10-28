@@ -42,7 +42,7 @@ sudo apt update
 sudo apt install -y \
   git python3 python3-venv python3-pip make curl tar \
   gcc-riscv32-unknown-elf picolibc-riscv32-unknown-elf \
-  screen
+  cargo cargo-web screen
 ```
 
 #### Raspberry Pi OS 64 bits / Armbian (ARM64)
@@ -51,7 +51,7 @@ sudo apt install -y \
 sudo apt update
 sudo apt install -y \
   git python3 python3-venv python3-pip make curl tar build-essential \
-  gcc-riscv-none-elf picolibc-riscv-none-elf screen
+  gcc-riscv-none-elf picolibc-riscv-none-elf cargo cargo-web screen
 
 # La toolchain ARM se nomme parfois "riscv-none-elf". Exportez CROSS_PREFIX :
 cat <<'ENV' | sudo tee /etc/profile.d/riscv-toolchain.sh
@@ -65,8 +65,7 @@ source /etc/profile.d/riscv-toolchain.sh
 
 ### Dépendances Python communes
 
-Le flash repose sur `pyserial` et sur le binaire `wchisp`. Depuis le dossier
-`flash_automation/` :
+Le flash repose sur `pyserial` et `wchisp`. Installez-les dans l'environnement virtuel (recommandé) ou pour l'utilisateur courant :
 
 ```bash
 python3 -m pip install --upgrade pip
@@ -74,9 +73,8 @@ pip install -r requirements.txt
 python3 install_wchisp.py
 ```
 
-> ℹ️ `install_wchisp.py` télécharge le binaire officiel depuis GitHub et
-> l'installe dans `.venv/bin` (si vous utilisez un environnement virtuel)
-> ou dans `~/.local/bin`. Ajoutez ce dossier à votre `PATH` si nécessaire.
+> ℹ️ Après une installation `--user`, ajoutez `~/.local/bin` au `PATH` :
+> `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc`
 
 ---
 
@@ -93,14 +91,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip
 pip install -r requirements.txt
-python3 install_wchisp.py
+pip install wchisp
 python3 automation_cli.py
 ```
 
 Dans le menu, suivez la séquence recommandée :
 
 1. `1` – **Vérifier les permissions** : rend `build.sh` et `flash_automation.sh` exécutables.
-2. `2` – **Installer les dépendances Python** : s'assure que `pyserial` est prêt (le binaire `wchisp` a été installé juste avant).
+2. `2` – **Installer les dépendances Python** : s'assure que `pyserial` est prêt (vous avez déjà installé `wchisp` dans l'étape précédente).
 3. `3` – **Compiler le firmware** : lance `./build.sh` et enregistre la sortie.
 4. **Avant l'étape 4**, quittez temporairement le menu (option `X`) ou ouvrez un second terminal **dans le même dossier** pour exécuter :
 
@@ -136,7 +134,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip
 pip install -r requirements.txt
-python3 install_wchisp.py
+pip install wchisp
 ./build.sh
 python3 -m compileall flash.py
 python3 flash.py
@@ -176,12 +174,11 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip
 pip install -r requirements.txt
-python3 install_wchisp.py
+pip install wchisp
 ```
 
 - La virtualenv évite d'installer des paquets système par erreur.
-- `install_wchisp.py` récupère automatiquement `wchisp`, l'outil officiel de
-  flash pour le microcontrôleur CH32V203.
+- `wchisp` est l'outil officiel de flash pour le microcontrôleur CH32V203.
 
 ### 3. Compiler Klipper pour le BMCU-C
 
