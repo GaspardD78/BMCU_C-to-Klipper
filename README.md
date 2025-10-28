@@ -63,6 +63,23 @@ source /etc/profile.d/riscv-toolchain.sh
 
 > ✅ Vérifiez que `python3`, `git`, `riscv32-unknown-elf-gcc` (ou `riscv-none-elf-gcc`) et `screen` répondent avec `command -v <outil>`.
 
+#### Alternative : installer Cargo via rustup
+
+Si votre distribution ne fournit pas un paquet `cargo` récent ou si vous préférez gérer Rust depuis votre `$HOME`, vous pouvez utiliser [rustup](https://rustup.rs). Après l'installation, assurez-vous que les scripts du dépôt détectent bien les binaires attendus.
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile minimal
+source "$HOME/.cargo/env"
+rustup target add wasm32-unknown-unknown
+cargo install cargo-web
+command -v cargo
+command -v cargo-web
+command -v riscv-none-elf-gcc  # fournie par les paquets système, gardez-la installée
+```
+
+> 🧭 Si `command -v` ne trouve pas `cargo` ou `cargo-web`, ajoutez `~/.cargo/bin` à votre `PATH` **avant** de lancer `./build.sh` ou `python3 flash.py` : `echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc`.
+> 🛠️ Les optimisations comme `--no-install-recommends` ou l'installation rustup en profil minimal ne posent pas de problème tant que `cargo-web` est réinstallé et que la toolchain RISC-V ARM (`riscv-none-elf-*`) reste accessible.
+
 ### Dépendances Python communes
 
 Le flash repose sur `pyserial` et `wchisp`. Installez-les dans l'environnement virtuel (recommandé) ou pour l'utilisateur courant :
