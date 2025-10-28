@@ -29,7 +29,11 @@ from typing import Any, Callable, Dict, Iterable, Optional
 
 from stop_utils import StopController, StopRequested, cleanup_repository
 
-from . import context as command_context
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import context as command_context  # type: ignore
+else:
+    from . import context as command_context
 
 FLASH_DIR = Path(__file__).resolve().parent
 REPO_ROOT = FLASH_DIR.parent

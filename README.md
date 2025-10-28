@@ -90,6 +90,8 @@ pip install -r requirements.txt
 python3 install_wchisp.py
 ```
 
+> ⚠️ `wchisp` n'est pas distribué via PyPI : `install_wchisp.py` télécharge le binaire
+> officiel correspondant à votre architecture et l'ajoute à votre environnement.
 > ℹ️ Après une installation `--user`, ajoutez `~/.local/bin` au `PATH` :
 > `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc`
 
@@ -108,9 +110,12 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip
 pip install -r requirements.txt
-pip install wchisp
+python3 install_wchisp.py
 python3 automation_cli.py
 ```
+
+> ⚠️ L'outil `wchisp` n'étant pas packagé sur PyPI, ce script s'assure qu'il est
+> installé depuis les releases officielles.
 
 Dans le menu, suivez la séquence recommandée :
 
@@ -166,7 +171,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip
 pip install -r requirements.txt
-pip install wchisp
+python3 install_wchisp.py
 ./build.sh
 python3 -m compileall flash.py
 python3 flash.py
@@ -206,7 +211,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip
 pip install -r requirements.txt
-pip install wchisp
+python3 install_wchisp.py
 ```
 
 - La virtualenv évite d'installer des paquets système par erreur.
