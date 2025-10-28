@@ -34,9 +34,13 @@ python3 install_wchisp.py
 python3 flash.py
 ```
 
-- `build.sh` clone Klipper depuis `$KLIPPER_REPO_URL` (défaut : dépôt officiel)
-  et applique les correctifs présents dans `klipper_overrides/` avant de lancer
-  la compilation.
+- `build.sh` synchronise Klipper depuis `$KLIPPER_REPO_URL` (défaut : dépôt
+  officiel) et applique les correctifs présents dans `klipper_overrides/` avant
+  de lancer la compilation. Le dépôt local (`.cache/klipper`) est conservé :
+  un `git fetch --depth=1 --tags` actualise la branche suivie et limite les
+  références téléchargées aux seules entrées nécessaires. Si un binaire
+  `out/klipper.bin` est détecté avec la même empreinte de configuration,
+  l'utilisateur peut choisir de le réutiliser afin d'éviter une recompilation.
 - Par défaut, le binaire généré est disponible dans `.cache/klipper/out/klipper.bin`.
   Si Klipper est déjà installé ailleurs, exportez `KLIPPER_SRC_DIR=/chemin/vers/klipper`
   avant `./build.sh` pour réutiliser cet environnement et `KLIPPER_FIRMWARE_PATH`
@@ -54,6 +58,7 @@ python3 flash.py
 | `KLIPPER_REPO_URL` | URL du dépôt Klipper à cloner | `https://github.com/Klipper3d/klipper.git` |
 | `KLIPPER_REF` | Branche/tag/commit à utiliser | `master` |
 | `KLIPPER_CLONE_DEPTH` | Profondeur du clone `git` | `1` |
+| `KLIPPER_FETCH_REFSPEC` | Référence distante suivie (`refs/heads/...` ou `refs/tags/...`) | `refs/heads/${KLIPPER_REF}` (déduit automatiquement) |
 | `KLIPPER_SRC_DIR` | Répertoire Klipper à réutiliser (aucun clone/checkout automatique) | `flash_automation/.cache/klipper` |
 | `KLIPPER_FIRMWARE_PATH` | Firmware attendu par `flash_automation.sh` | `.cache/klipper/out/klipper.bin` |
 | `CROSS_PREFIX` | Toolchain RISC-V installée manuellement | `riscv32-unknown-elf-` |
@@ -65,6 +70,19 @@ python3 flash.py
 | `WCHISP_BASE_URL` | Base des URL de téléchargement `wchisp` | `https://github.com/ch32-rs/wchisp/releases/download` |
 
 Les journaux et rapports d'échec sont écrits dans `logs/` avec horodatage.
+
+### 🔄 Flux de synchronisation
+
+- Lors des exécutions successives, `./build.sh` réutilise le dépôt
+  `.cache/klipper` et l'actualise via `git fetch --depth=1 --tags --prune`
+  en se limitant au refspec configuré (`remote.origin.fetch`).
+- Les signatures de la configuration (`klipper.config`, `klipper_overrides/`)
+  et du binaire `out/klipper.bin` sont enregistrées dans
+  `.cache/klipper.bin.meta`. Si rien n'a changé et que le binaire est plus
+  récent que les fichiers de configuration, le script propose de le réutiliser
+  au lieu de recompiler.
+- Répondez `o` pour conserver le firmware existant ou toute autre touche pour
+  forcer une recompilation propre.
 
 ## 📚 Documentation
 

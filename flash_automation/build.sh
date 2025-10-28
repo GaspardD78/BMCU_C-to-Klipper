@@ -21,6 +21,7 @@ FLASH_ROOT="${SCRIPT_DIR}"
 CACHE_ROOT="${FLASH_ROOT}/.cache"
 DEFAULT_KLIPPER_DIR="${CACHE_ROOT}/klipper"
 KLIPPER_DIR="${KLIPPER_SRC_DIR:-${DEFAULT_KLIPPER_DIR}}"
+KLIPPER_DIR="${KLIPPER_DIR%/}"
 USE_EXISTING_KLIPPER="false"
 if [[ -n "${KLIPPER_SRC_DIR:-}" ]]; then
     USE_EXISTING_KLIPPER="true"
@@ -55,6 +56,31 @@ TOOLCHAIN_BIN_DIR="${TOOLCHAIN_INSTALL_DIR}/riscv/bin"
 KLIPPER_REPO_URL="${KLIPPER_REPO_URL:-https://github.com/Klipper3d/klipper.git}"
 KLIPPER_REF="${KLIPPER_REF:-master}"
 KLIPPER_CLONE_DEPTH="${KLIPPER_CLONE_DEPTH:-1}"
+KLIPPER_FETCH_REFSPEC="${KLIPPER_FETCH_REFSPEC:-}"
+if [[ -z "${KLIPPER_FETCH_REFSPEC}" ]]; then
+    if [[ "${KLIPPER_REF}" == refs/* ]]; then
+        KLIPPER_FETCH_REFSPEC="${KLIPPER_REF}"
+    elif [[ "${KLIPPER_REF}" =~ ^v[0-9] ]]; then
+        KLIPPER_FETCH_REFSPEC="refs/tags/${KLIPPER_REF}"
+    else
+        KLIPPER_FETCH_REFSPEC="refs/heads/${KLIPPER_REF}"
+    fi
+elif [[ "${KLIPPER_FETCH_REFSPEC}" != refs/* ]]; then
+    KLIPPER_FETCH_REFSPEC="refs/heads/${KLIPPER_FETCH_REFSPEC}"
+fi
+
+case "${KLIPPER_FETCH_REFSPEC}" in
+    refs/heads/*)
+        KLIPPER_LOCAL_TRACKING_REF="refs/remotes/origin/${KLIPPER_FETCH_REFSPEC#refs/heads/}"
+        ;;
+    *)
+        KLIPPER_LOCAL_TRACKING_REF="${KLIPPER_FETCH_REFSPEC}"
+        ;;
+esac
+
+KLIPPER_METADATA_FILE="${CACHE_ROOT}/klipper.bin.meta"
+INPUT_FINGERPRINT=""
+INPUT_LATEST_MTIME="0"
 
 if [[ -t 1 ]]; then
     readonly COLOR_INFO="\e[34m"
@@ -185,6 +211,23 @@ require_command() {
     fi
 }
 
+file_mtime() {
+    local path="$1"
+    local mtime
+
+    if mtime="$(stat -c %Y "${path}" 2>/dev/null)"; then
+        printf '%s' "${mtime}"
+        return 0
+    fi
+
+    if mtime="$(stat -f %m "${path}" 2>/dev/null)"; then
+        printf '%s' "${mtime}"
+        return 0
+    fi
+
+    return 1
+}
+
 if [[ -f "${LOGO_FILE}" ]]; then
     cat "${LOGO_FILE}"
     echo
@@ -197,14 +240,35 @@ ensure_toolchain
 declare -A REQUIRED_COMMANDS=(
     [git]="git est requis. Assurez-vous qu'il est installé."
     [make]="make est requis. Installez les outils de compilation (build-essential)."
+    [stat]="stat est requis pour lire les horodatages (GNU coreutils ou BSD stat)."
+    [sha256sum]="sha256sum est requis pour valider les binaires existants. Installez coreutils."
 )
 REQUIRED_COMMANDS["${TOOLCHAIN_PREFIX}gcc"]="la chaîne d'outils ${TOOLCHAIN_PREFIX}gcc est absente. Installez 'gcc-riscv32-unknown-elf', définissez CROSS_PREFIX ou laissez le script télécharger la toolchain officielle."
 
-ordered_commands=(git make "${TOOLCHAIN_PREFIX}gcc")
+ordered_commands=(git make stat sha256sum "${TOOLCHAIN_PREFIX}gcc")
 for cmd in "${ordered_commands[@]}"; do
     require_command "${cmd}" "${REQUIRED_COMMANDS[${cmd}]}"
     print_info "  • ${cmd} ✅"
 done
+
+configure_klipper_remote() {
+    local repo="$1"
+    local remote_url="$2"
+    local fetch_refspec="$3"
+    local local_refspec="$4"
+
+    if ! git -C "${repo}" remote get-url origin >/dev/null 2>&1; then
+        git -C "${repo}" remote add origin "${remote_url}"
+    else
+        git -C "${repo}" remote set-url origin "${remote_url}"
+    fi
+
+    git -C "${repo}" config --unset-all remote.origin.fetch >/dev/null 2>&1 || true
+    if ! git -C "${repo}" config remote.origin.fetch "+${fetch_refspec}:${local_refspec}"; then
+        print_error "Impossible de restreindre les références récupérées (${fetch_refspec})."
+        exit 1
+    fi
+}
 
 ensure_klipper_repo() {
     mkdir -p "${CACHE_ROOT}"
@@ -235,33 +299,222 @@ ensure_klipper_repo() {
         return
     fi
 
+    if [[ -d "${KLIPPER_DIR}" && ! -d "${KLIPPER_DIR}/.git" ]]; then
+        print_info "Répertoire ${KLIPPER_DIR} corrompu, nouvelle initialisation..."
+        rm -rf "${KLIPPER_DIR}"
+    fi
+
     if [[ ! -d "${KLIPPER_DIR}/.git" ]]; then
         print_info "Clonage du dépôt Klipper (${KLIPPER_REPO_URL})..."
         if ! git clone \
             --depth "${KLIPPER_CLONE_DEPTH}" \
             --branch "${KLIPPER_REF}" \
+            --single-branch \
             "${KLIPPER_REPO_URL}" "${KLIPPER_DIR}"; then
             print_error "Échec du clonage de ${KLIPPER_REPO_URL}"
             exit 1
         fi
-        return
     fi
 
-    print_info "Mise à jour du dépôt Klipper (${KLIPPER_REF})..."
-    if ! git -C "${KLIPPER_DIR}" fetch --tags --prune origin; then
+    print_info "Synchronisation du dépôt Klipper (${KLIPPER_REF})..."
+    configure_klipper_remote "${KLIPPER_DIR}" "${KLIPPER_REPO_URL}" "${KLIPPER_FETCH_REFSPEC}" "${KLIPPER_LOCAL_TRACKING_REF}"
+
+    if ! git -C "${KLIPPER_DIR}" reset --hard >/dev/null 2>&1; then
+        print_error "Impossible de nettoyer l'état du dépôt Klipper."
+        exit 1
+    fi
+
+    if ! git -C "${KLIPPER_DIR}" fetch --depth "${KLIPPER_CLONE_DEPTH}" --tags --prune origin; then
         print_error "Impossible de récupérer les mises à jour depuis origin"
         exit 1
     fi
 
-    if ! git -C "${KLIPPER_DIR}" checkout "${KLIPPER_REF}"; then
-        print_error "Impossible de se positionner sur ${KLIPPER_REF}"
+    if [[ "${KLIPPER_FETCH_REFSPEC}" == refs/heads/* ]]; then
+        if ! git -C "${KLIPPER_DIR}" checkout "${KLIPPER_REF}" >/dev/null 2>&1; then
+            if ! git -C "${KLIPPER_DIR}" checkout -b "${KLIPPER_REF}" "origin/${KLIPPER_REF}" >/dev/null 2>&1; then
+                print_error "Impossible de se positionner sur ${KLIPPER_REF}"
+                exit 1
+            fi
+        fi
+        if ! git -C "${KLIPPER_DIR}" reset --hard "origin/${KLIPPER_REF}"; then
+            print_error "Impossible de mettre à jour ${KLIPPER_REF}"
+            exit 1
+        fi
+    else
+        if ! git -C "${KLIPPER_DIR}" checkout --force "${KLIPPER_REF}"; then
+            print_error "Impossible de se positionner sur ${KLIPPER_REF}"
+            exit 1
+        fi
+    fi
+}
+
+refresh_inputs_state() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        print_error "python3 est requis pour calculer l'empreinte des fichiers de configuration."
         exit 1
     fi
 
-    if ! git -C "${KLIPPER_DIR}" pull --ff-only origin "${KLIPPER_REF}"; then
-        print_error "Impossible de mettre à jour ${KLIPPER_REF}"
+    local inputs=("${SCRIPT_DIR}/klipper.config")
+    if [[ -d "${OVERRIDES_DIR}" ]]; then
+        inputs+=("${OVERRIDES_DIR}")
+    fi
+
+    local serialized_inputs
+    serialized_inputs="$(printf '%s\n' "${inputs[@]}")"
+
+    local state=()
+    if ! mapfile -t state < <(FINGERPRINT_INPUTS="${serialized_inputs}" python3 - <<'PY'
+import hashlib
+import os
+from pathlib import Path
+
+inputs = [Path(p) for p in os.environ.get("FINGERPRINT_INPUTS", "").splitlines() if p]
+files = []
+for path in inputs:
+    if not path.exists():
+        continue
+    if path.is_file():
+        files.append(path)
+    else:
+        for child in sorted(path.rglob("*")):
+            if child.is_file():
+                files.append(child)
+
+files.sort(key=lambda p: p.as_posix())
+hasher = hashlib.sha256()
+latest_mtime = 0
+
+for file_path in files:
+    file_id = file_path.as_posix().encode("utf-8")
+    hasher.update(file_id)
+    hasher.update(b"\0")
+    with file_path.open("rb") as handle:
+        while True:
+            chunk = handle.read(65536)
+            if not chunk:
+                break
+            hasher.update(chunk)
+    mtime = int(file_path.stat().st_mtime)
+    if mtime > latest_mtime:
+        latest_mtime = mtime
+
+print(hasher.hexdigest())
+print(latest_mtime)
+PY
+); then
+        print_error "Impossible de calculer l'empreinte des fichiers de configuration."
         exit 1
     fi
+
+    if (( ${#state[@]} < 2 )); then
+        print_error "État incomplet lors du calcul de l'empreinte de configuration."
+        exit 1
+    fi
+
+    INPUT_FINGERPRINT="${state[0]}"
+    INPUT_LATEST_MTIME="${state[1]}"
+}
+
+record_build_metadata() {
+    local current_head="$1"
+    local bin_sha="$2"
+    local bin_mtime="$3"
+
+    mkdir -p "${CACHE_ROOT}"
+    cat > "${KLIPPER_METADATA_FILE}" <<EOF
+KLIPPER_HEAD=${current_head}
+CONFIG_FINGERPRINT=${INPUT_FINGERPRINT}
+CONFIG_LATEST_MTIME=${INPUT_LATEST_MTIME}
+BIN_SHA256=${bin_sha}
+BIN_MTIME=${bin_mtime}
+RECORDED_AT=$(date +%s)
+EOF
+}
+
+maybe_reuse_existing_binary() {
+    local existing_bin="${KLIPPER_DIR}/out/klipper.bin"
+    local metadata_head=""
+    local metadata_hash=""
+    local metadata_sha=""
+    local metadata_mtime=""
+
+    if [[ ! -f "${existing_bin}" ]]; then
+        return 1
+    fi
+
+    local bin_mtime
+    if ! bin_mtime="$(file_mtime "${existing_bin}")"; then
+        return 1
+    fi
+
+    local bin_sha
+    if ! bin_sha="$(sha256sum "${existing_bin}" 2>/dev/null | awk '{print $1}')"; then
+        return 1
+    fi
+
+    if (( bin_mtime < INPUT_LATEST_MTIME )); then
+        return 1
+    fi
+
+    if [[ -f "${KLIPPER_METADATA_FILE}" ]]; then
+        while IFS='=' read -r key value; do
+            case "${key}" in
+                KLIPPER_HEAD)
+                    metadata_head="${value}"
+                    ;;
+                CONFIG_FINGERPRINT)
+                    metadata_hash="${value}"
+                    ;;
+                BIN_SHA256)
+                    metadata_sha="${value}"
+                    ;;
+                BIN_MTIME)
+                    metadata_mtime="${value}"
+                    ;;
+            esac
+        done < "${KLIPPER_METADATA_FILE}"
+    fi
+
+    local current_head
+    if ! current_head="$(git -C "${KLIPPER_DIR}" rev-parse HEAD 2>/dev/null)"; then
+        return 1
+    fi
+
+    if [[ "${metadata_head}" != "${current_head}" ]]; then
+        return 1
+    fi
+
+    if [[ "${metadata_hash}" != "${INPUT_FINGERPRINT}" ]]; then
+        return 1
+    fi
+
+    if [[ "${metadata_sha}" != "${bin_sha}" ]]; then
+        return 1
+    fi
+
+    if [[ -n "${metadata_mtime}" ]] && (( bin_mtime < metadata_mtime )); then
+        return 1
+    fi
+
+    if [[ ! -t 0 ]]; then
+        print_info "Binaire existant détecté mais environnement non interactif : recompilation forcée."
+        return 1
+    fi
+
+    print_info "Un binaire Klipper existant semble à jour (HEAD ${current_head:0:12}, SHA256 ${bin_sha:0:12})."
+    read -r -p "Souhaitez-vous le réutiliser ? [o/N] " reuse_choice
+    case "${reuse_choice}" in
+        [oOyY])
+            record_build_metadata "${current_head}" "${bin_sha}" "${bin_mtime}"
+            print_success "Réutilisation de ${existing_bin}."
+            return 0
+            ;;
+        *)
+            print_info "Recompilation demandée."
+            ;;
+    esac
+
+    return 1
 }
 
 ensure_klipper_repo
@@ -368,9 +621,32 @@ copy_tree "${OVERRIDES_DIR}/src/ch32v20x" "${KLIPPER_DIR}/src/ch32v20x"
 copy_tree "${OVERRIDES_DIR}/src/generic" "${KLIPPER_DIR}/src/generic"
 copy_tree "${OVERRIDES_DIR}/config/boards" "${KLIPPER_DIR}/config/boards"
 
+refresh_inputs_state
+
+if maybe_reuse_existing_binary; then
+    exit 0
+fi
+
 print_info "Compilation du firmware Klipper..."
 cd "${KLIPPER_DIR}"
 make clean
 make CROSS_PREFIX="${TOOLCHAIN_PREFIX}"
 
-print_success "Compilation terminée. Le firmware se trouve dans ${KLIPPER_DIR}/out/klipper.bin"
+BIN_PATH="${KLIPPER_DIR}/out/klipper.bin"
+if [[ ! -f "${BIN_PATH}" ]]; then
+    print_error "La compilation s'est terminée sans générer ${BIN_PATH}."
+    exit 1
+fi
+
+if ! CURRENT_HEAD="$(git -C "${KLIPPER_DIR}" rev-parse HEAD 2>/dev/null)"; then
+    CURRENT_HEAD="inconnu"
+fi
+
+BIN_SHA="$(sha256sum "${BIN_PATH}" | awk '{print $1}')"
+if ! BIN_MTIME="$(file_mtime "${BIN_PATH}")"; then
+    print_error "Impossible de déterminer l'horodatage de ${BIN_PATH}."
+    exit 1
+fi
+record_build_metadata "${CURRENT_HEAD}" "${BIN_SHA}" "${BIN_MTIME}"
+
+print_success "Compilation terminée. Le firmware se trouve dans ${BIN_PATH} (SHA256 ${BIN_SHA:0:12})."
