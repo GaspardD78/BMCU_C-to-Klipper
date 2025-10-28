@@ -119,6 +119,9 @@ PREV_BIN_HEAD=""
 PREV_BIN_REUSED=""
 
 KLIPPER_METADATA_FILE="${CACHE_ROOT}/klipper.bin.meta"
+FIRMWARE_ARCHIVE_DIR="${CACHE_ROOT}/firmware"
+FIRMWARE_ARCHIVE_PATH="${FIRMWARE_ARCHIVE_DIR}/klipper.bin"
+ARCHIVED_FIRMWARE_STORED="false"
 INPUT_FINGERPRINT=""
 INPUT_LATEST_MTIME="0"
 
@@ -545,6 +548,58 @@ log_build_sha() {
     print_info "Empreinte SHA256 enregistrée dans ${log_file}"
 }
 
+preserve_final_binary() {
+    local reason="$1"
+    local update_final_path="${2:-false}"
+
+    if [[ "${ARCHIVED_FIRMWARE_STORED}" == "true" && "${update_final_path}" != "true" ]]; then
+        return 0
+    fi
+
+    local source_path="${FINAL_BIN_PATH:-}"
+    if [[ -z "${source_path}" || ! -f "${source_path}" ]]; then
+        source_path="${KLIPPER_DIR}/out/klipper.bin"
+        if [[ ! -f "${source_path}" ]]; then
+            return 0
+        fi
+    fi
+
+    if [[ "${source_path}" == "${FIRMWARE_ARCHIVE_PATH}" ]]; then
+        ARCHIVED_FIRMWARE_STORED="true"
+        if [[ "${update_final_path}" == "true" ]]; then
+            FINAL_BIN_PATH="${FIRMWARE_ARCHIVE_PATH}"
+            if [[ -z "${FINAL_BIN_SHA:-}" ]]; then
+                FINAL_BIN_SHA="$(sha256sum "${FINAL_BIN_PATH}" | awk '{print $1}')"
+            fi
+            update_state_binary_info "${FINAL_BIN_PATH}" "${FINAL_BIN_SHA}" "${FINAL_BIN_HEAD}" "${FINAL_BIN_REUSED}"
+        fi
+        return 0
+    fi
+
+    mkdir -p "${FIRMWARE_ARCHIVE_DIR}"
+    if cp -f "${source_path}" "${FIRMWARE_ARCHIVE_PATH}"; then
+        ARCHIVED_FIRMWARE_STORED="true"
+        if [[ -n "${reason}" ]]; then
+            print_info "Firmware sauvegardé dans ${FIRMWARE_ARCHIVE_PATH} (${reason})."
+        else
+            print_info "Firmware sauvegardé dans ${FIRMWARE_ARCHIVE_PATH}."
+        fi
+
+        if [[ "${update_final_path}" == "true" ]]; then
+            FINAL_BIN_PATH="${FIRMWARE_ARCHIVE_PATH}"
+            if [[ -z "${FINAL_BIN_SHA:-}" ]]; then
+                FINAL_BIN_SHA="$(sha256sum "${FINAL_BIN_PATH}" | awk '{print $1}')"
+            fi
+            update_state_binary_info "${FINAL_BIN_PATH}" "${FINAL_BIN_SHA}" "${FINAL_BIN_HEAD}" "${FINAL_BIN_REUSED}"
+        fi
+    else
+        print_error "Impossible de sauvegarder ${source_path} vers ${FIRMWARE_ARCHIVE_PATH}."
+        return 1
+    fi
+
+    return 0
+}
+
 restore_repo_if_dirty() {
     if [[ "${CLEANUP_DONE}" == "true" ]]; then
         return 0
@@ -589,6 +644,7 @@ restore_repo_if_dirty() {
     fi
 
     if [[ "${allow_reclone}" == "true" ]]; then
+        preserve_final_binary "reclone du dépôt" "true" || true
         print_info "Suppression du dépôt Klipper local (${KLIPPER_DIR})."
         rm -rf "${KLIPPER_DIR}"
         CLEANUP_DONE="true"
@@ -1424,6 +1480,7 @@ if start_step "finalize"; then
     print_info "SHA256 (klipper.bin) : ${FINAL_BIN_SHA}"
     log_build_sha "${FINAL_BIN_PATH}" "${FINAL_BIN_SHA}" "${FINAL_BIN_HEAD}" "${FINAL_BIN_REUSED}"
 
+    preserve_final_binary "sauvegarde post-compilation" || true
     restore_repo_if_dirty
 
     if [[ "${FINAL_BIN_REUSED}" == "true" ]]; then

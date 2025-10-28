@@ -45,7 +45,8 @@ readonly LOG_BASE_DIR="${FLASH_ROOT}/logs"
 readonly LOG_DIR="${LOG_BASE_DIR}/flash_$(date +%Y-%m-%d_%H-%M-%S)"
 readonly LOG_FILE="${LOG_DIR}/flash.log"
 readonly FAILURE_REPORT="${LOG_DIR}/FAILURE_REPORT.txt"
-readonly DEFAULT_FIRMWARE_RELATIVE_PATH=".cache/klipper/out"
+readonly DEFAULT_FIRMWARE_RELATIVE_PATHS=(".cache/klipper/out" ".cache/firmware")
+readonly DEFAULT_FIRMWARE_RELATIVE_PATH="${DEFAULT_FIRMWARE_RELATIVE_PATHS[0]}"
 FIRMWARE_DISPLAY_PATH="${KLIPPER_FIRMWARE_PATH:-}" 
 FIRMWARE_FILE=""
 FIRMWARE_FORMAT=""
@@ -677,14 +678,15 @@ function collect_firmware_candidates() {
         fi
     fi
 
-    local default_dir="${FLASH_ROOT}/${DEFAULT_FIRMWARE_RELATIVE_PATH}"
-    if [[ -d "${default_dir}" ]]; then
+    for rel_path in "${DEFAULT_FIRMWARE_RELATIVE_PATHS[@]}"; do
+        local default_dir="${FLASH_ROOT}/${rel_path}"
+        [[ -d "${default_dir}" ]] || continue
         while IFS= read -r -d '' file; do
             [[ -n "${seen["${file}"]}" ]] && continue
             seen["${file}"]=1
             result+=("${file}")
         done < <(find "${default_dir}" -maxdepth 2 -type f \( -name '*.bin' -o -name '*.uf2' -o -name '*.elf' \) -print0 2>/dev/null)
-    fi
+    done
 
     local -a extra_search=("${FLASH_ROOT}")
     for dir in "${extra_search[@]}"; do
@@ -758,7 +760,9 @@ function prepare_firmware() {
     collect_firmware_candidates candidates
 
     if [[ ${#candidates[@]} -eq 0 ]]; then
-        error_msg "Aucun firmware compatible détecté dans ${DEFAULT_FIRMWARE_RELATIVE_PATH}. Lancer './build.sh' ou fournir KLIPPER_FIRMWARE_PATH."
+        local search_roots
+        search_roots=$(printf '%s' "${DEFAULT_FIRMWARE_RELATIVE_PATHS[*]}")
+        error_msg "Aucun firmware compatible détecté (recherché dans ${search_roots}). Lancer './build.sh' ou fournir KLIPPER_FIRMWARE_PATH."
         exit 1
     fi
 
