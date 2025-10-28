@@ -72,17 +72,16 @@ class StopController:
                 except Exception:
                     continue
 
-        interrupt_main = getattr(threading, "interrupt_main", None)
-        if interrupt_main is not None:
+        if hasattr(threading, "interrupt_main"):
             try:
-                interrupt_main()
+                threading.interrupt_main()
             except RuntimeError:
                 pass
         else:  # pragma: no cover - rare fallback
             try:
-                signal.raise_signal(signal.SIGINT)
-            except AttributeError:
                 os.kill(os.getpid(), signal.SIGINT)
+            except OSError:
+                raise StopRequested("Impossible d'interrompre le thread principal")
 
     def register_process(self, process: subprocess.Popen[str]) -> None:
         with self._lock:
