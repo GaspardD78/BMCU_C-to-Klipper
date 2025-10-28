@@ -138,6 +138,21 @@ Dans le menu, suivez la séquence recommandée :
 >
 > Ajoutez `--dry-run` à n'importe quelle commande pour vérifier ce qui serait exécuté.
 
+> ✋ **Nouvelle ergonomie :** Un appui sur `Ctrl+C` pendant que le menu attend
+> une entrée n'interrompt plus l'application. Le gestionnaire affiche
+> `Menu principal réarmé ; choisissez une option.` puis redessine les choix.
+> Les actions déclenchées continuent d'accepter `Ctrl+C` pour revenir au menu
+> principal après nettoyage.
+
+> 📊 **Suivi de progression :** Les logs `logs/automation-*.log` contiennent
+> désormais des lignes `[progress]` indiquant l'étape en cours (ex.
+> `receiving objects`, `compilation [#####.....] 45%`). Consultez-les pour
+> vérifier rapidement qu'une action longue ne s'est pas figée.
+
+> 🧪 Un protocole de validation manuel et ses retours d'expérience sont
+> disponibles dans [`docs/manual-test-protocol.md`](docs/manual-test-protocol.md)
+> et `docs/test-logs/`. Inspirez-vous-en pour vos propres vérifications.
+
 ---
 
 ## ⚡ Mode turbo (tout-en-un)
