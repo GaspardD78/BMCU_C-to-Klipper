@@ -533,6 +533,16 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
         sys.exit(1)
 
     print(colorize("Connexion passerelle :", Colors.HEADER))
+    print_block(
+        """
+        Le script ouvre ses propres connexions SSH pour copier le firmware et lancer
+        les commandes de flash. Renseignez donc l'adresse IP ou le nom d'hôte de la
+        passerelle (Raspberry Pi ou CB2) sur laquelle le BMCU est branché. Si vous
+        exécutez l'assistant directement depuis cette machine, indiquez simplement
+        « localhost » (ou 127.0.0.1).
+        """
+    )
+
     host_question = "IP/nom du Raspberry ou CB2"
     if profile.gateway_host:
         bmc_host = ask_text(host_question, default=profile.gateway_host)
