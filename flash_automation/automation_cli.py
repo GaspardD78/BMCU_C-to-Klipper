@@ -922,7 +922,16 @@ def interactive_menu(context: AutomationContext) -> None:
             print(f" {action.key}. {action.label}")
         print(" X. Quitter")
 
-        choice = input("Votre choix : ").strip().upper()
+        try:
+            choice = input("Votre choix : ").strip().upper()
+        except KeyboardInterrupt:
+            print()
+            context.logger.warning(
+                "Interruption clavier détectée dans le menu principal."
+            )
+            context.stop_controller.finalize_stop()
+            context.logger.info("Menu principal réarmé ; choisissez une option.")
+            continue
         if choice in {"X", "Q"}:
             context.logger.info("Fermeture du gestionnaire sur demande utilisateur")
             break

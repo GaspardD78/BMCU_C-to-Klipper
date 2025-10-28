@@ -18,10 +18,14 @@ logs/automation-<horodatage>.log
   en temps universel (UTC).
 * Les entrées de log utilisent un horodatage ISO 8601 complet avec fuseau
   (`2024-05-14T17:22:33+0000 | INFO | automation | ...`) afin de faciliter la
-  corrélation avec d'autres systèmes de supervision.
+  corrélation avec d'autres systèmes de supervision. Les lignes préfixées par
+  `[progress]` détaillent l'étape courante (clone Git, compilation, transfert…)
+  et affichent un pourcentage lorsqu'il est disponible.
 
 > 💡 En cas d'interruption manuelle (`Ctrl+C`), le script rappelle le chemin du
-> fichier de log actif juste avant de quitter.
+> fichier de log actif juste avant de quitter. Un `Ctrl+C` isolé dans le menu
+> principal affiche également `Menu principal réarmé ; choisissez une option.`
+> et continue d'alimenter le même journal.
 
 ## Tableau de synthèse en console
 
