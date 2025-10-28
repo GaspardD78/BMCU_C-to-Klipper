@@ -32,11 +32,13 @@ from __future__ import annotations
 
 import getpass
 import json
+import platform
 import shlex
 import shutil
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, asdict
@@ -145,6 +147,27 @@ class QuickProfile:
     serial_device: str = ""
 
 
+@dataclass(frozen=True)
+class SystemInfo:
+    """Informations système utiles pour l'auto-configuration."""
+
+    model: str
+    os_release: dict[str, str]
+    machine: str
+
+
+@dataclass(frozen=True)
+class EnvironmentDefaults:
+    """Valeurs par défaut déterminées à partir de l'environnement."""
+
+    label: str = "Environnement générique"
+    host: str = ""
+    user: str = getpass.getuser()
+    remote_path: str = "/tmp/klipper_firmware.bin"
+    serial_device: str = ""
+    log_root: str = "logs"
+
+
 def load_profile() -> QuickProfile:
     """Charge le profil utilisateur si disponible."""
 
@@ -165,6 +188,78 @@ def save_profile(profile: QuickProfile) -> None:
         CONFIG_FILE.write_text(json.dumps(asdict(profile), indent=2), encoding="utf-8")
     except OSError as err:
         print(colorize(f"Impossible d'enregistrer le profil : {err}", Colors.WARNING))
+
+
+# ---------------------------------------------------------------------------
+# Détection d'environnement
+# ---------------------------------------------------------------------------
+
+
+def read_os_release() -> dict[str, str]:
+    """Parse le fichier /etc/os-release si disponible."""
+
+    path = Path("/etc/os-release")
+    if not path.exists():
+        return {}
+    try:
+        data = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+
+    result: dict[str, str] = {}
+    for line in data.splitlines():
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        result[key.strip()] = value.strip().strip('"')
+    return result
+
+
+def read_system_info() -> SystemInfo:
+    """Collecte des informations système pour la détection de plateforme."""
+
+    model_path = Path("/sys/firmware/devicetree/base/model")
+    try:
+        model = model_path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        model = platform.platform()
+
+    return SystemInfo(model=model, os_release=read_os_release(), machine=platform.machine())
+
+
+def detect_environment_defaults(info: SystemInfo | None = None) -> EnvironmentDefaults:
+    """Déduit des valeurs par défaut en fonction de la plateforme courante."""
+
+    info = info or read_system_info()
+    model = info.model.lower()
+    os_id = info.os_release.get("ID", "").lower()
+    os_like = info.os_release.get("ID_LIKE", "").lower()
+
+    if "raspberry pi" in model or "raspbian" in os_id or "raspbian" in os_like:
+        return EnvironmentDefaults(label="Raspberry Pi", host="localhost", user="pi")
+
+    if "bambu" in model or "cb2" in model or "bambu" in os_id:
+        return EnvironmentDefaults(label="Bambu Lab CB2", host="localhost", user=getpass.getuser())
+
+    if info.machine.startswith("arm") or info.machine.startswith("aarch"):
+        return EnvironmentDefaults(label="Plateforme ARM", host="localhost", user=getpass.getuser())
+
+    return EnvironmentDefaults()
+
+
+def apply_environment_defaults(profile: QuickProfile, defaults: EnvironmentDefaults) -> None:
+    """Complète le profil avec les valeurs détectées lorsqu'elles manquent."""
+
+    if not profile.gateway_host:
+        profile.gateway_host = defaults.host
+    if not profile.gateway_user:
+        profile.gateway_user = defaults.user
+    if not profile.remote_firmware_path:
+        profile.remote_firmware_path = defaults.remote_path
+    if not profile.serial_device and defaults.serial_device:
+        profile.serial_device = defaults.serial_device
+    if not profile.log_root:
+        profile.log_root = defaults.log_root
 
 
 # ---------------------------------------------------------------------------
@@ -419,7 +514,46 @@ def print_block(message: str) -> None:
     print()
 
 
-def ask_yes_no(question: str, *, default: bool | None = None) -> bool:
+class PromptTimer:
+    """Affiche périodiquement un message d'aide pendant une saisie."""
+
+    def __init__(self, prompt: str, message: str | None, *, interval: float = 30.0):
+        self.prompt = prompt
+        self.message = message
+        self.interval = interval
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def _worker(self) -> None:
+        if not self.message:
+            return
+        elapsed = 0.0
+        while not self._stop.wait(self.interval):
+            elapsed += self.interval
+            print()
+            print(
+                colorize(
+                    f"⏱️ Astuce ({int(elapsed)}s) : {self.message}",
+                    Colors.WARNING,
+                )
+            )
+            if self.prompt:
+                print(self.prompt, end="", flush=True)
+
+    def __enter__(self):
+        if self.message:
+            self._thread = threading.Thread(target=self._worker, daemon=True)
+            self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self.interval)
+        return False
+
+
+def ask_yes_no(question: str, *, default: bool | None = None, help_message: str | None = None) -> bool:
     """Demande une confirmation oui/non à l'utilisateur."""
     if default is True:
         suffix = " [O/n] "
@@ -429,7 +563,9 @@ def ask_yes_no(question: str, *, default: bool | None = None) -> bool:
         suffix = " [o/n] "
 
     while True:
-        answer = input(colorize(question, Colors.OKCYAN) + suffix).strip().lower()
+        prompt = colorize(question, Colors.OKCYAN) + suffix
+        with PromptTimer(prompt, help_message):
+            answer = input(prompt).strip().lower()
         if not answer and default is not None:
             return default
         if answer in {"o", "oui", "y", "yes"}:
@@ -439,7 +575,13 @@ def ask_yes_no(question: str, *, default: bool | None = None) -> bool:
         print(colorize("Réponse invalide. Merci d'indiquer 'o' pour oui ou 'n' pour non.", Colors.WARNING))
 
 
-def ask_text(question: str, *, default: str | None = None, required: bool = True) -> str:
+def ask_text(
+    question: str,
+    *,
+    default: str | None = None,
+    required: bool = True,
+    help_message: str | None = None,
+) -> str:
     """Récupère une chaîne de caractères en respectant un défaut éventuel."""
     while True:
         prompt = colorize(f"{question}", Colors.OKCYAN)
@@ -447,7 +589,8 @@ def ask_text(question: str, *, default: str | None = None, required: bool = True
             prompt += f" [{default}]"
         prompt += " : "
 
-        value = input(prompt).strip()
+        with PromptTimer(prompt, help_message):
+            value = input(prompt).strip()
         if not value:
             if default is not None:
                 return default
@@ -458,10 +601,12 @@ def ask_text(question: str, *, default: str | None = None, required: bool = True
         return value
 
 
-def ask_password(question: str) -> str:
+def ask_password(question: str, *, help_message: str | None = None) -> str:
     """Demande un mot de passe sans l'afficher."""
     while True:
-        password = getpass.getpass(prompt=colorize(f"{question} : ", Colors.OKCYAN))
+        prompt = colorize(f"{question} : ", Colors.OKCYAN)
+        with PromptTimer(prompt, help_message):
+            password = getpass.getpass(prompt=prompt)
         if password:
             return password
         print(colorize("Le mot de passe ne peut pas être vide.", Colors.WARNING))
@@ -531,7 +676,7 @@ def ask_menu(options: list[str], *, default_index: int = 0) -> int:
         print(colorize("Merci d'entrer un numéro valide.", Colors.WARNING))
 
 
-def gather_user_choices(profile: QuickProfile) -> UserChoices:
+def gather_user_choices(profile: QuickProfile, environment: EnvironmentDefaults) -> UserChoices:
     """Collecte les informations essentielles en mode simplifié."""
 
     intro_text = f"""
@@ -564,21 +709,44 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
     )
 
     host_question = "IP/nom du Raspberry ou CB2"
-    host_default = profile.gateway_host or "localhost"
-    user_default = profile.gateway_user or "pi"
+    host_default = profile.gateway_host or environment.host or "localhost"
+    user_default = profile.gateway_user or environment.user or "pi"
     ssh_port = 22
 
     attempt = 0
     detected_devices: list[str] = []
     while True:
         if attempt == 0:
-            bmc_host = ask_text(host_question, default=host_default, required=True)
-            bmc_user = ask_text("Utilisateur SSH", default=user_default, required=True)
+            bmc_host = ask_text(
+                host_question,
+                default=host_default,
+                required=True,
+                help_message="Indiquez l'adresse IP ou le nom d'hôte de la passerelle.",
+            )
+            bmc_user = ask_text(
+                "Utilisateur SSH",
+                default=user_default,
+                required=True,
+                help_message="L'utilisateur dispose des droits de flash sur la passerelle.",
+            )
         else:
             print(colorize("Réessayons la connexion. Ajustez les informations si nécessaire.", Colors.WARNING))
-            bmc_host = ask_text(host_question, default=bmc_host or host_default, required=True)
-            bmc_user = ask_text("Utilisateur SSH", default=bmc_user or user_default, required=True)
-        bmc_password = ask_password("Mot de passe SSH")
+            bmc_host = ask_text(
+                host_question,
+                default=bmc_host or host_default,
+                required=True,
+                help_message="Vérifiez l'accès réseau ou utilisez localhost sur la passerelle.",
+            )
+            bmc_user = ask_text(
+                "Utilisateur SSH",
+                default=bmc_user or user_default,
+                required=True,
+                help_message="Essayez pi, bambu ou l'utilisateur courant selon la plateforme.",
+            )
+        bmc_password = ask_password(
+            "Mot de passe SSH",
+            help_message="Le mot de passe reste masqué. Ctrl+C pour annuler.",
+        )
 
         with progress_step("Diagnostic de la passerelle"):
             remote_checks, detected_devices = run_remote_prerequisite_checks(
@@ -596,7 +764,11 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
                 Colors.FAIL,
             )
         )
-        if not ask_yes_no("Souhaitez-vous réessayer ?", default=True):
+        if not ask_yes_no(
+            "Souhaitez-vous réessayer ?",
+            default=True,
+            help_message="Corrigez les identifiants ou vérifiez le réseau avant de continuer.",
+        ):
             print(colorize("Opération annulée.", Colors.WARNING))
             sys.exit(1)
 
@@ -616,32 +788,40 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
         firmware_file = detected_firmware
     else:
         while True:
-            firmware_input = ask_text("Chemin du firmware", required=True)
+            firmware_input = ask_text(
+                "Chemin du firmware",
+                required=True,
+                help_message="Utilisez ./klipper.bin ou un chemin absolu vers le firmware.",
+            )
             try:
                 firmware_file = ensure_firmware_path(firmware_input)
                 break
             except FileNotFoundError as err:
                 print(err)
 
-    if profile.remote_firmware_path:
-        remote_firmware_path = ask_text(
-            "Chemin distant (SSH)", default=profile.remote_firmware_path
-        )
-    else:
-        remote_firmware_path = ask_text(
-            "Chemin distant (SSH)", default="/tmp/klipper_firmware.bin"
-        )
+    remote_default = profile.remote_firmware_path or environment.remote_path
+    remote_firmware_path = ask_text(
+        "Chemin distant (SSH)",
+        default=remote_default,
+        help_message="Le firmware est copié vers ce chemin sur la passerelle.",
+    )
     profile.remote_firmware_path = remote_firmware_path
 
     wait_for_reboot = ask_yes_no(
-        "Attendre le reboot automatique ?", default=profile.wait_for_reboot
+        "Attendre le reboot automatique ?",
+        default=profile.wait_for_reboot,
+        help_message="Déconseillez 'non' sauf si vous surveillez manuellement le BMCU.",
     )
     profile.wait_for_reboot = wait_for_reboot
     reboot_timeout = 600
     reboot_check_interval = 10
 
-    log_default = profile.log_root or "logs"
-    log_root_input = ask_text("Dossier de logs", default=log_default)
+    log_default = profile.log_root or environment.log_root
+    log_root_input = ask_text(
+        "Dossier de logs",
+        default=log_default,
+        help_message="Les rapports d'exécution seront stockés dans ce dossier.",
+    )
     profile.log_root = log_root_input
     log_root = Path(log_root_input).expanduser().resolve()
 
@@ -741,11 +921,11 @@ def run_build() -> bool:
     return True
 
 
-def run_flash_flow(profile: QuickProfile) -> int:
+def run_flash_flow(profile: QuickProfile, environment: EnvironmentDefaults) -> int:
     """Enchaîne la collecte d'infos puis le flash."""
 
     try:
-        choices = gather_user_choices(profile)
+        choices = gather_user_choices(profile, environment)
     except KeyboardInterrupt:
         print(colorize("\nInterruption utilisateur.", Colors.WARNING))
         return 1
@@ -753,7 +933,11 @@ def run_flash_flow(profile: QuickProfile) -> int:
     save_profile(profile)
     summarize_choices(choices)
 
-    if not ask_yes_no("On lance le flash ?", default=True):
+    if not ask_yes_no(
+        "On lance le flash ?",
+        default=True,
+        help_message="Validez pour démarrer immédiatement le processus de flash.",
+    ):
         print(colorize("Opération annulée.", Colors.WARNING))
         return 0
 
@@ -866,44 +1050,69 @@ def generate_assistance_prompt(
     ).strip()
 
 
+def build_home_summary(profile: QuickProfile, environment: EnvironmentDefaults) -> str:
+    """Construit le bloc récapitulatif affiché au démarrage."""
+
+    firmware = find_default_firmware()
+    firmware_display = str(firmware) if firmware else "à générer (build.sh)"
+    host_display = profile.gateway_host or environment.host or "(à définir)"
+    user_display = profile.gateway_user or environment.user or "(à définir)"
+    remote_display = profile.remote_firmware_path or environment.remote_path
+    serial_display = profile.serial_device or "(auto)"
+    log_display = profile.log_root or environment.log_root
+
+    return f"""
+    {colorize('Assistant BMCU → Klipper', f'{Colors.BOLD}{Colors.OKBLUE}')}
+
+      • Environnement détecté : {environment.label}
+      • Passerelle suggérée   : {user_display}@{host_display}
+      • Firmware local        : {firmware_display}
+      • Copie distante        : {remote_display}
+      • Périphérique USB      : {serial_display}
+      • Dossier de logs       : {log_display}
+    """
+
+
+def show_main_screen(profile: QuickProfile, environment: EnvironmentDefaults) -> int:
+    """Affiche l'écran d'accueil unique avec les options principales."""
+
+    print_block(build_home_summary(profile, environment))
+    print(colorize("Choisissez une action :", Colors.HEADER))
+    return ask_menu(
+        [
+            "Flasher le BMCU (assistant complet)",
+            "Construire le firmware Klipper (build.sh)",
+            "Quitter",
+        ],
+        default_index=0,
+    )
+
+
 def main() -> int:
     """Point d'entrée CLI."""
 
     display_logo()
     profile = load_profile()
+    environment = detect_environment_defaults()
+    apply_environment_defaults(profile, environment)
 
-    intro_text = """
-    Bienvenue ! Choisissez une action :
-      1. Construire le firmware Klipper.
-      2. Lancer le flash.
-      3. Quitter.
+    selection = show_main_screen(profile, environment)
 
-    Appuyez sur Entrée pour le choix par défaut.
-    """
-    print_block(intro_text)
+    if selection == 0:
+        return run_flash_flow(profile, environment)
 
-    while True:
-        print(colorize("Menu rapide :", Colors.HEADER))
-        selection = ask_menu(
-            [
-                "Préparer le firmware (build.sh)",
-                "Flasher le BMCU",
-                "Quitter",
-            ],
-            default_index=0,
-        )
+    if selection == 1:
+        build_success = run_build()
+        if build_success and ask_yes_no(
+            "Enchaîner avec le flash ?",
+            default=True,
+            help_message="Acceptez pour utiliser directement le firmware fraîchement compilé.",
+        ):
+            return run_flash_flow(profile, environment)
+        return 0 if build_success else 1
 
-        if selection == 0:
-            build_success = run_build()
-            if build_success and ask_yes_no("Enchaîner avec le flash ?", default=True):
-                return run_flash_flow(profile)
-            continue
-
-        if selection == 1:
-            return run_flash_flow(profile)
-
-        print(colorize("À bientôt !", Colors.OKBLUE))
-        return 0
+    print(colorize("À bientôt !", Colors.OKBLUE))
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover - point d'entrée CLI
