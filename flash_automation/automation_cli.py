@@ -12,13 +12,16 @@ from __future__ import annotations
 import argparse
 import getpass
 import hashlib
+import itertools
 import json
 import logging
 import os
+import select
 import shlex
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -422,12 +425,40 @@ class AutomationContext:
 
         try:
             assert process.stdout is not None  # pour mypy/pyright
-            for line in process.stdout:
-                cleaned = line.rstrip()
-                if cleaned:
-                    self.logger.info("[sortie] %s", cleaned)
-                if self.stop_controller.stop_requested:
+            stdout = process.stdout
+            inactivity_threshold = 5.0
+            spinner_interval = 5.0
+            spinner_frames = itertools.cycle(["⏳", "⌛", "🕒", "🕘"])
+            last_output = time.monotonic()
+            next_indicator_time = last_output + inactivity_threshold
+            indicator_active = False
+
+            while True:
+                self.stop_controller.raise_if_requested()
+
+                ready, _, _ = select.select([stdout], [], [], 0.5)
+                if ready:
+                    line = stdout.readline()
+                    if line == "":
+                        break
+                    cleaned = line.rstrip()
+                    if cleaned:
+                        if indicator_active:
+                            indicator_active = False
+                        self.logger.info("[sortie] %s", cleaned)
+                    last_output = time.monotonic()
+                    next_indicator_time = last_output + inactivity_threshold
+                    continue
+
+                if process.poll() is not None:
                     break
+
+                now = time.monotonic()
+                if now >= next_indicator_time:
+                    frame = next(spinner_frames)
+                    self.logger.info("%s Toujours en cours… (commande %s)", frame, printable)
+                    indicator_active = True
+                    next_indicator_time = now + spinner_interval
 
             return_code = process.wait()
         except KeyboardInterrupt:
