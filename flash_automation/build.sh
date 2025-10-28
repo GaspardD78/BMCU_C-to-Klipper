@@ -78,6 +78,39 @@ case "${KLIPPER_FETCH_REFSPEC}" in
         ;;
 esac
 
+LOG_DIR="${FLASH_ROOT}/logs"
+STATE_FILE="${LOG_DIR}/state.json"
+BUILD_LOG_BASENAME="build"
+declare -a STEP_SEQUENCE=("dependencies" "repo_sync" "overrides" "compile" "finalize")
+declare -A STEP_INDEX=(
+    [dependencies]=0
+    [repo_sync]=1
+    [overrides]=2
+    [compile]=3
+    [finalize]=4
+)
+STATE_BINARY_INFO_JSON=""
+CURRENT_STEP=""
+RESUME_FROM_STEP=""
+SIGNAL_CAUGHT=""
+SHOULD_RESTORE_REPO="false"
+FINAL_BIN_PATH=""
+FINAL_BIN_SHA=""
+FINAL_BIN_HEAD=""
+FINAL_BIN_REUSED="false"
+REUSED_BIN_SHA=""
+REUSED_BIN_MTIME=""
+REUSED_BIN_HEAD=""
+REUSED_BIN_PATH=""
+CLEANUP_DONE="false"
+PREV_STEP=""
+PREV_STATUS=""
+PREV_UPDATED=""
+PREV_BIN_PATH=""
+PREV_BIN_SHA=""
+PREV_BIN_HEAD=""
+PREV_BIN_REUSED=""
+
 KLIPPER_METADATA_FILE="${CACHE_ROOT}/klipper.bin.meta"
 INPUT_FINGERPRINT=""
 INPUT_LATEST_MTIME="0"
@@ -104,6 +137,441 @@ print_success() {
 
 print_error() {
     printf "%s[ERREUR]%s %s\n" "${COLOR_ERROR}" "${COLOR_RESET}" "$1" >&2
+}
+
+ensure_logs_dir() {
+    mkdir -p "${LOG_DIR}"
+}
+
+step_label() {
+    local step="$1"
+    case "${step}" in
+        dependencies)
+            printf '%s' "Vérification des dépendances"
+            ;;
+        repo_sync)
+            printf '%s' "Préparation du dépôt Klipper"
+            ;;
+        overrides)
+            printf '%s' "Application des correctifs"
+            ;;
+        compile)
+            printf '%s' "Compilation du firmware"
+            ;;
+        finalize)
+            printf '%s' "Nettoyage final"
+            ;;
+        *)
+            printf '%s' "${step}"
+            ;;
+    esac
+}
+
+next_step() {
+    local step="$1"
+    case "${step}" in
+        dependencies)
+            printf '%s' "repo_sync"
+            ;;
+        repo_sync)
+            printf '%s' "overrides"
+            ;;
+        overrides)
+            printf '%s' "compile"
+            ;;
+        compile)
+            printf '%s' "finalize"
+            ;;
+        finalize)
+            printf '%s' "completed"
+            ;;
+        *)
+            printf '%s' "completed"
+            ;;
+    esac
+}
+
+update_state_binary_info() {
+    local path="$1"
+    local sha="$2"
+    local head="$3"
+    local reused="$4"
+
+    STATE_BINARY_INFO_JSON="$(STATE_BIN_PATH="${path}" STATE_BIN_SHA="${sha}" STATE_BIN_HEAD="${head}" STATE_BIN_REUSED="${reused}" python3 - <<'PY'
+import json
+import os
+
+path = os.environ.get("STATE_BIN_PATH")
+sha = os.environ.get("STATE_BIN_SHA")
+head = os.environ.get("STATE_BIN_HEAD")
+reused = os.environ.get("STATE_BIN_REUSED")
+
+data = {}
+if path:
+    data["binary_path"] = path
+if sha:
+    data["binary_sha256"] = sha
+if head:
+    data["klipper_head"] = head
+if reused:
+    data["reused"] = reused.lower() == "true"
+
+if data:
+    print(json.dumps(data, ensure_ascii=False))
+else:
+    print("")
+PY
+)"
+}
+
+clear_state_binary_info() {
+    STATE_BINARY_INFO_JSON=""
+}
+
+write_state() {
+    local step="$1"
+    local status="$2"
+    local timestamp
+
+    timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    ensure_logs_dir
+
+    STATE_EXTRA_JSON="${STATE_BINARY_INFO_JSON}" python3 - "$STATE_FILE" "$step" "$status" "$timestamp" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+step = sys.argv[2]
+status = sys.argv[3]
+timestamp = sys.argv[4]
+extra_raw = os.environ.get("STATE_EXTRA_JSON", "")
+
+data = {
+    "step": step,
+    "status": status,
+    "updated_at": timestamp,
+}
+
+if extra_raw:
+    try:
+        extra = json.loads(extra_raw)
+    except json.JSONDecodeError:
+        extra = {}
+    if isinstance(extra, dict):
+        data.update(extra)
+
+tmp_path = path.with_suffix(path.suffix + ".tmp")
+path.parent.mkdir(parents=True, exist_ok=True)
+
+with tmp_path.open("w", encoding="utf-8") as handle:
+    json.dump(data, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+
+tmp_path.replace(path)
+PY
+}
+
+read_state() {
+    if [[ ! -f "${STATE_FILE}" ]]; then
+        return 1
+    fi
+
+    mapfile -t __STATE_DATA < <(python3 - "$STATE_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    data = {}
+
+print(data.get("step", ""))
+print(data.get("status", ""))
+print(data.get("updated_at", ""))
+print(data.get("binary_path", ""))
+print(data.get("binary_sha256", ""))
+print(data.get("klipper_head", ""))
+print(str(data.get("reused", "")))
+PY
+    )
+
+    PREV_STEP="${__STATE_DATA[0]}"
+    PREV_STATUS="${__STATE_DATA[1]}"
+    PREV_UPDATED="${__STATE_DATA[2]}"
+    PREV_BIN_PATH="${__STATE_DATA[3]}"
+    PREV_BIN_SHA="${__STATE_DATA[4]}"
+    PREV_BIN_HEAD="${__STATE_DATA[5]}"
+    PREV_BIN_REUSED="${__STATE_DATA[6]}"
+
+    return 0
+}
+
+should_skip_step() {
+    local step="$1"
+
+    if [[ -z "${RESUME_FROM_STEP}" ]]; then
+        return 1
+    fi
+
+    if [[ "${step}" == "dependencies" ]]; then
+        return 1
+    fi
+
+    local resume_index="${STEP_INDEX[${RESUME_FROM_STEP}]:--1}"
+    local step_index="${STEP_INDEX[${step}]:--1}"
+
+    if (( step_index < resume_index )); then
+        return 0
+    fi
+
+    return 1
+}
+
+mark_step_skipped() {
+    local step="$1"
+    local label
+
+    label="$(step_label "${step}")"
+    print_info "Étape ${label} déjà réalisée, saut."
+
+    local step_index="${STEP_INDEX[${step}]:--1}"
+    local overrides_index="${STEP_INDEX[overrides]:-2}"
+    if (( step_index >= overrides_index )); then
+        SHOULD_RESTORE_REPO="true"
+    fi
+
+    local next
+    next="$(next_step "${step}")"
+    if [[ "${next}" == "completed" ]]; then
+        clear_state_binary_info
+        write_state "completed" "success"
+    else
+        write_state "${next}" "pending"
+    fi
+}
+
+start_step() {
+    local step="$1"
+
+    if [[ -n "${RESUME_FROM_STEP}" ]] && [[ "${RESUME_FROM_STEP}" != "${step}" ]]; then
+        if should_skip_step "${step}"; then
+            mark_step_skipped "${step}"
+            return 1
+        fi
+    fi
+
+    local label
+    label="$(step_label "${step}")"
+    print_info "➜ ${label}"
+    CURRENT_STEP="${step}"
+    write_state "${step}" "running"
+    return 0
+}
+
+finish_step() {
+    local step="$1"
+    local next
+
+    if [[ "${CURRENT_STEP}" == "${step}" ]]; then
+        CURRENT_STEP=""
+    fi
+
+    next="$(next_step "${step}")"
+    if [[ "${next}" == "completed" ]]; then
+        clear_state_binary_info
+        write_state "completed" "success"
+    else
+        write_state "${next}" "pending"
+    fi
+}
+
+initialize_state() {
+    ensure_logs_dir
+
+    PREV_STEP=""
+    PREV_STATUS=""
+    PREV_UPDATED=""
+    PREV_BIN_PATH=""
+    PREV_BIN_SHA=""
+    PREV_BIN_HEAD=""
+    PREV_BIN_REUSED=""
+
+    local resume_choice="yes"
+
+    if read_state; then
+        local lower_status="${PREV_STATUS,,}"
+        if [[ "${PREV_STEP}" == "completed" && "${lower_status}" == "success" ]]; then
+            RESUME_FROM_STEP="${STEP_SEQUENCE[0]}"
+            clear_state_binary_info
+            SHOULD_RESTORE_REPO="false"
+            write_state "${RESUME_FROM_STEP}" "pending"
+            return
+        fi
+
+        if [[ -n "${PREV_STEP}" ]]; then
+            local label="$(step_label "${PREV_STEP}")"
+            local message="Une exécution précédente a été arrêtée à l'étape \"${label}\" (statut ${PREV_STATUS:-inconnu})."
+            print_info "${message}"
+
+            if [[ -t 0 ]]; then
+                read -r -p "Souhaitez-vous reprendre cette étape ? [O/n] " resume_prompt || resume_prompt=""
+                case "${resume_prompt}" in
+                    [nN]*)
+                        resume_choice="no"
+                        ;;
+                esac
+            fi
+
+            if [[ "${resume_choice}" == "yes" ]]; then
+                RESUME_FROM_STEP="${PREV_STEP}"
+                local reused_flag="false"
+                if [[ "${PREV_BIN_REUSED,,}" == "true" ]]; then
+                    reused_flag="true"
+                fi
+                if [[ -n "${PREV_BIN_PATH}" ]]; then
+                    FINAL_BIN_PATH="${PREV_BIN_PATH}"
+                    FINAL_BIN_SHA="${PREV_BIN_SHA}"
+                    FINAL_BIN_HEAD="${PREV_BIN_HEAD}"
+                    FINAL_BIN_REUSED="${reused_flag}"
+                    update_state_binary_info "${FINAL_BIN_PATH}" "${FINAL_BIN_SHA}" "${FINAL_BIN_HEAD}" "${FINAL_BIN_REUSED}"
+                fi
+                local resume_index="${STEP_INDEX[${RESUME_FROM_STEP}]:--1}"
+                local overrides_index="${STEP_INDEX[overrides]:-2}"
+                if (( resume_index >= overrides_index )); then
+                    SHOULD_RESTORE_REPO="true"
+                fi
+                write_state "${RESUME_FROM_STEP}" "pending"
+                return
+            fi
+        fi
+    fi
+
+    RESUME_FROM_STEP="${STEP_SEQUENCE[0]}"
+    clear_state_binary_info
+    SHOULD_RESTORE_REPO="false"
+    write_state "${RESUME_FROM_STEP}" "pending"
+}
+
+log_build_sha() {
+    local bin_path="$1"
+    local bin_sha="$2"
+    local head="$3"
+    local reused="$4"
+
+    ensure_logs_dir
+
+    local timestamp
+    timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    local base_name
+    base_name="${LOG_DIR}/${BUILD_LOG_BASENAME}-$(date +%Y%m%d-%H%M%S)"
+    local log_file="${base_name}.log"
+    local suffix=1
+
+    while [[ -e "${log_file}" ]]; do
+        log_file="${base_name}-${suffix}.log"
+        ((suffix++))
+    done
+
+    {
+        printf 'timestamp=%s\n' "${timestamp}"
+        printf 'klipper_head=%s\n' "${head}"
+        printf 'binary_path=%s\n' "${bin_path}"
+        printf 'sha256=%s\n' "${bin_sha}"
+        printf 'reused=%s\n' "${reused}"
+    } >"${log_file}"
+
+    print_info "Empreinte SHA256 enregistrée dans ${log_file}"
+}
+
+restore_repo_if_dirty() {
+    if [[ "${CLEANUP_DONE}" == "true" ]]; then
+        return 0
+    fi
+
+    if [[ "${SHOULD_RESTORE_REPO}" != "true" ]]; then
+        return 0
+    fi
+
+    if [[ ! -d "${KLIPPER_DIR}/.git" ]]; then
+        CLEANUP_DONE="true"
+        return 0
+    fi
+
+    local allow_reclone="true"
+    if [[ "${USE_EXISTING_KLIPPER}" == "true" ]]; then
+        allow_reclone="false"
+    fi
+
+    local status_output
+    if ! status_output="$(git -C "${KLIPPER_DIR}" status --porcelain 2>/dev/null)"; then
+        print_error "Impossible de vérifier l'état du dépôt Klipper (${KLIPPER_DIR})."
+        return 1
+    fi
+
+    if [[ -z "${status_output}" ]]; then
+        CLEANUP_DONE="true"
+        return 0
+    fi
+
+    print_info "Nettoyage de l'arbre de travail Klipper..."
+
+    if git -C "${KLIPPER_DIR}" restore --source=HEAD --staged --worktree . >/dev/null 2>&1; then
+        if [[ -z "$(git -C "${KLIPPER_DIR}" status --porcelain 2>/dev/null)" ]]; then
+            print_success "Dépôt Klipper restauré dans un état propre."
+            CLEANUP_DONE="true"
+            return 0
+        fi
+        print_info "Le dépôt reste modifié après restauration, reclonage nécessaire."
+    else
+        print_info "La restauration Git a échoué, reclonage nécessaire."
+    fi
+
+    if [[ "${allow_reclone}" == "true" ]]; then
+        print_info "Suppression du dépôt Klipper local (${KLIPPER_DIR})."
+        rm -rf "${KLIPPER_DIR}"
+        CLEANUP_DONE="true"
+        return 0
+    fi
+
+    print_error "Le dépôt Klipper fourni (${KLIPPER_DIR}) reste modifié. Merci de le nettoyer manuellement."
+    return 1
+}
+
+handle_signal() {
+    local signal_name="$1"
+    SIGNAL_CAUGHT="${signal_name}"
+    print_error "Signal ${signal_name} reçu, interruption en cours..."
+
+    if [[ -n "${CURRENT_STEP}" ]]; then
+        write_state "${CURRENT_STEP}" "interrupted"
+    else
+        write_state "${RESUME_FROM_STEP:-${STEP_SEQUENCE[0]}}" "interrupted"
+    fi
+
+    restore_repo_if_dirty || true
+    exit 128
+}
+
+handle_exit() {
+    local exit_code=$?
+
+    if [[ -n "${SIGNAL_CAUGHT}" ]]; then
+        return
+    fi
+
+    if (( exit_code != 0 )); then
+        if [[ -n "${CURRENT_STEP}" ]]; then
+            write_state "${CURRENT_STEP}" "failed"
+        fi
+    fi
+
+    restore_repo_if_dirty || true
 }
 
 bootstrap_toolchain() {
@@ -227,29 +695,6 @@ file_mtime() {
 
     return 1
 }
-
-if [[ -f "${LOGO_FILE}" ]]; then
-    cat "${LOGO_FILE}"
-    echo
-fi
-
-print_info "Vérification des dépendances..."
-
-ensure_toolchain
-
-declare -A REQUIRED_COMMANDS=(
-    [git]="git est requis. Assurez-vous qu'il est installé."
-    [make]="make est requis. Installez les outils de compilation (build-essential)."
-    [stat]="stat est requis pour lire les horodatages (GNU coreutils ou BSD stat)."
-    [sha256sum]="sha256sum est requis pour valider les binaires existants. Installez coreutils."
-)
-REQUIRED_COMMANDS["${TOOLCHAIN_PREFIX}gcc"]="la chaîne d'outils ${TOOLCHAIN_PREFIX}gcc est absente. Installez 'gcc-riscv32-unknown-elf', définissez CROSS_PREFIX ou laissez le script télécharger la toolchain officielle."
-
-ordered_commands=(git make stat sha256sum "${TOOLCHAIN_PREFIX}gcc")
-for cmd in "${ordered_commands[@]}"; do
-    require_command "${cmd}" "${REQUIRED_COMMANDS[${cmd}]}"
-    print_info "  • ${cmd} ✅"
-done
 
 configure_klipper_remote() {
     local repo="$1"
@@ -505,6 +950,10 @@ maybe_reuse_existing_binary() {
     read -r -p "Souhaitez-vous le réutiliser ? [o/N] " reuse_choice
     case "${reuse_choice}" in
         [oOyY])
+            REUSED_BIN_SHA="${bin_sha}"
+            REUSED_BIN_MTIME="${bin_mtime}"
+            REUSED_BIN_HEAD="${current_head}"
+            REUSED_BIN_PATH="${existing_bin}"
             record_build_metadata "${current_head}" "${bin_sha}" "${bin_mtime}"
             print_success "Réutilisation de ${existing_bin}."
             return 0
@@ -517,19 +966,39 @@ maybe_reuse_existing_binary() {
     return 1
 }
 
-ensure_klipper_repo
+load_metadata_binary_info() {
+    local meta_head=""
+    local meta_sha=""
 
-if [[ "${USE_EXISTING_KLIPPER}" == "true" && -f "${KLIPPER_DIR}/.config" ]]; then
-    if [[ ! -f "${KLIPPER_DIR}/.config.bmcuc_backup" ]]; then
-        print_info "Sauvegarde de la configuration existante (${KLIPPER_DIR}/.config.bmcuc_backup)..."
-        cp "${KLIPPER_DIR}/.config" "${KLIPPER_DIR}/.config.bmcuc_backup"
-    else
-        print_info "Configuration existante déjà sauvegardée (${KLIPPER_DIR}/.config.bmcuc_backup)."
+    if [[ -f "${KLIPPER_METADATA_FILE}" ]]; then
+        while IFS='=' read -r key value; do
+            case "${key}" in
+                KLIPPER_HEAD)
+                    meta_head="${value}"
+                    ;;
+                BIN_SHA256)
+                    meta_sha="${value}"
+                    ;;
+            esac
+        done < "${KLIPPER_METADATA_FILE}"
     fi
-fi
 
-print_info "Copie de la configuration Klipper..."
-cp "${SCRIPT_DIR}/klipper.config" "${KLIPPER_DIR}/.config"
+    if [[ -z "${FINAL_BIN_PATH}" ]]; then
+        FINAL_BIN_PATH="${KLIPPER_DIR}/out/klipper.bin"
+    fi
+
+    if [[ -z "${FINAL_BIN_HEAD}" && -n "${meta_head}" ]]; then
+        FINAL_BIN_HEAD="${meta_head}"
+    fi
+
+    if [[ -z "${FINAL_BIN_SHA}" && -n "${meta_sha}" ]]; then
+        FINAL_BIN_SHA="${meta_sha}"
+    fi
+
+    if [[ -n "${FINAL_BIN_SHA}" ]]; then
+        update_state_binary_info "${FINAL_BIN_PATH}" "${FINAL_BIN_SHA}" "${FINAL_BIN_HEAD}" "${FINAL_BIN_REUSED}"
+    fi
+}
 
 update_cross_prefix() {
     local config_file="${KLIPPER_DIR}/.config"
@@ -580,8 +1049,6 @@ PY
     fi
 }
 
-update_cross_prefix
-
 apply_patch() {
     local patch_file="$1"
 
@@ -615,38 +1082,177 @@ copy_tree() {
     fi
 }
 
-apply_patch "${OVERRIDES_DIR}/Makefile.patch"
-apply_patch "${OVERRIDES_DIR}/src/Kconfig.patch"
-copy_tree "${OVERRIDES_DIR}/src/ch32v20x" "${KLIPPER_DIR}/src/ch32v20x"
-copy_tree "${OVERRIDES_DIR}/src/generic" "${KLIPPER_DIR}/src/generic"
-copy_tree "${OVERRIDES_DIR}/config/boards" "${KLIPPER_DIR}/config/boards"
-
-refresh_inputs_state
-
-if maybe_reuse_existing_binary; then
-    exit 0
+if [[ -f "${LOGO_FILE}" ]]; then
+    cat "${LOGO_FILE}"
+    echo
 fi
 
-print_info "Compilation du firmware Klipper..."
-cd "${KLIPPER_DIR}"
-make clean
-make CROSS_PREFIX="${TOOLCHAIN_PREFIX}"
-
-BIN_PATH="${KLIPPER_DIR}/out/klipper.bin"
-if [[ ! -f "${BIN_PATH}" ]]; then
-    print_error "La compilation s'est terminée sans générer ${BIN_PATH}."
+if ! command -v python3 >/dev/null 2>&1; then
+    print_error "python3 est requis pour exécuter ce script (gestion d'état et calculs SHA256)."
     exit 1
 fi
 
-if ! CURRENT_HEAD="$(git -C "${KLIPPER_DIR}" rev-parse HEAD 2>/dev/null)"; then
-    CURRENT_HEAD="inconnu"
+initialize_state
+
+trap 'handle_signal SIGINT' INT
+trap 'handle_signal SIGTERM' TERM
+trap 'handle_exit' EXIT
+
+if start_step "dependencies"; then
+    print_info "Vérification des dépendances..."
+    ensure_toolchain
+
+    declare -A REQUIRED_COMMANDS=(
+        [git]="git est requis. Assurez-vous qu'il est installé."
+        [make]="make est requis. Installez les outils de compilation (build-essential)."
+        [stat]="stat est requis pour lire les horodatages (GNU coreutils ou BSD stat)."
+        [sha256sum]="sha256sum est requis pour valider les binaires existants. Installez coreutils."
+        [python3]="python3 est requis pour les empreintes et la gestion d'état. Installez-le puis relancez."
+    )
+    REQUIRED_COMMANDS["${TOOLCHAIN_PREFIX}gcc"]="la chaîne d'outils ${TOOLCHAIN_PREFIX}gcc est absente. Installez 'gcc-riscv32-unknown-elf', définissez CROSS_PREFIX ou laissez le script télécharger la toolchain officielle."
+
+    ordered_commands=(git make stat sha256sum python3 "${TOOLCHAIN_PREFIX}gcc")
+    for cmd in "${ordered_commands[@]}"; do
+        require_command "${cmd}" "${REQUIRED_COMMANDS[${cmd}]}"
+        print_info "  • ${cmd} ✅"
+    done
+
+    finish_step "dependencies"
 fi
 
-BIN_SHA="$(sha256sum "${BIN_PATH}" | awk '{print $1}')"
-if ! BIN_MTIME="$(file_mtime "${BIN_PATH}")"; then
-    print_error "Impossible de déterminer l'horodatage de ${BIN_PATH}."
-    exit 1
+if start_step "repo_sync"; then
+    ensure_klipper_repo
+    finish_step "repo_sync"
 fi
-record_build_metadata "${CURRENT_HEAD}" "${BIN_SHA}" "${BIN_MTIME}"
 
-print_success "Compilation terminée. Le firmware se trouve dans ${BIN_PATH} (SHA256 ${BIN_SHA:0:12})."
+if start_step "overrides"; then
+    if [[ "${USE_EXISTING_KLIPPER}" == "true" && -f "${KLIPPER_DIR}/.config" ]]; then
+        if [[ ! -f "${KLIPPER_DIR}/.config.bmcuc_backup" ]]; then
+            print_info "Sauvegarde de la configuration existante (${KLIPPER_DIR}/.config.bmcuc_backup)..."
+            cp "${KLIPPER_DIR}/.config" "${KLIPPER_DIR}/.config.bmcuc_backup"
+        else
+            print_info "Configuration existante déjà sauvegardée (${KLIPPER_DIR}/.config.bmcuc_backup)."
+        fi
+    fi
+
+    print_info "Copie de la configuration Klipper..."
+    cp "${SCRIPT_DIR}/klipper.config" "${KLIPPER_DIR}/.config"
+    update_cross_prefix
+
+    apply_patch "${OVERRIDES_DIR}/Makefile.patch"
+    apply_patch "${OVERRIDES_DIR}/src/Kconfig.patch"
+    copy_tree "${OVERRIDES_DIR}/src/ch32v20x" "${KLIPPER_DIR}/src/ch32v20x"
+    copy_tree "${OVERRIDES_DIR}/src/generic" "${KLIPPER_DIR}/src/generic"
+    copy_tree "${OVERRIDES_DIR}/config/boards" "${KLIPPER_DIR}/config/boards"
+
+    refresh_inputs_state
+    SHOULD_RESTORE_REPO="true"
+
+    finish_step "overrides"
+fi
+
+if start_step "compile"; then
+    local bin_mtime=""
+
+    FINAL_BIN_PATH=""
+    FINAL_BIN_SHA=""
+    FINAL_BIN_HEAD=""
+    FINAL_BIN_REUSED="false"
+
+    refresh_inputs_state
+
+    if maybe_reuse_existing_binary; then
+        FINAL_BIN_PATH="${REUSED_BIN_PATH}"
+        FINAL_BIN_SHA="${REUSED_BIN_SHA}"
+        FINAL_BIN_HEAD="${REUSED_BIN_HEAD}"
+        FINAL_BIN_REUSED="true"
+        update_state_binary_info "${FINAL_BIN_PATH}" "${FINAL_BIN_SHA}" "${FINAL_BIN_HEAD}" "${FINAL_BIN_REUSED}"
+    else
+        print_info "Compilation du firmware Klipper..."
+        (
+            cd "${KLIPPER_DIR}" && \
+                make clean && \
+                make CROSS_PREFIX="${TOOLCHAIN_PREFIX}"
+        )
+
+        FINAL_BIN_PATH="${KLIPPER_DIR}/out/klipper.bin"
+        if [[ ! -f "${FINAL_BIN_PATH}" ]]; then
+            print_error "La compilation s'est terminée sans générer ${FINAL_BIN_PATH}."
+            exit 1
+        fi
+
+        if ! FINAL_BIN_HEAD="$(git -C "${KLIPPER_DIR}" rev-parse HEAD 2>/dev/null)"; then
+            FINAL_BIN_HEAD="inconnu"
+        fi
+
+        FINAL_BIN_SHA="$(sha256sum "${FINAL_BIN_PATH}" | awk '{print $1}')"
+        if ! bin_mtime="$(file_mtime "${FINAL_BIN_PATH}")"; then
+            print_error "Impossible de déterminer l'horodatage de ${FINAL_BIN_PATH}."
+            exit 1
+        fi
+
+        record_build_metadata "${FINAL_BIN_HEAD}" "${FINAL_BIN_SHA}" "${bin_mtime}"
+        FINAL_BIN_REUSED="false"
+        update_state_binary_info "${FINAL_BIN_PATH}" "${FINAL_BIN_SHA}" "${FINAL_BIN_HEAD}" "${FINAL_BIN_REUSED}"
+
+        print_success "Compilation terminée. Le firmware se trouve dans ${FINAL_BIN_PATH} (SHA256 ${FINAL_BIN_SHA:0:12})."
+    fi
+
+    finish_step "compile"
+fi
+
+if start_step "finalize"; then
+    if [[ -z "${FINAL_BIN_PATH}" && -n "${PREV_BIN_PATH}" ]]; then
+        FINAL_BIN_PATH="${PREV_BIN_PATH}"
+    fi
+    if [[ -z "${FINAL_BIN_SHA}" && -n "${PREV_BIN_SHA}" ]]; then
+        FINAL_BIN_SHA="${PREV_BIN_SHA}"
+    fi
+    if [[ -z "${FINAL_BIN_HEAD}" && -n "${PREV_BIN_HEAD}" ]]; then
+        FINAL_BIN_HEAD="${PREV_BIN_HEAD}"
+    fi
+
+    if [[ -z "${FINAL_BIN_SHA}" ]]; then
+        load_metadata_binary_info
+    else
+        update_state_binary_info "${FINAL_BIN_PATH}" "${FINAL_BIN_SHA}" "${FINAL_BIN_HEAD}" "${FINAL_BIN_REUSED}"
+    fi
+
+    if [[ -z "${FINAL_BIN_SHA}" && -n "${FINAL_BIN_PATH}" && -f "${FINAL_BIN_PATH}" ]]; then
+        FINAL_BIN_SHA="$(sha256sum "${FINAL_BIN_PATH}" | awk '{print $1}')"
+        update_state_binary_info "${FINAL_BIN_PATH}" "${FINAL_BIN_SHA}" "${FINAL_BIN_HEAD}" "${FINAL_BIN_REUSED}"
+    fi
+
+    if [[ -z "${FINAL_BIN_HEAD}" ]]; then
+        if [[ -d "${KLIPPER_DIR}/.git" ]]; then
+            if ! FINAL_BIN_HEAD="$(git -C "${KLIPPER_DIR}" rev-parse HEAD 2>/dev/null)"; then
+                FINAL_BIN_HEAD="inconnu"
+            fi
+        else
+            FINAL_BIN_HEAD="inconnu"
+        fi
+    fi
+
+    if [[ -z "${FINAL_BIN_PATH}" ]]; then
+        FINAL_BIN_PATH="${KLIPPER_DIR}/out/klipper.bin"
+    fi
+
+    if [[ -z "${FINAL_BIN_SHA}" ]]; then
+        print_error "Impossible de déterminer le SHA256 du firmware généré."
+        exit 1
+    fi
+
+    print_info "SHA256 (klipper.bin) : ${FINAL_BIN_SHA}"
+    log_build_sha "${FINAL_BIN_PATH}" "${FINAL_BIN_SHA}" "${FINAL_BIN_HEAD}" "${FINAL_BIN_REUSED}"
+
+    restore_repo_if_dirty
+
+    if [[ "${FINAL_BIN_REUSED}" == "true" ]]; then
+        print_success "Binaire Klipper réutilisé : ${FINAL_BIN_PATH} (SHA256 ${FINAL_BIN_SHA:0:12})."
+    else
+        print_success "Firmware disponible : ${FINAL_BIN_PATH} (SHA256 ${FINAL_BIN_SHA:0:12})."
+    fi
+
+    finish_step "finalize"
+fi
+
