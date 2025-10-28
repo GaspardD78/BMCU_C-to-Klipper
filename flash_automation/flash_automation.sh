@@ -671,7 +671,7 @@ function collect_firmware_candidates() {
         elif [[ -d "${resolved_hint}" ]]; then
             local dir="${resolved_hint}"
             while IFS= read -r -d '' file; do
-                [[ -n "${seen["${file}"]}" ]] && continue
+                [[ -n "${seen["${file}"]-}" ]] && continue
                 seen["${file}"]=1
                 result+=("${file}")
             done < <(find "${dir}" -maxdepth 3 -type f \( -name '*.bin' -o -name '*.uf2' -o -name '*.elf' \) -print0 2>/dev/null)
@@ -682,7 +682,7 @@ function collect_firmware_candidates() {
         local default_dir="${FLASH_ROOT}/${rel_path}"
         [[ -d "${default_dir}" ]] || continue
         while IFS= read -r -d '' file; do
-            [[ -n "${seen["${file}"]}" ]] && continue
+            [[ -n "${seen["${file}"]-}" ]] && continue
             seen["${file}"]=1
             result+=("${file}")
         done < <(find "${default_dir}" -maxdepth 2 -type f \( -name '*.bin' -o -name '*.uf2' -o -name '*.elf' \) -print0 2>/dev/null)
@@ -692,7 +692,7 @@ function collect_firmware_candidates() {
     for dir in "${extra_search[@]}"; do
         [[ -d "${dir}" ]] || continue
         while IFS= read -r -d '' file; do
-            [[ -n "${seen["${file}"]}" ]] && continue
+            [[ -n "${seen["${file}"]-}" ]] && continue
             seen["${file}"]=1
             result+=("${file}")
         done < <(find "${dir}" -maxdepth 4 -type f \( -name '*.bin' -o -name '*.uf2' -o -name '*.elf' \) -print0 2>/dev/null)
