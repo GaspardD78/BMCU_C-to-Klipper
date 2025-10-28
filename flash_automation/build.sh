@@ -1331,7 +1331,7 @@ if start_step "overrides"; then
 fi
 
 if start_step "compile"; then
-    local bin_mtime=""
+    bin_mtime=""
 
     FINAL_BIN_PATH=""
     FINAL_BIN_SHA=""

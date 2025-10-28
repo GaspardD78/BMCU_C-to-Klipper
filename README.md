@@ -99,7 +99,7 @@ python3 install_wchisp.py
 
 ## 🤖 Procédure guidée (automation_cli.py)
 
-Le script [`automation_cli.py`](flash_automation/automation_cli.py) propose un menu interactif inspiré de KIAUH qui **enchaîne pour vous les étapes fastidieuses** (permissions, installation, compilation, flash local ou distant). Chaque action est journalisée dans `logs/automation_cli.log`, ce qui facilite le support en cas d'imprévu.
+Le script [`automation_cli.py`](flash_automation/automation_cli.py) propose un menu interactif inspiré de KIAUH qui **enchaîne pour vous les étapes fastidieuses** (permissions, installation, compilation, flash local ou distant). Chaque action est journalisée dans `~/BMCU_C_to_Klipper_logs/automation-<horodatage>.log` (chemin personnalisable via `BMCU_LOG_ROOT`), ce qui facilite le support en cas d'imprévu.
 
 ### Installation express
 
@@ -149,7 +149,7 @@ Dans le menu, suivez la séquence recommandée :
 > Les actions déclenchées continuent d'accepter `Ctrl+C` pour revenir au menu
 > principal après nettoyage.
 
-> 📊 **Suivi de progression :** Les logs `logs/automation-*.log` contiennent
+> 📊 **Suivi de progression :** Les logs `~/BMCU_C_to_Klipper_logs/automation-*.log` contiennent
 > désormais des lignes `[progress]` indiquant l'étape en cours (ex.
 > `receiving objects`, `compilation [#####.....] 45%`). Consultez-les pour
 > vérifier rapidement qu'une action longue ne s'est pas figée.

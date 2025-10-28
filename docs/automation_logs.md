@@ -7,10 +7,11 @@ au format JSON.
 ## Emplacement et format des journaux
 
 Chaque exécution de `automation_cli.py` crée un fichier de log dédié dans le
-répertoire `logs/` à la racine du projet :
+répertoire externe `~/BMCU_C_to_Klipper_logs/` (par défaut) afin que les
+journaux survivent aux opérations de nettoyage du dépôt :
 
 ```
-logs/automation-<horodatage>.log
+~/BMCU_C_to_Klipper_logs/automation-<horodatage>.log
 ```
 
 * `<horodatage>` suit le format `YYYYMMDDTHHMMSSZ` (par exemple
@@ -21,6 +22,10 @@ logs/automation-<horodatage>.log
   corrélation avec d'autres systèmes de supervision. Les lignes préfixées par
   `[progress]` détaillent l'étape courante (clone Git, compilation, transfert…)
   et affichent un pourcentage lorsqu'il est disponible.
+* Définissez la variable d'environnement `BMCU_LOG_ROOT` pour changer le
+  dossier parent des journaux. Si la valeur pointe vers un chemin situé dans le
+  dépôt Git, elle sera automatiquement redirigée vers `~/BMCU_C_to_Klipper_logs`
+  avec un avertissement dans la console.
 
 > 💡 En cas d'interruption manuelle (`Ctrl+C`), le script rappelle le chemin du
 > fichier de log actif juste avant de quitter. Un `Ctrl+C` isolé dans le menu

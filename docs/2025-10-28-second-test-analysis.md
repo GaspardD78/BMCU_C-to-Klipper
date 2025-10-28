@@ -50,7 +50,7 @@ Ce document résume les observations issues du journal d'exécution fourni et pr
 - **Résumé final des vérifications locales :**
   - Ajouter un tableau récapitulatif des prérequis avec couleurs (OK/KO) et, si un élément manque, des liens vers la documentation interne. 【F:docs/2025-10-28-second-test-analysis.md†L46-L52】
 - **Logs structurés :**
-  - Le format actuel est cohérent. Conserver ces informations dans un fichier daté (`logs/automation-20251028T123157.log`) pour faciliter le support utilisateur.
+  - Le format actuel est cohérent. Conserver ces informations dans un fichier daté (`~/BMCU_C_to_Klipper_logs/automation-20251028T123157.log`) pour faciliter le support utilisateur.
 
 ## Priorités recommandées
 

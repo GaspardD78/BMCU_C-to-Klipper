@@ -38,5 +38,6 @@ valeur par défaut répondent aux attentes.
 
 ✅ Tous les scénarios manuels réussis. Aucun comportement inattendu.
 
-Le log correspondant est archivé sous `logs/automation-20251029T181500Z.log`
-et peut être partagé en cas d'analyse complémentaire.
+Le log correspondant est archivé sous
+`~/BMCU_C_to_Klipper_logs/automation-20251029T181500Z.log` et peut être partagé
+en cas d'analyse complémentaire.

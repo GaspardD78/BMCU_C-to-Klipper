@@ -49,7 +49,7 @@ python3 flash.py
   `flash_automation.sh` fournit une version minimale (terminal) ;
   `flashBMCUtoKlipper_automation.py` permet l'orchestration distante (CI/batch).
   `automation_cli.py` centralise ces procédures dans un menu inspiré de KIAUH
-  et consigne toutes les étapes dans `logs/automation_cli.log`.
+  et consigne toutes les étapes dans `~/BMCU_C_to_Klipper_logs/automation-<horodatage>.log`.
 
 ### 🔐 Vérification du firmware
 
@@ -86,7 +86,8 @@ python3 flash.py
 | `WCHISP_RELEASE` | Tag GitHub utilisé pour récupérer `wchisp` | `v0.3.0` |
 | `WCHISP_BASE_URL` | Base des URL de téléchargement `wchisp` | `https://github.com/ch32-rs/wchisp/releases/download` |
 
-Les journaux et rapports d'échec sont écrits dans `logs/` avec horodatage.
+Les journaux et rapports d'échec sont écrits dans `~/BMCU_C_to_Klipper_logs/`
+avec horodatage (chemin personnalisable via `BMCU_LOG_ROOT`).
 
 ### 🔄 Flux de synchronisation
 
