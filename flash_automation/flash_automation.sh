@@ -58,6 +58,16 @@ WCHISP_COMMAND="${WCHISP_BIN:-wchisp}"
 readonly WCHISP_TARGET="${WCHISP_TARGET:-ch32v20x}"
 readonly WCHISP_DELAY="${WCHISP_DELAY:-30}"
 
+DEFAULT_CACHE_HOME="${XDG_CACHE_HOME:-${HOME}/.cache}"
+PERMISSIONS_CACHE_FILE="${BMCU_PERMISSION_CACHE_FILE:-${DEFAULT_CACHE_HOME}/bmcu_permissions.json}"
+PERMISSIONS_CACHE_TTL_RAW="${BMCU_PERMISSION_CACHE_TTL:-3600}"
+if [[ "${PERMISSIONS_CACHE_TTL_RAW}" =~ ^[0-9]+$ ]]; then
+    PERMISSIONS_CACHE_TTL="${PERMISSIONS_CACHE_TTL_RAW}"
+else
+    PERMISSIONS_CACHE_TTL=0
+fi
+PERMISSIONS_CACHE_MESSAGE=""
+
 if [[ -t 1 ]]; then
     COLOR_RESET="\033[0m"
     COLOR_INFO="\033[38;5;39m"
@@ -95,6 +105,180 @@ function log_message() {
     local timestamp
     timestamp=$(date "+%Y-%m-%d %H:%M:%S")
     echo "[$timestamp] [$level] - $message" >> "${LOG_FILE}"
+}
+
+function format_duration_seconds() {
+    local total_seconds="$1"
+    if ! [[ "${total_seconds}" =~ ^[0-9]+$ ]]; then
+        printf '%s' "0s"
+        return
+    fi
+
+    local hours=$(( total_seconds / 3600 ))
+    local minutes=$(( (total_seconds % 3600) / 60 ))
+    local seconds=$(( total_seconds % 60 ))
+    local -a parts=()
+
+    if (( hours > 0 )); then
+        parts+=("${hours}h")
+    fi
+    if (( minutes > 0 )); then
+        parts+=("${minutes}m")
+    fi
+    if (( seconds > 0 )) || (( ${#parts[@]} == 0 )); then
+        parts+=("${seconds}s")
+    fi
+
+    local IFS=' '
+    printf '%s' "${parts[*]}"
+}
+
+function permissions_cache_enabled() {
+    [[ "${PERMISSIONS_CACHE_TTL}" -gt 0 ]] && [[ -n "${PERMISSIONS_CACHE_FILE}" ]]
+}
+
+function should_skip_permission_checks() {
+    PERMISSIONS_CACHE_MESSAGE=""
+    if ! permissions_cache_enabled; then
+        return 1
+    fi
+    if [[ ! -f "${PERMISSIONS_CACHE_FILE}" ]]; then
+        return 1
+    fi
+
+    local output
+    if ! output=$(PERMISSIONS_CACHE_FILE="${PERMISSIONS_CACHE_FILE}" PERMISSIONS_CACHE_TTL="${PERMISSIONS_CACHE_TTL}" python3 - <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+path = os.environ["PERMISSIONS_CACHE_FILE"]
+try:
+    ttl = int(os.environ["PERMISSIONS_CACHE_TTL"])
+except (KeyError, ValueError):
+    sys.exit(1)
+
+if ttl <= 0:
+    sys.exit(1)
+
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+except Exception:
+    sys.exit(1)
+
+if data.get("status") != "ok":
+    sys.exit(1)
+
+checked_raw = data.get("checked_at")
+if not isinstance(checked_raw, str):
+    sys.exit(1)
+
+try:
+    checked = datetime.fromisoformat(checked_raw)
+except ValueError:
+    sys.exit(1)
+
+if checked.tzinfo is None:
+    checked = checked.replace(tzinfo=timezone.utc)
+
+now = datetime.now(timezone.utc)
+age = (now - checked).total_seconds()
+if age < 0:
+    age = 0
+
+if age >= ttl:
+    sys.exit(1)
+
+remaining = ttl - age
+
+def format_duration(value: float) -> str:
+    total = max(int(round(value)), 0)
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    if seconds or not parts:
+        parts.append(f"{seconds}s")
+    return " ".join(parts)
+
+print(
+    f"cache valide (vérifié il y a {format_duration(age)}; "
+    f"expiration dans {format_duration(remaining)})"
+)
+PY
+    ); then
+        return 1
+    fi
+    PERMISSIONS_CACHE_MESSAGE="${output}"
+    return 0
+}
+
+function update_permissions_cache() {
+    local status="$1"
+    local message="$2"
+
+    if ! permissions_cache_enabled; then
+        return
+    fi
+
+    if ! PERMISSIONS_STATUS="${status}" \
+        PERMISSIONS_MESSAGE="${message}" \
+        PERMISSIONS_ORIGIN="flash_automation.verify_environment" \
+        PERMISSIONS_CACHE_FILE="${PERMISSIONS_CACHE_FILE}" \
+        PERMISSIONS_CACHE_TTL="${PERMISSIONS_CACHE_TTL}" python3 - <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+path = os.environ["PERMISSIONS_CACHE_FILE"]
+try:
+    ttl = int(os.environ["PERMISSIONS_CACHE_TTL"])
+except (KeyError, ValueError):
+    sys.exit(0)
+
+if ttl <= 0:
+    sys.exit(0)
+
+payload = {
+    "status": os.environ.get("PERMISSIONS_STATUS", "ok"),
+    "checked_at": datetime.now(timezone.utc).isoformat(),
+    "origin": os.environ.get("PERMISSIONS_ORIGIN", "flash_automation.sh"),
+    "ttl_seconds": ttl,
+}
+
+message = os.environ.get("PERMISSIONS_MESSAGE", "")
+if message:
+    payload["message"] = message
+
+cache_dir = os.path.dirname(path) or "."
+try:
+    os.makedirs(cache_dir, exist_ok=True)
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
+except Exception:
+    sys.exit(1)
+else:
+    sys.exit(0)
+PY
+    then
+        warn "Impossible de mettre à jour le cache de permissions (${PERMISSIONS_CACHE_FILE})."
+        return 1
+    fi
+    return 0
+}
+
+function invalidate_permissions_cache() {
+    if permissions_cache_enabled && [[ -f "${PERMISSIONS_CACHE_FILE}" ]]; then
+        rm -f "${PERMISSIONS_CACHE_FILE}" || true
+    fi
 }
 
 function render_box() {
@@ -453,7 +637,19 @@ function verify_environment() {
     check_command "python3" false
     check_command "make" false
 
-    check_group_membership "dialout" || true
+    if should_skip_permission_checks; then
+        info "Vérification des permissions sautée : ${PERMISSIONS_CACHE_MESSAGE}."
+    else
+        if check_group_membership "dialout"; then
+            if update_permissions_cache "ok" "Appartenance au groupe 'dialout' confirmée"; then
+                if permissions_cache_enabled; then
+                    info "Cache des permissions mis à jour (expiration dans $(format_duration_seconds "${PERMISSIONS_CACHE_TTL}"))"
+                fi
+            fi
+        else
+            invalidate_permissions_cache
+        fi
+    fi
 
     info "Analyse des périphériques série disponibles."
     display_available_devices

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
+import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
@@ -18,9 +20,10 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from stat import S_IMODE
-from typing import Callable, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional
 
 from stop_utils import (
     DEFAULT_EXTERNAL_LOG_ROOT,
@@ -34,6 +37,161 @@ LOGS_DIR = (DEFAULT_EXTERNAL_LOG_ROOT / "automation_cli").resolve()
 LOG_FILE = LOGS_DIR / "automation_cli.log"
 LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
+
+_PERMISSION_CACHE_FILE = Path(
+    os.environ.get(
+        "BMCU_PERMISSION_CACHE_FILE",
+        Path.home() / ".cache" / "bmcu_permissions.json",
+    )
+)
+
+
+def _get_permission_cache_ttl() -> int:
+    value = os.environ.get("BMCU_PERMISSION_CACHE_TTL", "3600")
+    try:
+        ttl = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(ttl, 0)
+
+
+@dataclass(frozen=True)
+class PermissionCache:
+    checked_at: datetime
+    remaining_seconds: float
+    status: str
+    origin: Optional[str]
+    raw: Dict[str, Any]
+
+
+def _parse_timestamp(value: str) -> Optional[datetime]:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _load_permission_cache(now: Optional[datetime] = None) -> Optional[PermissionCache]:
+    ttl = _get_permission_cache_ttl()
+    if ttl <= 0:
+        return None
+    if not _PERMISSION_CACHE_FILE.exists():
+        return None
+    try:
+        raw = json.loads(_PERMISSION_CACHE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    status = raw.get("status")
+    if status != "ok":
+        return None
+
+    checked_at_raw = raw.get("checked_at")
+    if not isinstance(checked_at_raw, str):
+        return None
+
+    checked_at = _parse_timestamp(checked_at_raw)
+    if checked_at is None:
+        return None
+
+    now = now or datetime.now(timezone.utc)
+    age = (now - checked_at).total_seconds()
+    if age < 0:
+        age = 0
+    if age >= ttl:
+        return None
+
+    remaining = float(ttl) - age
+    origin = raw.get("origin")
+    return PermissionCache(
+        checked_at=checked_at,
+        remaining_seconds=remaining,
+        status=status,
+        origin=origin if isinstance(origin, str) else None,
+        raw=raw,
+    )
+
+
+def _format_duration(seconds: float) -> str:
+    seconds_int = max(int(round(seconds)), 0)
+    hours, rem = divmod(seconds_int, 3600)
+    minutes, secs = divmod(rem, 60)
+    parts: list[str] = []
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    if secs or not parts:
+        parts.append(f"{secs}s")
+    return " ".join(parts)
+
+
+def _describe_cache(cache: PermissionCache) -> str:
+    ttl = _get_permission_cache_ttl()
+    age = float(ttl) - cache.remaining_seconds
+    return (
+        "cache valide (vérifié il y a "
+        f"{_format_duration(age)}; expiration dans {_format_duration(cache.remaining_seconds)})"
+    )
+
+
+def _write_permission_cache(status: str, origin: str, payload: Dict[str, Any]) -> None:
+    ttl = _get_permission_cache_ttl()
+    if ttl <= 0:
+        return
+    now = datetime.now(timezone.utc)
+    data: Dict[str, Any] = {
+        "status": status,
+        "checked_at": now.isoformat(),
+        "origin": origin,
+        "ttl_seconds": ttl,
+    }
+    data.update(payload)
+    cache_dir = _PERMISSION_CACHE_FILE.parent
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+
+    tmp_path = cache_dir / f"{_PERMISSION_CACHE_FILE.name}.tmp"
+    try:
+        tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(_PERMISSION_CACHE_FILE)
+    except OSError:
+        tmp_path.unlink(missing_ok=True)
+
+
+def _compute_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _read_requirements_hash(path: Path) -> Optional[str]:
+    try:
+        content = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return content or None
+
+
+def _update_lock_file(context: "AutomationContext", lock_file: Path) -> None:
+    quoted_python = shlex.quote(str(sys.executable))
+    quoted_lock = shlex.quote(str(lock_file))
+    context.run_command(
+        [
+            "/bin/sh",
+            "-c",
+            f"{quoted_python} -m pip freeze > {quoted_lock}",
+        ],
+        cwd=FLASH_DIR,
+        description="Verrouillage des dépendances (pip freeze)",
+    )
 
 
 class AutomationError(RuntimeError):
@@ -149,23 +307,62 @@ def ensure_permissions(context: AutomationContext) -> None:
     """Rend exécutables les scripts shell nécessaires."""
 
     context.stop_controller.raise_if_requested()
+    cache = _load_permission_cache()
+    if cache is not None:
+        context.logger.info(
+            "Vérification des permissions sautée : %s.", _describe_cache(cache)
+        )
+        return
+
     context.logger.info("Vérification des permissions d'exécution")
+    results: list[Dict[str, Any]] = []
     for script in ("build.sh", "flash_automation.sh"):
         target = FLASH_DIR / script
+        entry: Dict[str, Any] = {"path": str(target)}
         if not target.exists():
             context.logger.warning("Le script %s est introuvable", target)
+            entry["status"] = "missing"
+            results.append(entry)
             continue
+
         current_mode = S_IMODE(target.stat().st_mode)
         desired_mode = current_mode | 0o111
-        if current_mode != desired_mode:
+        already_executable = current_mode == desired_mode
+        entry.update(
+            {
+                "status": "updated" if not already_executable else "ok",
+                "previous_mode": oct(current_mode),
+                "final_mode": oct(desired_mode),
+            }
+        )
+
+        if already_executable:
+            context.logger.debug("Les permissions sont déjà correctes pour %s", target)
+        else:
             context.logger.debug("Application du mode exécutable sur %s", target)
             if context.dry_run:
                 context.logger.warning("Mode --dry-run : chmod ignoré pour %s", target)
             else:
                 target.chmod(desired_mode)
-        else:
-            context.logger.debug("Les permissions sont déjà correctes pour %s", target)
+
+        results.append(entry)
+
     context.logger.info("Permissions vérifiées")
+    if context.dry_run:
+        context.logger.warning("Mode --dry-run : cache des permissions laissé inchangé")
+        return
+
+    _write_permission_cache(
+        status="ok",
+        origin="automation_cli.ensure_permissions",
+        payload={"scripts": results},
+    )
+    ttl = _get_permission_cache_ttl()
+    if ttl > 0:
+        context.logger.info(
+            "Cache des permissions mis à jour (expiration dans %s).",
+            _format_duration(float(ttl)),
+        )
 
 
 def install_python_dependencies(context: AutomationContext) -> None:
@@ -176,11 +373,59 @@ def install_python_dependencies(context: AutomationContext) -> None:
     if not requirements.exists():
         raise AutomationError("Le fichier requirements.txt est introuvable")
 
+    venv_dir = FLASH_DIR / ".venv"
+    lock_file = venv_dir / "requirements.lock"
+    hash_file = venv_dir / "requirements.sha256"
+    venv_dir.mkdir(parents=True, exist_ok=True)
+
+    current_hash = _compute_sha256(requirements)
+    stored_hash = _read_requirements_hash(hash_file)
+
+    if stored_hash == current_hash and lock_file.exists():
+        context.logger.info(
+            "Installation des dépendances sautée : requirements.txt inchangé (hash %s).",
+            current_hash[:12],
+        )
+        return
+
+    if stored_hash == current_hash and not lock_file.exists():
+        context.logger.info(
+            "Création du verrou de dépendances manquant (requirements.lock).",
+        )
+        if context.dry_run:
+            context.logger.warning(
+                "Mode --dry-run : verrou de dépendances non généré"
+            )
+            return
+        _update_lock_file(context, lock_file)
+        hash_file.write_text(current_hash + "\n", encoding="utf-8")
+        context.logger.info("Verrou de dépendances enregistré dans %s", lock_file)
+        return
+
+    if stored_hash:
+        context.logger.info(
+            "Mise à jour des dépendances : hash modifié (%s → %s).",
+            stored_hash[:12],
+            current_hash[:12],
+        )
+    else:
+        context.logger.info(
+            "Installation des dépendances requise : aucun verrou existant détecté."
+        )
+
     context.run_command(
         [sys.executable, "-m", "pip", "install", "-r", str(requirements)],
         cwd=FLASH_DIR,
         description="Installation des dépendances Python",
     )
+
+    if context.dry_run:
+        context.logger.warning("Mode --dry-run : verrou de dépendances non généré")
+        return
+
+    _update_lock_file(context, lock_file)
+    hash_file.write_text(current_hash + "\n", encoding="utf-8")
+    context.logger.info("Verrou de dépendances mis à jour dans %s", lock_file)
 
 
 def build_firmware(context: AutomationContext) -> None:
