@@ -32,10 +32,12 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import json
 import platform
 import shlex
 import shutil
+import string
 import subprocess
 import sys
 import textwrap
@@ -131,9 +133,11 @@ class UserChoices:
     dry_run: bool
     log_root: Path
     serial_device: str
+    firmware_checksum_file: Path | None = None
 
 
 CONFIG_FILE = Path(__file__).resolve().with_name("flash_profile.json")
+DEFAULT_CHECKSUM_FILE = Path(__file__).resolve().with_name("klipper.sha256")
 
 
 @dataclass
@@ -659,6 +663,90 @@ def find_default_firmware() -> Path | None:
     return None
 
 
+def _normalize_checksum(value: str) -> str:
+    """Valide et normalise une empreinte SHA-256."""
+
+    candidate = value.strip().lower()
+    if len(candidate) != 64 or any(char not in string.hexdigits for char in candidate):
+        raise ValueError(f"Empreinte SHA-256 invalide : {value!r}")
+    return candidate
+
+
+def compute_sha256(path: Path) -> str:
+    """Calcule l'empreinte SHA-256 d'un fichier."""
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def read_checksum_file(path: Path) -> str:
+    """Extrait la première empreinte valide d'un fichier de type sha256sum."""
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError as err:
+        raise FileNotFoundError(f"Impossible de lire le fichier de checksum {path}: {err}") from err
+
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        candidate = line.split()[0]
+        try:
+            return _normalize_checksum(candidate)
+        except ValueError:
+            continue
+
+    raise ValueError(f"Aucun checksum SHA-256 valide trouvé dans {path}.")
+
+
+class ChecksumMismatchError(RuntimeError):
+    """Erreur levée lorsque l'empreinte calculée diffère de la référence."""
+
+
+def verify_firmware_checksum(
+    firmware_path: Path,
+    *,
+    explicit_checksum: str | None = None,
+    checksum_file: Path | None = None,
+) -> tuple[str, str | None, str | None]:
+    """Valide l'empreinte du firmware et retourne les valeurs utilisées."""
+
+    source_label: str | None = None
+    expected: str | None = None
+
+    if explicit_checksum:
+        expected = _normalize_checksum(explicit_checksum)
+        source_label = "option --firmware-sha256"
+    else:
+        candidate_file = checksum_file
+        if candidate_file is None and DEFAULT_CHECKSUM_FILE.exists():
+            candidate_file = DEFAULT_CHECKSUM_FILE
+        if candidate_file is not None:
+            if not candidate_file.exists():
+                raise FileNotFoundError(f"Fichier de checksum introuvable : {candidate_file}")
+            expected = read_checksum_file(candidate_file)
+            source_label = f"fichier {candidate_file}"
+
+    computed = compute_sha256(firmware_path)
+
+    if expected and computed != expected:
+        raise ChecksumMismatchError(
+            textwrap.dedent(
+                f"""
+                Le firmware {firmware_path} ne correspond pas au checksum attendu.
+                  • Calculé : {computed}
+                  • Attendu : {expected} ({source_label})
+                """
+            ).strip()
+        )
+
+    return computed, expected, source_label
+
+
 def ask_menu(options: list[str], *, default_index: int = 0) -> int:
     """Propose un menu numéroté simple."""
 
@@ -685,7 +773,8 @@ def gather_user_choices(profile: QuickProfile, environment: EnvironmentDefaults)
 
 1. Vérifie trois prérequis.
 2. Récupère les infos minimales.
-3. Lance l'automatisation.
+3. Confirme l'empreinte SHA-256 du firmware.
+4. Lance l'automatisation.
 
 Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
 """
@@ -828,6 +917,29 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
     profile.log_root = log_root_input
     log_root = Path(log_root_input).expanduser().resolve()
 
+    checksum_file = DEFAULT_CHECKSUM_FILE if DEFAULT_CHECKSUM_FILE.exists() else None
+    if checksum_file:
+        print_block(
+            textwrap.dedent(
+                f"""
+                Vérification SHA-256 activée :
+                  • Fichier de référence : {checksum_file}
+                  • Modifiez ce fichier ou relancez le script avec --firmware-sha256 pour mettre à jour la valeur attendue.
+                """
+            ).strip()
+        )
+    else:
+        print_block(
+            textwrap.dedent(
+                f"""
+                Aucun fichier de checksum détecté.
+                Créez-en un avec :
+                  sha256sum {firmware_file} > {DEFAULT_CHECKSUM_FILE.name}
+                ou utilisez l'option --firmware-sha256=<empreinte> pour fournir la valeur attendue.
+                """
+            ).strip()
+        )
+
     return UserChoices(
         bmc_host=bmc_host,
         bmc_user=bmc_user,
@@ -847,11 +959,19 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
         dry_run=False,
         log_root=log_root,
         serial_device=serial_device,
+        firmware_checksum_file=checksum_file,
     )
 
 
 def summarize_choices(choices: UserChoices) -> None:
     """Affiche un résumé compact des paramètres retenus."""
+
+    if choices.firmware_sha256:
+        checksum_display = f"{choices.firmware_sha256} (option CLI)"
+    elif choices.firmware_checksum_file:
+        checksum_display = f"via {choices.firmware_checksum_file}"
+    else:
+        checksum_display = "non configurée"
 
     summary = f"""
     {colorize('Récapitulatif rapide :', f'{Colors.BOLD}{Colors.OKBLUE}')}
@@ -864,6 +984,7 @@ def summarize_choices(choices: UserChoices) -> None:
       • {colorize('Timeout', Colors.BOLD)}        : {choices.flash_timeout} s
       • {colorize('Attendre reboot', Colors.BOLD)}: {colorize('oui' if choices.wait_for_reboot else 'non', Colors.OKGREEN if choices.wait_for_reboot else Colors.WARNING)}
       • {colorize('Logs', Colors.BOLD)}           : {choices.log_root}
+      • {colorize('SHA-256', Colors.BOLD)}        : {checksum_display}
     """
     print_block(summary)
 
@@ -951,6 +1072,11 @@ def gather_choices_from_args(
     allow_same_version = args.allow_same_version
     expected_final_version = args.expected_final_version or ""
     firmware_sha256 = args.firmware_sha256 or ""
+    checksum_file = None
+    if args.firmware_sha256_file:
+        checksum_file = Path(args.firmware_sha256_file).expanduser().resolve()
+    elif not firmware_sha256 and DEFAULT_CHECKSUM_FILE.exists():
+        checksum_file = DEFAULT_CHECKSUM_FILE
     dry_run = args.dry_run
 
     return UserChoices(
@@ -972,6 +1098,7 @@ def gather_choices_from_args(
         dry_run=dry_run,
         log_root=log_root,
         serial_device=serial_device or "",
+        firmware_checksum_file=checksum_file,
     )
 
 
@@ -1052,6 +1179,38 @@ def run_flash_flow(
     update_profile_from_choices(profile, choices)
     save_profile(profile)
     summarize_choices(choices)
+
+    try:
+        computed_checksum, expected_checksum, checksum_source = verify_firmware_checksum(
+            choices.firmware_file,
+            explicit_checksum=choices.firmware_sha256 or None,
+            checksum_file=choices.firmware_checksum_file,
+        )
+    except ChecksumMismatchError as err:
+        print(colorize(str(err), Colors.FAIL))
+        return 1
+    except (FileNotFoundError, ValueError) as err:
+        print(colorize(str(err), Colors.FAIL))
+        return 1
+    else:
+        if expected_checksum:
+            choices.firmware_sha256 = expected_checksum
+            success_block = textwrap.dedent(
+                f"""
+                {colorize('Empreinte SHA-256 validée', Colors.OKGREEN)} ({checksum_source})
+                  {computed_checksum}
+                """
+            ).strip()
+            print_block(success_block)
+        else:
+            warning_block = textwrap.dedent(
+                f"""
+                {colorize('Empreinte SHA-256 calculée', Colors.WARNING)} : {computed_checksum}
+                Fournissez une valeur attendue via --firmware-sha256 ou créez {DEFAULT_CHECKSUM_FILE.name}
+                pour activer la vérification automatique.
+                """
+            ).strip()
+            print_block(warning_block)
 
     if ask_confirmation:
         if not ask_yes_no(
@@ -1286,6 +1445,10 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--firmware-sha256",
         help="Empreinte SHA-256 attendue du firmware (sécurité supplémentaire).",
+    )
+    parser.add_argument(
+        "--firmware-sha256-file",
+        help="Fichier contenant l'empreinte SHA-256 attendue (format sha256sum).",
     )
     parser.add_argument(
         "--dry-run",

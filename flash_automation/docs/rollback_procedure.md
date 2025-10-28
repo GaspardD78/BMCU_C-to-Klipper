@@ -102,7 +102,7 @@ Si seul un binaire Klipper fiable est disponible :
 
 ## 5. Vérifications finales
 
-1. Relancez `./build.sh` puis `python3 flash.py --dry-run` pour confirmer que l’environnement est stable.
+1. Relancez `./build.sh` puis `python3 flash.py --dry-run` pour confirmer que l’environnement est stable. Si un nouveau binaire est généré, mettez à jour `klipper.sha256` (`sha256sum .cache/klipper/out/klipper.bin > klipper.sha256`) afin que la vérification automatique reflète la bonne référence.
 2. Validez les connexions réseau/USB (`ping`, `screen`, `ssh`).
 3. Consignez l’incident (symptômes, actions, correctifs) dans votre outil de suivi afin de capitaliser sur l’expérience.
 

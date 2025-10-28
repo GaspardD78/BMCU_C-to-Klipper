@@ -51,6 +51,23 @@ python3 flash.py
   `automation_cli.py` centralise ces procédures dans un menu inspiré de KIAUH
   et consigne toutes les étapes dans `logs/automation_cli.log`.
 
+### 🔐 Vérification du firmware
+
+- `flash.py` calcule désormais automatiquement l'empreinte **SHA-256** du firmware
+  avant de lancer le flash.
+- Placez la valeur de référence dans `klipper.sha256` (format `sha256sum`)
+  pour qu'elle soit chargée automatiquement :
+
+  ```bash
+  sha256sum .cache/klipper/out/klipper.bin > klipper.sha256
+  ```
+
+- Vous pouvez également fournir la valeur attendue en CLI via
+  `--firmware-sha256=<empreinte>` ou en pointant un fichier spécifique avec
+  `--firmware-sha256-file=/chemin/vers/mon_checksum.txt`.
+- En cas de divergence, l'assistant interrompt le processus et affiche les
+  deux empreintes afin d'éviter un flash risqué.
+
 ## ⚙️ Paramètres utiles
 
 | Variable d'environnement | Description | Défaut |
