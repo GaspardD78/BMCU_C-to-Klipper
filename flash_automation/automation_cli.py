@@ -27,7 +27,13 @@ from pathlib import Path
 from stat import S_IMODE
 from typing import Any, Callable, Dict, Iterable, Optional
 
-from stop_utils import StopController, StopRequested, cleanup_repository
+from stop_utils import (
+    DEFAULT_EXTERNAL_LOG_ROOT,
+    StopController,
+    StopRequested,
+    cleanup_repository,
+    resolve_log_root,
+)
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -37,7 +43,13 @@ else:
 
 FLASH_DIR = Path(__file__).resolve().parent
 REPO_ROOT = FLASH_DIR.parent
-LOGS_DIR = (REPO_ROOT / "logs").resolve()
+_LOG_ROOT_ENV = os.environ.get("BMCU_LOG_ROOT")
+if _LOG_ROOT_ENV:
+    _LOG_ROOT_CANDIDATE = Path(_LOG_ROOT_ENV).expanduser()
+else:
+    _LOG_ROOT_CANDIDATE = DEFAULT_EXTERNAL_LOG_ROOT
+LOGS_DIR, LOG_ROOT_ADJUSTED = resolve_log_root(_LOG_ROOT_CANDIDATE)
+LOGS_DIR = LOGS_DIR.resolve()
 LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 
@@ -991,6 +1003,13 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     report = AutomationReport()
     logger = logging.getLogger("automation")
+    if LOG_ROOT_ADJUSTED:
+        logger.warning(
+            "Le répertoire de logs demandé se trouvait dans le dépôt. Utilisation de %s",
+            LOGS_DIR,
+        )
+    elif _LOG_ROOT_ENV:
+        logger.info("Répertoire de logs défini via BMCU_LOG_ROOT : %s", LOGS_DIR)
     logger.info("Bouton stop : pressez Ctrl+C pour interrompre proprement.")
     logger.info("Les journaux sont enregistrés dans %s", log_file)
 

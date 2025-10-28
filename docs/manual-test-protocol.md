@@ -15,7 +15,7 @@ n'est branché).
 ## Préparation
 
 - Activer l'environnement Python utilisé en production (`source .venv/bin/activate`).
-- Nettoyer les logs précédents : `rm -f ../logs/automation-*.log`.
+- Nettoyer les logs précédents : `rm -f ~/BMCU_C_to_Klipper_logs/automation-*.log`.
 - Démarrer le script : `python3 automation_cli.py --dry-run`.
 - Laisser le tableau de synthèse final s'afficher pour confirmer la réussite.
 
@@ -23,7 +23,7 @@ n'est branché).
 
 | ID | Objectif | Étapes | Résultat attendu |
 |----|----------|--------|------------------|
-| MT-01 | Interrompre le **menu principal** avec `Ctrl+C`. | 1. Lancer le menu.<br>2. Dès que l'invite `Votre choix :` apparaît, presser `Ctrl+C` une fois. | Le journal affiche un avertissement puis l'information « Menu principal réarmé ; choisissez une option. ». Le menu est redessiné sans quitter le programme, aucune suppression du dépôt n'est déclenchée, et `logs/automation-*.log` continue d'être alimenté. |
+| MT-01 | Interrompre le **menu principal** avec `Ctrl+C`. | 1. Lancer le menu.<br>2. Dès que l'invite `Votre choix :` apparaît, presser `Ctrl+C` une fois. | Le journal affiche un avertissement puis l'information « Menu principal réarmé ; choisissez une option. ». Le menu est redessiné sans quitter le programme, aucune suppression du dépôt n'est déclenchée, et `~/BMCU_C_to_Klipper_logs/automation-*.log` continue d'être alimenté. |
 | MT-02 | Interrompre une **action en cours** (ex. compilation) avec `Ctrl+C`. | 1. Depuis le menu, choisir `3` (compilation).<br>2. Dès que la commande est annoncée, presser `Ctrl+C`. | Le script annonce l'interruption, nettoie les processus (`Arrêt manuel demandé...`), puis revient automatiquement au menu principal. La prochaine sélection est possible sans relancer le programme. |
 | MT-03 | Vérifier les **valeurs par défaut** des invites critiques. | 1. Depuis le menu, choisir `6` (automatisation distante).<br>2. Laisser vide l'utilisateur SSH/IPMI pour accepter `root`.<br>3. Laisser vide le chemin distant pour accepter `/tmp/klipper_firmware.bin`.<br>4. Répondre directement `Entrée` à la confirmation « Attendre le redémarrage… ». | Les valeurs par défaut sont injectées dans le résumé de la commande (`--bmc-user root`, `--remote-firmware-path /tmp/klipper_firmware.bin`) et la confirmation considère la réponse vide comme `Oui`. |
 
@@ -43,7 +43,7 @@ Une fois les trois scénarios validés :
 En cas d'échec d'un scénario, consigner immédiatement :
 
 - La commande exécutée et le contexte (machine, distribution, version de Python).
-- La sortie console et le nom du fichier `logs/automation-*.log`.
+- La sortie console et le nom du fichier `~/BMCU_C_to_Klipper_logs/automation-*.log`.
 - Les ajustements réalisés pour corriger le problème (pull request ou commit).
 
 Ce protocole peut être reproduit sur une session SSH distante en
