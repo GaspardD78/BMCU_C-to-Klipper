@@ -30,6 +30,7 @@ flash (manuel ou distant).
 cd flash_automation
 chmod +x *.sh
 ./build.sh
+python3 install_wchisp.py
 python3 flash.py
 ```
 
