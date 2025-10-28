@@ -50,6 +50,14 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Iterable, Optional
 
+from stop_utils import (
+    DEFAULT_EXTERNAL_LOG_ROOT,
+    StopController,
+    StopRequested,
+    cleanup_repository,
+    resolve_log_root,
+)
+
 
 # ---------------------------------------------------------------------------
 # Bannière de démarrage
@@ -105,6 +113,7 @@ class ExecutionContext:
 
     log_dir: Path
     log_file: Path
+    stop_controller: StopController
     bmc_host: str
     bmc_user: str
     bmc_password: str
@@ -169,18 +178,54 @@ def format_command(command: Iterable[str] | str) -> str:
     return " ".join(shlex.quote(part) for part in command)
 
 
-def run_command(command: Iterable[str] | str, *, timeout: Optional[int] = None) -> subprocess.CompletedProcess[str]:
+def run_command(
+    command: Iterable[str] | str,
+    *,
+    timeout: Optional[int] = None,
+    stop_controller: Optional[StopController] = None,
+) -> subprocess.CompletedProcess[str]:
     """Exécute une commande shell et journalise les sorties."""
+
+    if stop_controller is not None:
+        stop_controller.raise_if_requested()
 
     display_cmd = format_command(command)
     logging.debug("Exécution de la commande : %s", display_cmd)
 
-    completed = subprocess.run(
-        command,
-        capture_output=True,
+    popen_args: Iterable[str] | str = command
+    shell = isinstance(command, str)
+
+    process = subprocess.Popen(
+        command if shell else list(command),
+        shell=shell,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=timeout,
-        check=False,
+    )
+
+    if stop_controller is not None:
+        stop_controller.register_process(process)
+
+    try:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate()
+            raise
+    except KeyboardInterrupt:
+        if stop_controller is not None and not stop_controller.stop_requested:
+            stop_controller.request_stop(reason="interruption clavier")
+        raise StopRequested()
+    finally:
+        if stop_controller is not None:
+            stop_controller.unregister_process(process)
+
+    completed = subprocess.CompletedProcess(
+        args=popen_args,
+        returncode=process.returncode,
+        stdout=stdout,
+        stderr=stderr,
     )
 
     logging.debug("Commande terminée avec le code %s", completed.returncode)
@@ -189,6 +234,9 @@ def run_command(command: Iterable[str] | str, *, timeout: Optional[int] = None) 
         logging.debug("--- STDOUT ---\n%s", completed.stdout.rstrip())
     if completed.stderr:
         logging.debug("--- STDERR ---\n%s", completed.stderr.rstrip())
+
+    if stop_controller is not None and stop_controller.stop_requested:
+        raise StopRequested()
 
     if completed.returncode != 0:
         raise CommandExecutionError(display_cmd, completed)
@@ -203,6 +251,9 @@ def execute_step(step_number: int, step_name: str, func, *args, **kwargs):
     logging.info("%s... EN COURS", step_label)
     try:
         result = func(*args, **kwargs)
+    except StopRequested:
+        logging.warning("%s... ARRÊT DEMANDÉ", step_label)
+        raise
     except StepError:
         logging.error("%s... ÉCHEC", step_label)
         raise
@@ -264,7 +315,10 @@ def read_bmc_firmware_version(context: ExecutionContext) -> str:
     """Récupère la version du firmware en interrogeant le BMC via IPMI."""
 
     try:
-        result = run_command(build_ipmitool_command(context.bmc_host, context.bmc_user, context.bmc_password, "mc", "info"))
+        result = run_command(
+            build_ipmitool_command(context.bmc_host, context.bmc_user, context.bmc_password, "mc", "info"),
+            stop_controller=context.stop_controller,
+        )
     except CommandExecutionError as err:
         raise StepError("Lecture version firmware", str(err)) from err
 
@@ -307,7 +361,7 @@ def run_remote_command(context: ExecutionContext, remote_command: str, *, timeou
         f"set -euo pipefail; {remote_command}",
     ]
 
-    return run_command(ssh_command, timeout=timeout)
+    return run_command(ssh_command, timeout=timeout, stop_controller=context.stop_controller)
 
 
 def compute_firmware_metadata(firmware_path: Path) -> tuple[int, str]:
@@ -354,20 +408,29 @@ def copy_firmware(context: ExecutionContext, firmware_path: Path) -> None:
         f"{context.bmc_user}@{context.bmc_host}:{context.remote_firmware_path}",
     ]
 
-    run_command(scp_command)
+    run_command(scp_command, stop_controller=context.stop_controller)
 
 
-def wait_for_host(host: str, *, timeout: int, interval: int = 5) -> None:
+def wait_for_host(
+    host: str,
+    *,
+    timeout: int,
+    interval: int = 5,
+    stop_controller: Optional[StopController] = None,
+) -> None:
     """Attend qu'un hôte réponde au ping."""
 
     logging.debug("Attente du retour en ligne de %s (timeout=%ss)...", host, timeout)
     deadline = _dt.datetime.now() + _dt.timedelta(seconds=timeout)
     while _dt.datetime.now() < deadline:
+        if stop_controller is not None:
+            stop_controller.raise_if_requested()
+
         try:
-            run_command(["ping", "-c", "1", "-W", "1", host])
+            run_command(["ping", "-c", "1", "-W", "1", host], stop_controller=stop_controller)
         except CommandExecutionError:
             logging.debug("Ping en échec, nouvel essai dans %ss", interval)
-            _sleep(interval)
+            _sleep(interval, stop_controller=stop_controller)
             continue
         else:
             logging.info("L'hôte %s répond au ping", host)
@@ -376,12 +439,16 @@ def wait_for_host(host: str, *, timeout: int, interval: int = 5) -> None:
     raise StepError("Post-vérification", f"L'hôte {host} ne répond pas au ping après {timeout} secondes")
 
 
-def _sleep(seconds: int) -> None:
+def _sleep(seconds: int, *, stop_controller: Optional[StopController] = None) -> None:
     """Wrapper de sommeil testable (facilité de mock)."""
 
     import time
 
-    time.sleep(seconds)
+    if stop_controller is not None:
+        if stop_controller.wait(seconds):
+            raise StopRequested()
+    else:
+        time.sleep(seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +461,8 @@ def step_initialisation(args: argparse.Namespace, context: ExecutionContext) -> 
 
     step_label = "Étape 0 : Initialisation et nettoyage"
     logging.info("%s - vérification des dépendances", step_label)
+
+    context.stop_controller.raise_if_requested()
 
     for command in args.required_commands:
         ensure_command_available(step_label, command)
@@ -408,6 +477,8 @@ def step_initialisation(args: argparse.Namespace, context: ExecutionContext) -> 
 def step_precheck(context: ExecutionContext) -> None:
     """Pré-vérifie l'état du BMC en lisant la version du firmware."""
 
+    context.stop_controller.raise_if_requested()
+
     if context.dry_run:
         context.initial_version = "(dry-run)"
         logging.info("Mode test à blanc : la lecture de la version initiale est ignorée")
@@ -419,6 +490,8 @@ def step_precheck(context: ExecutionContext) -> None:
 
 def step_preparation(args: argparse.Namespace, context: ExecutionContext) -> None:
     """Met le BMC en mode maintenance et transfère le firmware."""
+
+    context.stop_controller.raise_if_requested()
 
     firmware_path = Path(args.firmware_file).resolve()
     context.firmware_local_path = firmware_path
@@ -453,6 +526,7 @@ def step_preparation(args: argparse.Namespace, context: ExecutionContext) -> Non
         run_remote_command(context, args.pre_update_command)
 
     if context.serial_device:
+        context.stop_controller.raise_if_requested()
         logging.info("Périphérique série ciblé : %s", context.serial_device)
         verify_command = "if [ ! -e {device} ]; then echo 'missing' >&2; exit 1; fi".format(
             device=shlex.quote(context.serial_device)
@@ -477,6 +551,8 @@ def step_preparation(args: argparse.Namespace, context: ExecutionContext) -> Non
 def step_flash(args: argparse.Namespace, context: ExecutionContext) -> None:
     """Lance la commande de flash principale sur le BMC."""
 
+    context.stop_controller.raise_if_requested()
+
     serial_device = context.serial_device or ""
     flash_cmd = args.flash_command.format(
         firmware=shlex.quote(context.remote_firmware_path),
@@ -498,6 +574,8 @@ def step_flash(args: argparse.Namespace, context: ExecutionContext) -> None:
 def step_post_verification(args: argparse.Namespace, context: ExecutionContext) -> None:
     """Attend le redémarrage du BMC et valide la version flashée."""
 
+    context.stop_controller.raise_if_requested()
+
     if context.dry_run:
         context.final_version = "(dry-run)"
         if args.wait_for_reboot:
@@ -512,7 +590,12 @@ def step_post_verification(args: argparse.Namespace, context: ExecutionContext) 
 
     if args.wait_for_reboot:
         logging.info("Attente du redémarrage du BMC (%ss maximum)", args.reboot_timeout)
-        wait_for_host(context.bmc_host, timeout=args.reboot_timeout, interval=args.reboot_check_interval)
+        wait_for_host(
+            context.bmc_host,
+            timeout=args.reboot_timeout,
+            interval=args.reboot_check_interval,
+            stop_controller=context.stop_controller,
+        )
 
     context.final_version = read_bmc_firmware_version(context)
     logging.info("Version finale détectée : %s", context.final_version)
@@ -574,6 +657,18 @@ def handle_failure(context: ExecutionContext, failure: StepError) -> None:
         logging.error("Impossible d'écrire le fichier FAILURE_REPORT.txt : %s", err)
     else:
         logging.error("Rapport d'échec enregistré dans %s", failure_report)
+
+
+def handle_manual_stop(context: ExecutionContext) -> None:
+    """Nettoie l'environnement lorsque l'utilisateur demande l'arrêt."""
+
+    logging.warning("Arrêt manuel détecté. Nettoyage en cours...")
+    logging.warning("Les journaux sont conservés dans %s", context.log_dir)
+    flush_logs()
+    logging.shutdown()
+
+    print(f"Journaux disponibles dans : {context.log_dir}")
+    cleanup_repository()
 
 
 # ---------------------------------------------------------------------------
@@ -669,8 +764,8 @@ def parse_arguments(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--log-root",
-        default="logs",
-        help="Répertoire parent pour les journaux horodatés",
+        default=str(DEFAULT_EXTERNAL_LOG_ROOT),
+        help="Répertoire parent pour les journaux horodatés (doit être hors du dépôt)",
     )
     parser.add_argument(
         "--required-commands",
@@ -698,21 +793,38 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     args = parse_arguments(argv)
 
+    stop_controller = StopController()
+
     timestamp = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    log_root = Path(args.log_root)
+    log_root_candidate = Path(args.log_root)
+    log_root, adjusted_log_root = resolve_log_root(log_root_candidate)
+    log_root.mkdir(parents=True, exist_ok=True)
     log_dir = log_root / f"flash_test_{timestamp}"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "debug.log"
 
     configure_logging(log_file)
 
+    stop_controller.start()
+
+    if adjusted_log_root:
+        logging.warning(
+            "Le répertoire de logs demandé se trouvait dans le dépôt. Utilisation de %s",
+            log_root,
+        )
+
     logging.info("Initialisation du processus d'automatisation du flash")
     if args.dry_run:
         logging.warning("Mode test à blanc activé : aucune action distante ne sera exécutée")
+    logging.info(
+        "Bouton stop : tapez 'STOP' + Entrée ou pressez Ctrl+C pour interrompre proprement."
+    )
+    logging.info("Les journaux sont enregistrés dans %s", log_dir)
 
     context = ExecutionContext(
         log_dir=log_dir,
         log_file=log_file,
+        stop_controller=stop_controller,
         bmc_host=args.bmc_host,
         bmc_user=args.bmc_user,
         bmc_password=args.bmc_password,
@@ -728,6 +840,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         execute_step(2, "Préparation du flash", step_preparation, args, context)
         execute_step(3, "Exécution du flash", step_flash, args, context)
         execute_step(4, "Post-vérification", step_post_verification, args, context)
+    except StopRequested:
+        handle_manual_stop(context)
+        return 130
+    except KeyboardInterrupt:
+        if not stop_controller.stop_requested:
+            stop_controller.request_stop(reason="interruption clavier")
+        handle_manual_stop(context)
+        return 130
     except StepError as failure:
         handle_failure(context, failure)
         return 1
