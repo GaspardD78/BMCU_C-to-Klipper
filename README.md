@@ -69,7 +69,8 @@ Le flash repose sur `pyserial` et `wchisp`. Installez-les dans l'environnement v
 
 ```bash
 python3 -m pip install --upgrade pip
-python3 -m pip install --user wchisp
+pip install -r requirements.txt
+python3 install_wchisp.py
 ```
 
 > ℹ️ Après une installation `--user`, ajoutez `~/.local/bin` au `PATH` :
