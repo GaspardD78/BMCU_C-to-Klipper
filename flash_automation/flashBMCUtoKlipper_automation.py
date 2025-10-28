@@ -116,6 +116,7 @@ class ExecutionContext:
     firmware_local_path: Optional[Path] = None
     firmware_size: Optional[int] = None
     firmware_sha256: Optional[str] = None
+    serial_device: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -451,6 +452,20 @@ def step_preparation(args: argparse.Namespace, context: ExecutionContext) -> Non
         logging.debug("Commande de mise en maintenance : %s", args.pre_update_command)
         run_remote_command(context, args.pre_update_command)
 
+    if context.serial_device:
+        logging.info("Périphérique série ciblé : %s", context.serial_device)
+        verify_command = "if [ ! -e {device} ]; then echo 'missing' >&2; exit 1; fi".format(
+            device=shlex.quote(context.serial_device)
+        )
+        try:
+            run_remote_command(context, verify_command)
+        except CommandExecutionError as err:
+            raise StepError(
+                "Préparation du flash",
+                f"Le périphérique série '{context.serial_device}' est introuvable sur le BMC.",
+                cause=err,
+            ) from err
+
     copy_firmware(context, firmware_path)
     logging.info(
         "Firmware transféré vers %s:%s",
@@ -462,9 +477,12 @@ def step_preparation(args: argparse.Namespace, context: ExecutionContext) -> Non
 def step_flash(args: argparse.Namespace, context: ExecutionContext) -> None:
     """Lance la commande de flash principale sur le BMC."""
 
+    serial_device = context.serial_device or ""
     flash_cmd = args.flash_command.format(
         firmware=shlex.quote(context.remote_firmware_path),
         firmware_path=shlex.quote(context.remote_firmware_path),
+        serial_device=serial_device,
+        serial_device_quoted=shlex.quote(serial_device) if serial_device else "",
     )
 
     logging.debug("Commande de flash finale : %s", flash_cmd)
@@ -580,6 +598,11 @@ def parse_arguments(argv: Optional[list[str]] = None) -> argparse.Namespace:
         default="/tmp/klipper_firmware.bin",
         help="Chemin cible sur le BMC pour le fichier firmware",
     )
+    parser.add_argument(
+        "--serial-device",
+        default="",
+        help="Chemin du périphérique USB/TTY utilisé pour le flash (optionnel).",
+    )
     parser.add_argument("--ssh-port", type=int, default=22, help="Port SSH du BMC")
     parser.add_argument(
         "--pre-update-command",
@@ -593,7 +616,8 @@ def parse_arguments(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "--flash-command",
         default="socflash -s {firmware}",
         help=(
-            "Commande distante de flash. Utiliser {firmware} ou {firmware_path} comme placeholder pour le chemin sur le BMC."
+            "Commande distante de flash. Utiliser {firmware} ou {firmware_path} pour le binaire et {serial_device}"
+            " / {serial_device_quoted} pour le port série."
         ),
     )
     parser.add_argument("--flash-timeout", type=int, default=1800, help="Timeout (en secondes) pour la commande de flash")
@@ -695,6 +719,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         ssh_port=args.ssh_port,
         remote_firmware_path=args.remote_firmware_path,
         dry_run=args.dry_run,
+        serial_device=args.serial_device or None,
     )
 
     try:
