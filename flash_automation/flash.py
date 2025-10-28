@@ -37,6 +37,8 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -181,6 +183,23 @@ def display_check_results(title: str, results: Iterable[CheckResult]) -> None:
             detail = textwrap.indent(result.detail.strip(), "      ")
             print(detail)
     print()
+
+
+@contextmanager
+def progress_step(title: str):
+    """Affiche un indicateur simple de progression."""
+
+    print(colorize(f"⏳ {title}...", Colors.OKBLUE))
+    start = time.monotonic()
+    try:
+        yield
+    except Exception:
+        duration = time.monotonic() - start
+        print(colorize(f"❌ {title} ({duration:.1f}s)", Colors.FAIL))
+        raise
+    else:
+        duration = time.monotonic() - start
+        print(colorize(f"✅ {title} ({duration:.1f}s)", Colors.OKGREEN))
 
 
 def check_command_available(command: str) -> CheckResult:
@@ -526,7 +545,8 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
 """
     print_block(intro_text)
 
-    local_checks = run_local_prerequisite_checks()
+    with progress_step("Diagnostic local"):
+        local_checks = run_local_prerequisite_checks()
     display_check_results("Diagnostic local :", local_checks)
     if not all(result.success for result in local_checks):
         print(colorize("Préparez l'environnement local puis relancez l'assistant.", Colors.FAIL))
@@ -544,29 +564,44 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
     )
 
     host_question = "IP/nom du Raspberry ou CB2"
-    if profile.gateway_host:
-        bmc_host = ask_text(host_question, default=profile.gateway_host)
-    else:
-        bmc_host = ask_text(host_question, required=True)
-    profile.gateway_host = bmc_host
-
-    if profile.gateway_user:
-        bmc_user = ask_text("Utilisateur SSH", default=profile.gateway_user)
-    else:
-        bmc_user = ask_text("Utilisateur SSH", default="pi")
-    profile.gateway_user = bmc_user
-
-    bmc_password = ask_password("Mot de passe SSH")
+    host_default = profile.gateway_host or "localhost"
+    user_default = profile.gateway_user or "pi"
     ssh_port = 22
 
-    remote_checks, detected_devices = run_remote_prerequisite_checks(
-        bmc_host, bmc_user, bmc_password, ssh_port
-    )
-    display_check_results("Diagnostic passerelle :", remote_checks)
-    ssh_ok = any(result.label == "Connexion SSH" and result.success for result in remote_checks)
-    if not ssh_ok:
-        print(colorize("Connexion SSH impossible : corrigez l'accès distant avant de continuer.", Colors.FAIL))
-        sys.exit(1)
+    attempt = 0
+    detected_devices: list[str] = []
+    while True:
+        if attempt == 0:
+            bmc_host = ask_text(host_question, default=host_default, required=True)
+            bmc_user = ask_text("Utilisateur SSH", default=user_default, required=True)
+        else:
+            print(colorize("Réessayons la connexion. Ajustez les informations si nécessaire.", Colors.WARNING))
+            bmc_host = ask_text(host_question, default=bmc_host or host_default, required=True)
+            bmc_user = ask_text("Utilisateur SSH", default=bmc_user or user_default, required=True)
+        bmc_password = ask_password("Mot de passe SSH")
+
+        with progress_step("Diagnostic de la passerelle"):
+            remote_checks, detected_devices = run_remote_prerequisite_checks(
+                bmc_host, bmc_user, bmc_password, ssh_port
+            )
+        display_check_results("Diagnostic passerelle :", remote_checks)
+        ssh_ok = any(result.label == "Connexion SSH" and result.success for result in remote_checks)
+        if ssh_ok:
+            break
+
+        attempt += 1
+        print(
+            colorize(
+                "Connexion SSH impossible : corrigez l'accès distant avant de continuer.",
+                Colors.FAIL,
+            )
+        )
+        if not ask_yes_no("Souhaitez-vous réessayer ?", default=True):
+            print(colorize("Opération annulée.", Colors.WARNING))
+            sys.exit(1)
+
+    profile.gateway_host = bmc_host
+    profile.gateway_user = bmc_user
 
     serial_device = prompt_serial_device(detected_devices, profile.serial_device)
     profile.serial_device = serial_device
@@ -695,9 +730,9 @@ def run_build() -> bool:
         print(colorize("Script build.sh introuvable.", Colors.FAIL))
         return False
 
-    print(colorize("Compilation du firmware Klipper…", Colors.OKBLUE))
     try:
-        subprocess.run([str(build_script)], check=True)
+        with progress_step("Compilation du firmware Klipper"):
+            subprocess.run([str(build_script)], check=True)
     except subprocess.CalledProcessError as err:
         print(colorize(f"La compilation a échoué (code {err.returncode}).", Colors.FAIL))
         return False

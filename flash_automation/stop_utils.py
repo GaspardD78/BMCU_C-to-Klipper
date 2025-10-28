@@ -72,10 +72,17 @@ class StopController:
                 except Exception:
                     continue
 
-        try:
-            threading.interrupt_main()
-        except RuntimeError:
-            pass
+        interrupt_main = getattr(threading, "interrupt_main", None)
+        if interrupt_main is not None:
+            try:
+                interrupt_main()
+            except RuntimeError:
+                pass
+        else:  # pragma: no cover - rare fallback
+            try:
+                signal.raise_signal(signal.SIGINT)
+            except AttributeError:
+                os.kill(os.getpid(), signal.SIGINT)
 
     def register_process(self, process: subprocess.Popen[str]) -> None:
         with self._lock:
