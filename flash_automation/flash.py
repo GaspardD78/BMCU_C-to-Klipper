@@ -30,6 +30,7 @@ une assistance reste disponible en cas d'échec.
 
 from __future__ import annotations
 
+import argparse
 import getpass
 import json
 import platform
@@ -517,7 +518,7 @@ def print_block(message: str) -> None:
 class PromptTimer:
     """Affiche périodiquement un message d'aide pendant une saisie."""
 
-    def __init__(self, prompt: str, message: str | None, *, interval: float = 30.0):
+    def __init__(self, prompt: str, message: str | None, *, interval: float = 15.0):
         self.prompt = prompt
         self.message = message
         self.interval = interval
@@ -533,7 +534,7 @@ class PromptTimer:
             print()
             print(
                 colorize(
-                    f"⏱️ Astuce ({int(elapsed)}s) : {self.message}",
+                    f"⌛ En attente ({int(elapsed)}s) : {self.message}",
                     Colors.WARNING,
                 )
             )
@@ -721,13 +722,13 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
                 host_question,
                 default=host_default,
                 required=True,
-                help_message="Indiquez l'adresse IP ou le nom d'hôte de la passerelle.",
+                help_message="Merci de saisir l'adresse IP ou le nom d'hôte de la passerelle (ex. 192.168.0.42).",
             )
             bmc_user = ask_text(
                 "Utilisateur SSH",
                 default=user_default,
                 required=True,
-                help_message="L'utilisateur dispose des droits de flash sur la passerelle.",
+                help_message="Merci de saisir l'utilisateur SSH autorisé (ex. pi, bambu).",
             )
         else:
             print(colorize("Réessayons la connexion. Ajustez les informations si nécessaire.", Colors.WARNING))
@@ -735,17 +736,17 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
                 host_question,
                 default=bmc_host or host_default,
                 required=True,
-                help_message="Vérifiez l'accès réseau ou utilisez localhost sur la passerelle.",
+                help_message="Merci de saisir un hôte atteignable (localhost si vous êtes sur la passerelle).",
             )
             bmc_user = ask_text(
                 "Utilisateur SSH",
                 default=bmc_user or user_default,
                 required=True,
-                help_message="Essayez pi, bambu ou l'utilisateur courant selon la plateforme.",
+                help_message="Merci de saisir un utilisateur SSH valide (pi, bambu, utilisateur courant, ...).",
             )
         bmc_password = ask_password(
             "Mot de passe SSH",
-            help_message="Le mot de passe reste masqué. Ctrl+C pour annuler.",
+            help_message="Merci de saisir le mot de passe SSH (aucune frappe n'apparaît, Ctrl+C pour annuler).",
         )
 
         with progress_step("Diagnostic de la passerelle"):
@@ -767,7 +768,7 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
         if not ask_yes_no(
             "Souhaitez-vous réessayer ?",
             default=True,
-            help_message="Corrigez les identifiants ou vérifiez le réseau avant de continuer.",
+            help_message="Merci de confirmer si vous souhaitez retenter la connexion après vos ajustements.",
         ):
             print(colorize("Opération annulée.", Colors.WARNING))
             sys.exit(1)
@@ -783,7 +784,9 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
     detected_firmware = find_default_firmware()
     firmware_file: Path
     if detected_firmware and ask_yes_no(
-        f"Utiliser {detected_firmware}?", default=True
+        f"Utiliser {detected_firmware}?",
+        default=True,
+        help_message="Merci de confirmer si vous souhaitez réutiliser le firmware déjà détecté.",
     ):
         firmware_file = detected_firmware
     else:
@@ -803,14 +806,14 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
     remote_firmware_path = ask_text(
         "Chemin distant (SSH)",
         default=remote_default,
-        help_message="Le firmware est copié vers ce chemin sur la passerelle.",
+        help_message="Merci de préciser où copier le firmware sur la passerelle (chemin absolu).",
     )
     profile.remote_firmware_path = remote_firmware_path
 
     wait_for_reboot = ask_yes_no(
         "Attendre le reboot automatique ?",
         default=profile.wait_for_reboot,
-        help_message="Déconseillez 'non' sauf si vous surveillez manuellement le BMCU.",
+        help_message="Merci de confirmer si l'assistant doit surveiller automatiquement le redémarrage du BMCU.",
     )
     profile.wait_for_reboot = wait_for_reboot
     reboot_timeout = 600
@@ -820,7 +823,7 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
     log_root_input = ask_text(
         "Dossier de logs",
         default=log_default,
-        help_message="Les rapports d'exécution seront stockés dans ce dossier.",
+        help_message="Merci d'indiquer le dossier qui accueillera les rapports d'exécution.",
     )
     profile.log_root = log_root_input
     log_root = Path(log_root_input).expanduser().resolve()
@@ -863,6 +866,113 @@ def summarize_choices(choices: UserChoices) -> None:
       • {colorize('Logs', Colors.BOLD)}           : {choices.log_root}
     """
     print_block(summary)
+
+
+def update_profile_from_choices(profile: QuickProfile, choices: UserChoices) -> None:
+    """Met à jour le profil simplifié avec les dernières informations."""
+
+    profile.gateway_host = choices.bmc_host
+    profile.gateway_user = choices.bmc_user
+    profile.remote_firmware_path = choices.remote_firmware_path
+    profile.wait_for_reboot = choices.wait_for_reboot
+    profile.serial_device = choices.serial_device
+    profile.log_root = str(choices.log_root)
+
+
+def gather_choices_from_args(
+    args: argparse.Namespace,
+    profile: QuickProfile,
+    environment: EnvironmentDefaults,
+) -> UserChoices:
+    """Construit les choix utilisateur à partir des arguments CLI."""
+
+    missing: list[str] = []
+
+    bmc_host = (
+        args.bmc_host
+        or profile.gateway_host
+        or environment.host
+        or "localhost"
+    )
+    if not bmc_host:
+        missing.append("--bmc-host")
+
+    bmc_user = args.bmc_user or profile.gateway_user or environment.user or "pi"
+    if not bmc_user:
+        missing.append("--bmc-user")
+
+    bmc_password = args.bmc_password
+    if not bmc_password:
+        missing.append("--bmc-password")
+
+    firmware_path: Path | None = None
+    if args.firmware_file:
+        try:
+            firmware_path = ensure_firmware_path(args.firmware_file)
+        except FileNotFoundError as err:
+            raise ValueError(str(err)) from err
+    else:
+        firmware_path = find_default_firmware()
+        if firmware_path is None:
+            missing.append("--firmware-file")
+
+    if missing:
+        missing_args = ", ".join(missing)
+        raise ValueError(
+            "Mode non interactif : paramètres obligatoires manquants "
+            f"({missing_args})."
+        )
+
+    remote_firmware_path = (
+        args.remote_firmware_path
+        or profile.remote_firmware_path
+        or environment.remote_path
+    )
+
+    ssh_port = args.ssh_port if args.ssh_port is not None else 22
+    flash_command = args.flash_command or "socflash -s {firmware}"
+    flash_timeout = args.flash_timeout if args.flash_timeout is not None else 1800
+    wait_for_reboot = (
+        profile.wait_for_reboot if args.wait_for_reboot is None else args.wait_for_reboot
+    )
+    reboot_timeout = args.reboot_timeout if args.reboot_timeout is not None else 600
+    reboot_check_interval = (
+        args.reboot_check_interval if args.reboot_check_interval is not None else 10
+    )
+    log_root_str = (
+        args.log_root
+        or profile.log_root
+        or environment.log_root
+        or "logs"
+    )
+    log_root = Path(log_root_str).expanduser().resolve()
+    serial_device = args.serial_device or profile.serial_device or environment.serial_device
+    pre_update_command = args.pre_update_command or ""
+    allow_same_version = args.allow_same_version
+    expected_final_version = args.expected_final_version or ""
+    firmware_sha256 = args.firmware_sha256 or ""
+    dry_run = args.dry_run
+
+    return UserChoices(
+        bmc_host=bmc_host,
+        bmc_user=bmc_user,
+        bmc_password=bmc_password,
+        firmware_file=firmware_path,
+        remote_firmware_path=remote_firmware_path,
+        ssh_port=ssh_port,
+        pre_update_command=pre_update_command,
+        flash_command=flash_command,
+        flash_timeout=flash_timeout,
+        wait_for_reboot=wait_for_reboot,
+        reboot_timeout=reboot_timeout,
+        reboot_check_interval=reboot_check_interval,
+        allow_same_version=allow_same_version,
+        expected_final_version=expected_final_version,
+        firmware_sha256=firmware_sha256,
+        dry_run=dry_run,
+        log_root=log_root,
+        serial_device=serial_device or "",
+    )
 
 
 def build_command(choices: UserChoices) -> list[str]:
@@ -921,25 +1031,36 @@ def run_build() -> bool:
     return True
 
 
-def run_flash_flow(profile: QuickProfile, environment: EnvironmentDefaults) -> int:
+def run_flash_flow(
+    profile: QuickProfile,
+    environment: EnvironmentDefaults,
+    *,
+    preset_choices: UserChoices | None = None,
+    ask_confirmation: bool = True,
+) -> int:
     """Enchaîne la collecte d'infos puis le flash."""
 
-    try:
-        choices = gather_user_choices(profile, environment)
-    except KeyboardInterrupt:
-        print(colorize("\nInterruption utilisateur.", Colors.WARNING))
-        return 1
+    if preset_choices is None:
+        try:
+            choices = gather_user_choices(profile, environment)
+        except KeyboardInterrupt:
+            print(colorize("\nInterruption utilisateur.", Colors.WARNING))
+            return 1
+    else:
+        choices = preset_choices
 
+    update_profile_from_choices(profile, choices)
     save_profile(profile)
     summarize_choices(choices)
 
-    if not ask_yes_no(
-        "On lance le flash ?",
-        default=True,
-        help_message="Validez pour démarrer immédiatement le processus de flash.",
-    ):
-        print(colorize("Opération annulée.", Colors.WARNING))
-        return 0
+    if ask_confirmation:
+        if not ask_yes_no(
+            "On lance le flash ?",
+            default=True,
+            help_message="Validez pour démarrer immédiatement le processus de flash.",
+        ):
+            print(colorize("Opération annulée.", Colors.WARNING))
+            return 0
 
     choices.log_root.mkdir(parents=True, exist_ok=True)
     command = build_command(choices)
@@ -1073,6 +1194,108 @@ def build_home_summary(profile: QuickProfile, environment: EnvironmentDefaults) 
     """
 
 
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    """Analyse les paramètres en ligne de commande."""
+
+    parser = argparse.ArgumentParser(
+        description="Assistant interactif pour flasher le BMCU vers Klipper",
+    )
+    parser.add_argument(
+        "--non-interactif",
+        action="store_true",
+        help="Exécute le flash directement avec les options passées en paramètres.",
+    )
+    parser.add_argument(
+        "--auto-confirm",
+        action="store_true",
+        help="Skippe la confirmation finale avant de lancer le flash.",
+    )
+    parser.add_argument("--bmc-host", help="Adresse IP ou nom DNS de la passerelle.")
+    parser.add_argument("--bmc-user", help="Utilisateur SSH sur la passerelle.")
+    parser.add_argument(
+        "--bmc-password",
+        help="Mot de passe SSH correspondant (requis en mode non interactif).",
+    )
+    parser.add_argument(
+        "--ssh-port",
+        type=int,
+        help="Port SSH utilisé pour joindre la passerelle.",
+    )
+    parser.add_argument(
+        "--firmware-file",
+        help="Chemin vers le firmware Klipper à flasher.",
+    )
+    parser.add_argument(
+        "--remote-firmware-path",
+        help="Chemin distant de dépôt du firmware sur la passerelle.",
+    )
+    parser.add_argument(
+        "--serial-device",
+        help="Chemin du périphérique série sur la passerelle (ex. /dev/ttyUSB0).",
+    )
+    parser.add_argument(
+        "--log-root",
+        help="Répertoire local où stocker les journaux de flash.",
+    )
+    parser.add_argument(
+        "--flash-command",
+        help="Commande de flash exécutée côté passerelle.",
+    )
+    parser.add_argument(
+        "--flash-timeout",
+        type=int,
+        help="Durée maximale (en secondes) autorisée pour l'étape de flash.",
+    )
+    wait_group = parser.add_mutually_exclusive_group()
+    wait_group.add_argument(
+        "--wait-for-reboot",
+        dest="wait_for_reboot",
+        action="store_true",
+        help="Force l'attente du redémarrage automatique.",
+    )
+    wait_group.add_argument(
+        "--no-wait-for-reboot",
+        dest="wait_for_reboot",
+        action="store_false",
+        help="Désactive l'attente automatique du redémarrage.",
+    )
+    parser.set_defaults(wait_for_reboot=None)
+    parser.add_argument(
+        "--reboot-timeout",
+        type=int,
+        help="Temps maximal (en secondes) pour attendre le retour en ligne.",
+    )
+    parser.add_argument(
+        "--reboot-check-interval",
+        type=int,
+        help="Intervalle entre deux vérifications du reboot.",
+    )
+    parser.add_argument(
+        "--pre-update-command",
+        help="Commande préliminaire à exécuter sur la passerelle avant le flash.",
+    )
+    parser.add_argument(
+        "--allow-same-version",
+        action="store_true",
+        help="Autorise le flash même si la version cible semble identique.",
+    )
+    parser.add_argument(
+        "--expected-final-version",
+        help="Version attendue après flash pour validation.",
+    )
+    parser.add_argument(
+        "--firmware-sha256",
+        help="Empreinte SHA-256 attendue du firmware (sécurité supplémentaire).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Active le mode test à blanc sans exécuter de commande distante.",
+    )
+
+    return parser.parse_args(argv)
+
+
 def show_main_screen(profile: QuickProfile, environment: EnvironmentDefaults) -> int:
     """Affiche l'écran d'accueil unique avec les options principales."""
 
@@ -1088,18 +1311,32 @@ def show_main_screen(profile: QuickProfile, environment: EnvironmentDefaults) ->
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Point d'entrée CLI."""
 
+    args = parse_arguments(argv)
     display_logo()
     profile = load_profile()
     environment = detect_environment_defaults()
     apply_environment_defaults(profile, environment)
 
+    if args.non_interactif:
+        try:
+            choices = gather_choices_from_args(args, profile, environment)
+        except ValueError as err:
+            print(colorize(str(err), Colors.FAIL))
+            return 2
+        return run_flash_flow(
+            profile,
+            environment,
+            preset_choices=choices,
+            ask_confirmation=not (args.auto_confirm or args.non_interactif),
+        )
+
     selection = show_main_screen(profile, environment)
 
     if selection == 0:
-        return run_flash_flow(profile, environment)
+        return run_flash_flow(profile, environment, ask_confirmation=not args.auto_confirm)
 
     if selection == 1:
         build_success = run_build()
@@ -1108,7 +1345,11 @@ def main() -> int:
             default=True,
             help_message="Acceptez pour utiliser directement le firmware fraîchement compilé.",
         ):
-            return run_flash_flow(profile, environment)
+            return run_flash_flow(
+                profile,
+                environment,
+                ask_confirmation=not args.auto_confirm,
+            )
         return 0 if build_success else 1
 
     print(colorize("À bientôt !", Colors.OKBLUE))
