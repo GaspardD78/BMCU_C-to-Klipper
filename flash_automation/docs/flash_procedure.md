@@ -35,7 +35,7 @@ Ce document détaille la procédure complète pour compiler et flasher le firmwa
    ```bash
    python3 flash.py
    ```
-   Utilisez l'option `--dry-run` pour valider le parcours sans écrire sur la carte. L'assistant rappelle les prérequis (connexion réseau/USB, sauvegardes, checksum du firmware), puis enchaîne automatiquement les vérifications avant de déclencher `wchisp`.
+   Utilisez l'option `--dry-run` pour valider le parcours sans écrire sur la carte. L'assistant rappelle les prérequis (connexion réseau/USB, sauvegardes, checksum du firmware), calcule automatiquement l'empreinte SHA-256 de `klipper.bin` et la compare à la valeur de référence définie dans `klipper.sha256` (ou fournie via `--firmware-sha256[(-file)]`). En cas d'écart, le processus s'arrête immédiatement pour éviter un flash risqué.
 2. Lorsque le programme vous le demande, placez manuellement le module en mode bootloader :
    1. Maintenez le bouton **BOOT0** enfoncé.
    2. Appuyez puis relâchez le bouton **RESET**.
