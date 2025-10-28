@@ -12,11 +12,9 @@ from __future__ import annotations
 import argparse
 import getpass
 import hashlib
-import itertools
 import json
 import logging
 import os
-import select
 import shlex
 import shutil
 import subprocess
@@ -29,6 +27,8 @@ from stat import S_IMODE
 from typing import Any, Callable, Dict, Iterable, Optional
 
 from stop_utils import StopController, StopRequested, cleanup_repository
+
+from . import context as command_context
 
 FLASH_DIR = Path(__file__).resolve().parent
 REPO_ROOT = FLASH_DIR.parent
@@ -412,61 +412,30 @@ class AutomationContext:
             self.logger.warning("Mode --dry-run actif, la commande n'est pas exécutée")
             return
 
-        process = subprocess.Popen(
-            cmd_list,
-            cwd=str(cwd) if cwd else None,
-            env={**os.environ, **env} if env else None,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+        registered: list[subprocess.Popen[bytes]] = []
 
-        self.stop_controller.register_process(process)
+        def _register(proc: subprocess.Popen[bytes]) -> None:
+            registered.append(proc)
+            self.stop_controller.register_process(proc)
 
         try:
-            assert process.stdout is not None  # pour mypy/pyright
-            stdout = process.stdout
-            inactivity_threshold = 5.0
-            spinner_interval = 5.0
-            spinner_frames = itertools.cycle(["⏳", "⌛", "🕒", "🕘"])
-            last_output = time.monotonic()
-            next_indicator_time = last_output + inactivity_threshold
-            indicator_active = False
-
-            while True:
-                self.stop_controller.raise_if_requested()
-
-                ready, _, _ = select.select([stdout], [], [], 0.5)
-                if ready:
-                    line = stdout.readline()
-                    if line == "":
-                        break
-                    cleaned = line.rstrip()
-                    if cleaned:
-                        if indicator_active:
-                            indicator_active = False
-                        self.logger.info("[sortie] %s", cleaned)
-                    last_output = time.monotonic()
-                    next_indicator_time = last_output + inactivity_threshold
-                    continue
-
-                if process.poll() is not None:
-                    break
-
-                now = time.monotonic()
-                if now >= next_indicator_time:
-                    frame = next(spinner_frames)
-                    self.logger.info("%s Toujours en cours… (commande %s)", frame, printable)
-                    indicator_active = True
-                    next_indicator_time = now + spinner_interval
-
-            return_code = process.wait()
+            return_code = command_context.run_command(
+                cmd_list,
+                cwd=cwd,
+                env=env,
+                logger=self.logger,
+                inactivity_threshold=2.0,
+                spinner_interval=0.5,
+                stop_check=self.stop_controller.raise_if_requested,
+                on_process_start=_register,
+            )
         except KeyboardInterrupt:
             if not self.stop_controller.stop_requested:
                 self.stop_controller.request_stop(reason="interruption clavier")
             raise StopRequested()
         finally:
-            self.stop_controller.unregister_process(process)
+            if registered:
+                self.stop_controller.unregister_process(registered[0])
 
         if self.stop_controller.stop_requested:
             raise StopRequested()
