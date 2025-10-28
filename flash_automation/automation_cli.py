@@ -19,6 +19,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -42,6 +43,11 @@ _PERMISSION_CACHE_FILE = Path(
         Path.home() / ".cache" / "bmcu_permissions.json",
     )
 )
+
+YES_RESPONSES = ("o", "oui", "y", "yes")
+NO_RESPONSES = ("n", "non", "no")
+YES_RESPONSES_NORMALIZED = {resp.lower() for resp in YES_RESPONSES}
+NO_RESPONSES_NORMALIZED = {resp.lower() for resp in NO_RESPONSES}
 
 
 def _get_permission_cache_ttl() -> int:
@@ -479,6 +485,71 @@ def configure_logging(now: Optional[datetime] = None) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Gestion des saisies interactives
+# ---------------------------------------------------------------------------
+
+
+def _normalize_confirmation_response(value: str) -> Optional[bool]:
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    if normalized in YES_RESPONSES_NORMALIZED:
+        return True
+    if normalized in NO_RESPONSES_NORMALIZED:
+        return False
+    return None
+
+
+def prompt_confirmation(
+    message: str,
+    *,
+    default: bool = True,
+    reminder_interval: float = 30.0,
+) -> bool:
+    """Demande une confirmation O/N avec rappel périodique."""
+
+    default_label = "O" if default else "N"
+    prompt_variant = "O/n" if default else "o/N"
+    accepted_yes = ", ".join(YES_RESPONSES)
+    accepted_no = ", ".join(NO_RESPONSES)
+    details = (
+        f"(Entrée = {default_label} ; {accepted_yes} ⇒ confirmer ; {accepted_no} ⇒ refuser)"
+    )
+    base_prompt = f"{message} [{prompt_variant}] {details} : "
+
+    stop_event = threading.Event()
+
+    def _reminder_loop() -> None:
+        while not stop_event.wait(reminder_interval):
+            print()
+            print(f"[En attente] {message} [{prompt_variant}]", flush=True)
+            print(f"            {details}", flush=True)
+
+    reminder_thread = threading.Thread(target=_reminder_loop, daemon=True)
+    reminder_thread.start()
+
+    try:
+        while True:
+            try:
+                response = input(base_prompt)
+            except EOFError:
+                response = ""
+
+            normalized = _normalize_confirmation_response(response)
+            if normalized is None:
+                if not response.strip():
+                    return default
+                print(
+                    "Réponse non reconnue. Utilisez les variantes listées pour confirmer ou refuser."
+                )
+                continue
+            return normalized
+    finally:
+        stop_event.set()
+        reminder_thread.join(timeout=0.1)
+
+
+# ---------------------------------------------------------------------------
 # Actions disponibles
 # ---------------------------------------------------------------------------
 
@@ -713,7 +784,10 @@ def remote_orchestration(context: AutomationContext) -> None:
     context.stop_controller.raise_if_requested()
     remote_path = input("Chemin distant du firmware [/tmp/klipper_firmware.bin] : ").strip() or \
         "/tmp/klipper_firmware.bin"
-    wait_reboot = input("Attendre le redémarrage après flash ? [o/N] : ").strip().lower().startswith("o")
+    wait_reboot = prompt_confirmation(
+        "Attendre le redémarrage après flash ?",
+        default=True,
+    )
     context.stop_controller.raise_if_requested()
 
     command = [
