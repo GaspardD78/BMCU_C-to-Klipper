@@ -803,6 +803,7 @@ def handle_manual_stop(context: AutomationContext) -> None:
     """Nettoyage global lors d'une interruption manuelle."""
 
     context.logger.warning("Arrêt manuel détecté. Nettoyage en cours...")
+    context.stop_controller.finalize_stop()
     logging.shutdown()
     print(f"Journaux disponibles dans : {context.log_file}")
     cleanup_repository()
@@ -892,10 +893,14 @@ def interactive_menu(context: AutomationContext) -> None:
         except AutomationError as error:
             context.logger.error("Action '%s' interrompue : %s", action.label, error)
         except StopRequested:
-            raise
+            context.logger.warning("Action '%s' interrompue sur demande utilisateur", action.label)
+            context.stop_controller.finalize_stop()
+            context.logger.info("Retour au menu principal.")
         except KeyboardInterrupt:
-            context.logger.warning("Action '%s' interrompue par l'utilisateur", action.label)
-            raise StopRequested()
+            context.logger.warning("Interruption clavier pendant l'action '%s'", action.label)
+            context.stop_controller.request_stop(reason="interruption clavier")
+            context.stop_controller.finalize_stop()
+            context.logger.info("Retour au menu principal.")
         except Exception as unexpected:
             context.logger.exception("Erreur inattendue lors de l'action '%s'", action.label)
 
