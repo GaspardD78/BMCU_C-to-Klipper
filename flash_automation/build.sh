@@ -715,6 +715,30 @@ configure_klipper_remote() {
     fi
 }
 
+reset_cached_klipper_repo() {
+    if [[ "${USE_EXISTING_KLIPPER}" == "true" ]]; then
+        return
+    fi
+
+    local repo="${DEFAULT_KLIPPER_DIR}"
+
+    if [[ ! -d "${repo}/.git" ]]; then
+        return
+    fi
+
+    print_info "Réinitialisation du dépôt Klipper mis en cache (${repo})..."
+
+    if ! git -C "${repo}" reset --hard HEAD; then
+        print_error "Impossible d'annuler les modifications locales dans ${repo}."
+        exit 1
+    fi
+
+    if ! git -C "${repo}" clean -fd; then
+        print_error "Impossible de supprimer les fichiers non suivis dans ${repo}."
+        exit 1
+    fi
+}
+
 ensure_klipper_repo() {
     mkdir -p "${CACHE_ROOT}"
 
@@ -1126,6 +1150,8 @@ if start_step "repo_sync"; then
 fi
 
 if start_step "overrides"; then
+    reset_cached_klipper_repo
+
     if [[ "${USE_EXISTING_KLIPPER}" == "true" && -f "${KLIPPER_DIR}/.config" ]]; then
         if [[ ! -f "${KLIPPER_DIR}/.config.bmcuc_backup" ]]; then
             print_info "Sauvegarde de la configuration existante (${KLIPPER_DIR}/.config.bmcuc_backup)..."
