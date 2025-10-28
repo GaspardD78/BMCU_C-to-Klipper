@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Optional, Set
 
@@ -19,6 +20,23 @@ DEFAULT_EXTERNAL_LOG_ROOT = Path.home() / "BMCU_C_to_Klipper_logs"
 
 class StopRequested(Exception):
     """Raised when the user requests to stop the automation."""
+
+
+def interrupt_main() -> None:
+    """Interrupts the main thread, favouring `_thread.interrupt_main` when available."""
+
+    try:
+        import _thread
+
+        _thread.interrupt_main()
+        return
+    except (ImportError, RuntimeError):
+        pass
+
+    try:
+        signal.raise_signal(signal.SIGINT)
+    except OSError as exc:  # pragma: no cover - platform specific failure
+        raise StopRequested("Impossible d'interrompre le thread principal") from exc
 
 
 class StopController:
@@ -72,16 +90,10 @@ class StopController:
                 except Exception:
                     continue
 
-        if hasattr(threading, "interrupt_main"):
-            try:
-                threading.interrupt_main()
-            except RuntimeError:
-                pass
-        else:  # pragma: no cover - rare fallback
-            try:
-                os.kill(os.getpid(), signal.SIGINT)
-            except OSError:
-                raise StopRequested("Impossible d'interrompre le thread principal")
+        try:
+            interrupt_main()
+        except StopRequested:
+            pass
 
     def register_process(self, process: subprocess.Popen[str]) -> None:
         with self._lock:
@@ -90,6 +102,33 @@ class StopController:
     def unregister_process(self, process: subprocess.Popen[str]) -> None:
         with self._lock:
             self._processes.discard(process)
+
+    def finalize_stop(self, timeout: float = 5.0) -> None:
+        """Waits for registered processes to exit and clears the stop flag."""
+
+        deadline = time.monotonic() + timeout if timeout and timeout > 0 else None
+        while True:
+            with self._lock:
+                processes = list(self._processes)
+            if not processes:
+                break
+            for process in processes:
+                try:
+                    if deadline is None:
+                        process.wait()
+                    else:
+                        remaining = max(deadline - time.monotonic(), 0)
+                        process.wait(timeout=remaining)
+                except Exception:
+                    continue
+            with self._lock:
+                for process in processes:
+                    if process.poll() is not None:
+                        self._processes.discard(process)
+            if deadline is not None and time.monotonic() >= deadline:
+                break
+
+        self._stop_event.clear()
 
     def raise_if_requested(self) -> None:
         if self._stop_event.is_set():
