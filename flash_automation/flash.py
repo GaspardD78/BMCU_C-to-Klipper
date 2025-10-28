@@ -33,6 +33,7 @@ from __future__ import annotations
 import getpass
 import json
 import shlex
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -63,6 +64,20 @@ def colorize(text: str, color: str) -> str:
     if not sys.stdout.isatty():
         return text
     return f"{color}{text}{Colors.ENDC}"
+
+
+# ---------------------------------------------------------------------------
+# Structures pour les vérifications
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CheckResult:
+    """Résultat d'une vérification de prérequis."""
+
+    label: str
+    success: bool
+    detail: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -110,13 +125,7 @@ class UserChoices:
     firmware_sha256: str
     dry_run: bool
     log_root: Path
-
-
-CHECKLIST_ITEMS = [
-    "BMCU branché au Raspberry/CB2.",
-    "Accès SSH fonctionnel vers la passerelle.",
-    "Firmware Klipper disponible (ou à générer).",
-]
+    serial_device: str
 
 
 CONFIG_FILE = Path(__file__).resolve().with_name("flash_profile.json")
@@ -131,6 +140,7 @@ class QuickProfile:
     remote_firmware_path: str = "/tmp/klipper_firmware.bin"
     log_root: str = "logs"
     wait_for_reboot: bool = True
+    serial_device: str = ""
 
 
 def load_profile() -> QuickProfile:
@@ -153,6 +163,228 @@ def save_profile(profile: QuickProfile) -> None:
         CONFIG_FILE.write_text(json.dumps(asdict(profile), indent=2), encoding="utf-8")
     except OSError as err:
         print(colorize(f"Impossible d'enregistrer le profil : {err}", Colors.WARNING))
+
+
+# ---------------------------------------------------------------------------
+# Vérifications automatisées
+# ---------------------------------------------------------------------------
+
+
+def display_check_results(title: str, results: Iterable[CheckResult]) -> None:
+    """Affiche un bloc synthétique avec le résultat des vérifications."""
+
+    print(colorize(title, Colors.HEADER))
+    for result in results:
+        status = colorize("OK", Colors.OKGREEN) if result.success else colorize("KO", Colors.FAIL)
+        print(f"  • {result.label}: {status}")
+        if result.detail:
+            detail = textwrap.indent(result.detail.strip(), "      ")
+            print(detail)
+    print()
+
+
+def check_command_available(command: str) -> CheckResult:
+    """Vérifie la présence d'une commande système locale."""
+
+    location = shutil.which(command)
+    if location:
+        return CheckResult(label=f"Commande '{command}'", success=True, detail=location)
+    return CheckResult(
+        label=f"Commande '{command}'",
+        success=False,
+        detail="Introuvable dans le PATH. Installez la dépendance avant de poursuivre.",
+    )
+
+
+def check_required_file(path: Path) -> CheckResult:
+    """Confirme la présence d'un fichier requis."""
+
+    if path.exists():
+        return CheckResult(label=f"Fichier '{path.name}'", success=True, detail=str(path))
+    return CheckResult(
+        label=f"Fichier '{path.name}'",
+        success=False,
+        detail="Le fichier est introuvable. Vérifiez votre clone du dépôt.",
+    )
+
+
+def run_local_prerequisite_checks() -> list[CheckResult]:
+    """Exécute les vérifications locales avant toute interaction distante."""
+
+    flash_dir = Path(__file__).resolve().parent
+    results = [
+        check_command_available("sshpass"),
+        check_command_available("scp"),
+        check_command_available("ping"),
+        check_required_file(flash_dir / "flashBMCUtoKlipper_automation.py"),
+    ]
+    return results
+
+
+def run_remote_command(
+    host: str,
+    user: str,
+    password: str,
+    port: int,
+    command: str,
+    *,
+    timeout: int = 15,
+) -> subprocess.CompletedProcess[str]:
+    """Exécute une commande distante via SSH en capturant la sortie."""
+
+    ssh_command = [
+        "sshpass",
+        "-p",
+        password,
+        "ssh",
+        "-p",
+        str(port),
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "BatchMode=no",
+        f"{user}@{host}",
+        command,
+    ]
+
+    return subprocess.run(
+        ssh_command,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def prioritize_serial_devices(devices: list[str]) -> list[str]:
+    """Trie les périphériques détectés par pertinence."""
+
+    def priority(path: str) -> tuple[int, str]:
+        lowered = path.lower()
+        if "1a86" in lowered:
+            return (0, path)
+        if "wch" in lowered or "ch32" in lowered:
+            return (1, path)
+        if "/dev/serial/by-id/" in path:
+            return (2, path)
+        return (3, path)
+
+    unique: list[str] = []
+    seen: set[str] = set()
+    for device in devices:
+        if device not in seen:
+            seen.add(device)
+            unique.append(device)
+
+    return [device for _, device in sorted((priority(dev), dev) for dev in unique)]
+
+
+def detect_remote_serial_devices(
+    host: str,
+    user: str,
+    password: str,
+    port: int,
+) -> tuple[list[str], str]:
+    """Récupère la liste des périphériques série/USB visibles depuis la passerelle."""
+
+    remote_script = (
+        "sh -c 'for path in /dev/serial/by-id/* /dev/ttyUSB* /dev/ttyACM* "
+        "/dev/ttyAMA* /dev/ttyS* /dev/ttyCH*; do "
+        '[ -e "$path" ] && printf "%s\\n" "$path"; '
+        "done'"
+    )
+    result = run_remote_command(host, user, password, port, remote_script)
+
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or f"Code retour {result.returncode}"
+        return [], detail
+
+    devices = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return prioritize_serial_devices(devices), result.stdout.strip()
+
+
+def run_remote_prerequisite_checks(
+    host: str,
+    user: str,
+    password: str,
+    port: int,
+) -> tuple[list[CheckResult], list[str]]:
+    """Effectue les vérifications dépendant de la passerelle BMCU."""
+
+    results: list[CheckResult] = []
+
+    try:
+        probe = run_remote_command(host, user, password, port, "printf '__bmcu__'")
+    except FileNotFoundError as err:
+        return (
+            [
+                CheckResult(
+                    label="Connexion SSH",
+                    success=False,
+                    detail=f"sshpass introuvable : {err}",
+                )
+            ],
+            [],
+        )
+    except subprocess.TimeoutExpired:
+        return (
+            [
+                CheckResult(
+                    label="Connexion SSH",
+                    success=False,
+                    detail="Timeout atteint lors de la tentative de connexion SSH.",
+                )
+            ],
+            [],
+        )
+
+    if probe.returncode != 0 or "__bmcu__" not in probe.stdout:
+        detail = probe.stderr.strip() or probe.stdout.strip() or f"Code retour {probe.returncode}"
+        results.append(CheckResult(label="Connexion SSH", success=False, detail=detail))
+        return results, []
+
+    results.append(
+        CheckResult(
+            label="Connexion SSH",
+            success=True,
+            detail="Authentification réussie.",
+        )
+    )
+
+    devices: list[str]
+    detection_detail: str
+    try:
+        devices, detection_detail = detect_remote_serial_devices(host, user, password, port)
+    except subprocess.TimeoutExpired:
+        results.append(
+            CheckResult(
+                label="Détection USB",
+                success=False,
+                detail="Timeout pendant l'énumération des périphériques USB.",
+            )
+        )
+        return results, []
+
+    if devices:
+        formatted = "\n".join(devices)
+        results.append(
+            CheckResult(
+                label="Détection USB",
+                success=True,
+                detail=formatted,
+            )
+        )
+        return results, devices
+
+    detail = detection_detail or "Aucun périphérique série détecté sur la passerelle."
+    results.append(
+        CheckResult(
+            label="Détection USB",
+            success=False,
+            detail=detail,
+        )
+    )
+    return results, []
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +448,30 @@ def ask_password(question: str) -> str:
         print(colorize("Le mot de passe ne peut pas être vide.", Colors.WARNING))
 
 
+def prompt_serial_device(detected_devices: list[str], previous: str) -> str:
+    """Propose une sélection de périphérique USB ou un champ libre."""
+
+    if detected_devices:
+        print(colorize("Périphériques USB détectés :", Colors.HEADER))
+        for index, device in enumerate(detected_devices, start=1):
+            print(f"  {index}. {device}")
+
+        options = [f"Utiliser {device}" for device in detected_devices]
+        options.append("Saisir un autre chemin")
+        options.append("Ignorer pour l'instant")
+
+        choice = ask_menu(options, default_index=0)
+        if choice < len(detected_devices):
+            return detected_devices[choice]
+        if choice == len(detected_devices):
+            manual_default = previous or detected_devices[0]
+            return ask_text("Chemin du périphérique USB", default=manual_default, required=False)
+        return ""
+
+    manual_default = previous or ""
+    return ask_text("Chemin du périphérique USB", default=manual_default, required=False)
+
+
 def ensure_firmware_path(path_str: str) -> Path:
     """Valide l'existence du fichier firmware fourni."""
     firmware_path = Path(path_str).expanduser().resolve()
@@ -270,16 +526,12 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
 """
     print_block(intro_text)
 
-    print(colorize("Vérifications express :", Colors.HEADER))
-    for index, item in enumerate(CHECKLIST_ITEMS, start=1):
-        print(f"  {index}. {item}")
-    print()
+    local_checks = run_local_prerequisite_checks()
+    display_check_results("Diagnostic local :", local_checks)
+    if not all(result.success for result in local_checks):
+        print(colorize("Préparez l'environnement local puis relancez l'assistant.", Colors.FAIL))
+        sys.exit(1)
 
-    if not ask_yes_no("Tout est OK ?", default=True):
-        print(colorize("Préparez l'installation puis relancez l'assistant.", Colors.WARNING))
-        sys.exit(0)
-
-    print()
     print(colorize("Connexion passerelle :", Colors.HEADER))
     host_question = "IP/nom du Raspberry ou CB2"
     if profile.gateway_host:
@@ -296,6 +548,18 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
 
     bmc_password = ask_password("Mot de passe SSH")
     ssh_port = 22
+
+    remote_checks, detected_devices = run_remote_prerequisite_checks(
+        bmc_host, bmc_user, bmc_password, ssh_port
+    )
+    display_check_results("Diagnostic passerelle :", remote_checks)
+    ssh_ok = any(result.label == "Connexion SSH" and result.success for result in remote_checks)
+    if not ssh_ok:
+        print(colorize("Connexion SSH impossible : corrigez l'accès distant avant de continuer.", Colors.FAIL))
+        sys.exit(1)
+
+    serial_device = prompt_serial_device(detected_devices, profile.serial_device)
+    profile.serial_device = serial_device
 
     print()
     print(colorize("Firmware :", Colors.HEADER))
@@ -354,6 +618,7 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
         firmware_sha256="",
         dry_run=False,
         log_root=log_root,
+        serial_device=serial_device,
     )
 
 
@@ -366,6 +631,7 @@ def summarize_choices(choices: UserChoices) -> None:
       • {colorize('Passerelle', Colors.BOLD)}     : {choices.bmc_user}@{choices.bmc_host}:{choices.ssh_port}
       • {colorize('Firmware', Colors.BOLD)}       : {choices.firmware_file}
       • {colorize('Copie distante', Colors.BOLD)} : {choices.remote_firmware_path}
+      • {colorize('Périphérique USB', Colors.BOLD)} : {choices.serial_device or 'non défini'}
       • {colorize('Commande', Colors.BOLD)}       : {choices.flash_command}
       • {colorize('Timeout', Colors.BOLD)}        : {choices.flash_timeout} s
       • {colorize('Attendre reboot', Colors.BOLD)}: {colorize('oui' if choices.wait_for_reboot else 'non', Colors.OKGREEN if choices.wait_for_reboot else Colors.WARNING)}
@@ -397,6 +663,8 @@ def build_command(choices: UserChoices) -> list[str]:
         command.append("--wait-for-reboot")
         command.extend(["--reboot-timeout", str(choices.reboot_timeout)])
         command.extend(["--reboot-check-interval", str(choices.reboot_check_interval)])
+    if choices.serial_device:
+        command.extend(["--serial-device", choices.serial_device])
     if choices.allow_same_version:
         command.append("--allow-same-version")
     if choices.expected_final_version:
@@ -536,6 +804,7 @@ def generate_assistance_prompt(
         - Commande : {format_command(command)}
         - Hôte BMC : {choices.bmc_host}
         - Utilisateur : {choices.bmc_user}
+        - Périphérique USB : {choices.serial_device or '(non défini)'}
         - Chemin firmware local : {choices.firmware_file}
         - Chemin distant : {choices.remote_firmware_path}
         - Mode test à blanc : {'oui' if choices.dry_run else 'non'}
