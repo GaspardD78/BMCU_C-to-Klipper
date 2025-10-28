@@ -13,6 +13,7 @@ dist/
 *.swp
 
 # Local toolchains & artefacts
+.venv/
 .toolchains/
 flash_automation/.cache/
 flash_automation/out/
