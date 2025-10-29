@@ -130,6 +130,7 @@ CLI_SDCARD_PATH_OVERRIDE=""
 CLI_FLASH_USB_SCRIPT_OVERRIDE=""
 CLI_AUTO_CONFIRM_REQUESTED="false"
 CLI_DRY_RUN_REQUESTED="false"
+CLI_BOOTSTRAP_REQUESTED="false"
 
 CLI_NO_COLOR_REQUESTED="false"
 CLI_QUIET_REQUESTED="false"
@@ -164,12 +165,16 @@ AUTO_CONFIRM_MODE="false"
 AUTO_CONFIRM_SOURCE=""
 DRY_RUN_MODE="false"
 DRY_RUN_SOURCE=""
+BOOTSTRAP_MODE="false"
+BOOTSTRAP_SOURCE=""
 SERIAL_SELECTION_SOURCE=""
 SDCARD_SELECTION_SOURCE=""
 SERIAL_VALIDATION_DEFERRED_ONCE="false"
 declare -a ACTIVE_KLIPPER_SERVICES=()
 SERVICES_STOPPED="false"
 SERVICES_RESTORED="false"
+DRY_RUN_PLACEHOLDER_CREATED="false"
+DRY_RUN_PLACEHOLDER_PATH=""
 
 readonly HOST_UNAME="$(uname -s 2>/dev/null || echo unknown)"
 readonly HOST_OS="${FLASH_AUTOMATION_OS_OVERRIDE:-${HOST_UNAME}}"
@@ -421,6 +426,7 @@ Options:
   --auto-confirm               Accepte automatiquement les choix suggérés (mode non interactif).
   --no-confirm                 Alias de --auto-confirm.
   --dry-run                    Valide l'enchaînement des étapes sans appliquer les actions destructrices.
+  --bootstrap                  Exécute ./build.sh avant de poursuivre le flux principal.
   --quiet                      Réduit les sorties console aux avertissements et erreurs.
   --no-color                   Désactive les couleurs ANSI, même sur un terminal interactif.
   -h, --help                   Affiche cette aide et quitte.
@@ -434,6 +440,7 @@ Variables d'environnement associées :
   FLASH_AUTOMATION_FLASH_USB_SCRIPT  Chemin personnalisé vers flash_usb.py.
   FLASH_AUTOMATION_QUIET             "true"/"1" pour réduire les sorties console.
   FLASH_AUTOMATION_NO_COLOR          "true"/"1" pour forcer la sortie sans couleurs.
+  FLASH_AUTOMATION_BOOTSTRAP         "true"/"1" pour lancer build.sh avant la procédure.
   FLASH_AUTOMATION_WCH_USB_IDS       Liste (séparée par ',') des VID USB WCH à considérer (par défaut : 1a86).
   WCHISP_ARCHIVE_CHECKSUM_OVERRIDE  Injecte une somme de contrôle SHA-256 personnalisée.
   ALLOW_UNVERIFIED_WCHISP           "true"/"1" pour autoriser le mode dégradé.
@@ -596,6 +603,10 @@ parse_cli_arguments() {
                 ;;
             --dry-run)
                 CLI_DRY_RUN_REQUESTED="true"
+                shift
+                ;;
+            --bootstrap)
+                CLI_BOOTSTRAP_REQUESTED="true"
                 shift
                 ;;
             --quiet)
@@ -814,6 +825,16 @@ apply_configuration_defaults() {
         fi
     fi
 
+    if [[ "${CLI_BOOTSTRAP_REQUESTED}" == "true" ]]; then
+        BOOTSTRAP_MODE="true"
+        BOOTSTRAP_SOURCE="option CLI (--bootstrap)"
+    else
+        BOOTSTRAP_MODE="$(normalize_boolean "${FLASH_AUTOMATION_BOOTSTRAP:-false}")"
+        if [[ "${BOOTSTRAP_MODE}" == "true" ]]; then
+            BOOTSTRAP_SOURCE="variable d'environnement FLASH_AUTOMATION_BOOTSTRAP"
+        fi
+    fi
+
     if [[ "${CLI_QUIET_REQUESTED}" == "true" ]]; then
         QUIET_MODE="true"
     else
@@ -950,6 +971,15 @@ function on_exit() {
     if [[ "${SERVICES_STOPPED}" == "true" && "${SERVICES_RESTORED}" != "true" ]]; then
         warn "Redémarrage automatique des services Klipper arrêtés suite à un incident."
         restart_klipper_services || true
+    fi
+
+    if [[ "${DRY_RUN_PLACEHOLDER_CREATED}" == "true" && -n "${DRY_RUN_PLACEHOLDER_PATH}" ]]; then
+        rm -f "${DRY_RUN_PLACEHOLDER_PATH}" 2>/dev/null || true
+        local placeholder_dir
+        placeholder_dir="$(dirname "${DRY_RUN_PLACEHOLDER_PATH}")"
+        rmdir "${placeholder_dir}" 2>/dev/null || true
+        DRY_RUN_PLACEHOLDER_CREATED="false"
+        DRY_RUN_PLACEHOLDER_PATH=""
     fi
 
     return "${exit_code}"
@@ -2001,6 +2031,43 @@ function verify_environment() {
     display_available_devices
 }
 
+function perform_bootstrap_if_requested() {
+    if [[ "${BOOTSTRAP_MODE}" != "true" ]]; then
+        return
+    fi
+
+    local build_script="${FLASH_ROOT}/build.sh"
+    if [[ ! -f "${build_script}" ]]; then
+        error_msg "Option --bootstrap : build.sh est introuvable dans ${FLASH_ROOT}."
+        exit 1
+    fi
+
+    local -a cmd
+    if [[ -x "${build_script}" ]]; then
+        cmd=("${build_script}")
+    else
+        cmd=(bash "${build_script}")
+    fi
+
+    local source_label
+    source_label="${BOOTSTRAP_SOURCE:-option bootstrap}"
+    info "Option bootstrap active : exécution préalable de build.sh (${source_label})."
+
+    set +e
+    (
+        cd "${FLASH_ROOT}"
+        "${cmd[@]}"
+    ) 2>&1 | tee -a "${LOG_FILE}"
+    local status=${PIPESTATUS[0]}
+    set -e
+    if (( status != 0 )); then
+        error_msg "L'exécution de build.sh a échoué (code ${status})."
+        exit "${status}"
+    fi
+
+    success "build.sh exécuté avec succès."
+}
+
 function collect_firmware_candidates() {
     local -n firmware_candidates_ref=$1
     firmware_candidates_ref=()
@@ -2071,6 +2138,26 @@ function collect_firmware_candidates() {
     fi
 
     unset -f add_candidate 2>/dev/null || true
+}
+
+function use_dry_run_placeholder_firmware() {
+    local placeholder_dir="${FLASH_ROOT}/.cache/firmware"
+    local placeholder_file="${placeholder_dir}/klipper.bin"
+
+    mkdir -p "${placeholder_dir}"
+    if [[ ! -f "${placeholder_file}" ]]; then
+        : > "${placeholder_file}"
+        DRY_RUN_PLACEHOLDER_CREATED="true"
+    else
+        DRY_RUN_PLACEHOLDER_CREATED="false"
+    fi
+
+    DRY_RUN_PLACEHOLDER_PATH="${placeholder_file}"
+    FIRMWARE_FILE="${placeholder_file}"
+    FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${FIRMWARE_FILE}")"
+    FIRMWARE_FORMAT="${FIRMWARE_FILE##*.}"
+    FIRMWARE_SELECTION_SOURCE="mode --dry-run (artefact simulé)"
+    info "Mode --dry-run : aucun firmware détecté, utilisation d'un artefact simulé (${FIRMWARE_DISPLAY_PATH})."
 }
 
 function prompt_firmware_selection() {
@@ -2261,29 +2348,35 @@ function prepare_firmware() {
         fi
 
         if [[ ${#candidates[@]} -eq 0 ]]; then
-            local message="Aucun firmware compatible détecté (recherché dans ${search_roots_display})."
-            if [[ "${DEEP_SCAN_ENABLED}" != "true" ]]; then
-                message+=" Utilisez --deep-scan pour élargir la recherche."
+            if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+                use_dry_run_placeholder_firmware
+            else
+                local message="Aucun firmware compatible détecté (recherché dans ${search_roots_display})."
+                if [[ "${DEEP_SCAN_ENABLED}" != "true" ]]; then
+                    message+=" Utilisez --deep-scan pour élargir la recherche."
+                fi
+                error_msg "${message} Lancer './build.sh' ou fournir KLIPPER_FIRMWARE_PATH."
+                exit 1
             fi
-            error_msg "${message} Lancer './build.sh' ou fournir KLIPPER_FIRMWARE_PATH."
-            exit 1
         fi
 
-        if [[ "${AUTO_CONFIRM_MODE}" == "true" ]]; then
-            FIRMWARE_FILE="${candidates[0]}"
-            FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${FIRMWARE_FILE}")"
-            FIRMWARE_FORMAT="${FIRMWARE_FILE##*.}"
-            if [[ ${#candidates[@]} -le 1 ]]; then
-                info "Mode auto-confirm : sélection automatique du firmware ${FIRMWARE_DISPLAY_PATH}."
-            else
-                if [[ -n "${FIRMWARE_PATTERN}" ]]; then
-                    info "Mode auto-confirm : plusieurs correspondances au motif '${FIRMWARE_PATTERN}', utilisation du firmware le plus récent (${FIRMWARE_DISPLAY_PATH})."
+        if [[ -z "${FIRMWARE_FILE}" ]]; then
+            if [[ "${AUTO_CONFIRM_MODE}" == "true" ]]; then
+                FIRMWARE_FILE="${candidates[0]}"
+                FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${FIRMWARE_FILE}")"
+                FIRMWARE_FORMAT="${FIRMWARE_FILE##*.}"
+                if [[ ${#candidates[@]} -le 1 ]]; then
+                    info "Mode auto-confirm : sélection automatique du firmware ${FIRMWARE_DISPLAY_PATH}."
                 else
-                    info "Mode auto-confirm : plusieurs firmwares détectés, utilisation du plus récent (${FIRMWARE_DISPLAY_PATH})."
+                    if [[ -n "${FIRMWARE_PATTERN}" ]]; then
+                        info "Mode auto-confirm : plusieurs correspondances au motif '${FIRMWARE_PATTERN}', utilisation du firmware le plus récent (${FIRMWARE_DISPLAY_PATH})."
+                    else
+                        info "Mode auto-confirm : plusieurs firmwares détectés, utilisation du plus récent (${FIRMWARE_DISPLAY_PATH})."
+                    fi
                 fi
+            else
+                prompt_firmware_selection candidates
             fi
-        else
-            prompt_firmware_selection candidates
         fi
     fi
 
@@ -2828,6 +2921,7 @@ function main() {
     if [[ "${DRY_RUN_MODE}" == "true" ]]; then
         info "Mode --dry-run actif : le script valide le déroulé sans effectuer d'actions destructrices."
     fi
+    perform_bootstrap_if_requested
     resolve_flash_method
     verify_environment
     prepare_firmware
