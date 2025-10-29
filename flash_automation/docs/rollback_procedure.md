@@ -16,7 +16,7 @@ Cette procédure vous ramène pas à pas vers un environnement sain après un é
 
 ## 1. Sécuriser le matériel
 
-1. Interrompez le script fautif (`Ctrl+C`) puis vérifiez qu’aucun autre processus `flash.py`, `flash_automation.sh` ou `flashBMCUtoKlipper_automation.py` n’est actif :
+1. Interrompez le script fautif (`Ctrl+C`) puis vérifiez qu’aucun autre processus `bmcu_tool.py`, `flash_automation.sh` ou `flashBMCUtoKlipper_automation.py` n’est actif :
 
    ```bash
    pgrep -af flash_automation || true
@@ -102,7 +102,7 @@ Si seul un binaire Klipper fiable est disponible :
 
 ## 5. Vérifications finales
 
-1. Relancez `./build.sh` puis `python3 flash.py --dry-run` pour confirmer que l’environnement est stable. Si un nouveau binaire est généré, mettez à jour `klipper.sha256` (`sha256sum .cache/klipper/out/klipper.bin > klipper.sha256`) afin que la vérification automatique reflète la bonne référence.
+1. Relancez `python3 bmcu_tool.py` et utilisez l'option pour compiler le firmware, puis lancez le flash avec l'option `--dry-run` pour confirmer que l’environnement est stable. Si un nouveau binaire est généré, mettez à jour `klipper.sha256` (`sha256sum .cache/klipper/out/klipper.bin > klipper.sha256`) afin que la vérification automatique reflète la bonne référence.
 2. Validez les connexions réseau/USB (`ping`, `screen`, `ssh`).
 3. Consignez l’incident (symptômes, actions, correctifs) dans votre outil de suivi afin de capitaliser sur l’expérience.
 

@@ -77,108 +77,49 @@ command -v cargo-web
 command -v riscv-none-elf-gcc  # fournie par les paquets système, gardez-la installée
 ```
 
-> 🧭 Si `command -v` ne trouve pas `cargo` ou `cargo-web`, ajoutez `~/.cargo/bin` à votre `PATH` **avant** de lancer `./build.sh` ou `python3 flash.py` : `echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc`.
+> 🧭 Si `command -v` ne trouve pas `cargo` ou `cargo-web`, ajoutez `~/.cargo/bin` à votre `PATH` **avant** de lancer `./build.sh` ou `python3 bmcu_tool.py` : `echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc`.
 > 🛠️ Les optimisations comme `--no-install-recommends` ou l'installation rustup en profil minimal ne posent pas de problème tant que `cargo-web` est réinstallé et que la toolchain RISC-V ARM (`riscv-none-elf-*`) reste accessible.
 
 ### Dépendances Python communes
 
-Le flash repose sur `pyserial` et `wchisp`. Installez-les dans l'environnement virtuel (recommandé) ou pour l'utilisateur courant :
-
-```bash
-python3 -m pip install --upgrade pip
-pip install -r requirements.txt
-python3 install_wchisp.py
-```
-
-> ⚠️ `wchisp` n'est pas distribué via PyPI : `install_wchisp.py` télécharge le binaire
-> officiel correspondant à votre architecture et l'ajoute à votre environnement.
-> ℹ️ Après une installation `--user`, ajoutez `~/.local/bin` au `PATH` :
-> `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc`
+Le flash repose sur `pyserial` et `wchisp`. L'outil principal s'occupe de vérifier ces dépendances pour vous.
 
 ---
 
-## 🤖 Procédure guidée (automation_cli.py)
+## 🤖 Procédure Recommandée (bmcu_tool.py)
 
-Le script [`automation_cli.py`](flash_automation/automation_cli.py) propose un menu interactif inspiré de KIAUH qui **enchaîne pour vous les étapes fastidieuses** (permissions, installation, compilation, flash local ou distant). Chaque action est journalisée dans `~/BMCU_C_to_Klipper_logs/automation-<horodatage>.log` (chemin personnalisable via `BMCU_LOG_ROOT`), ce qui facilite le support en cas d'imprévu.
+L'outil `bmcu_tool.py` est le nouveau point d'entrée unifié pour toutes les opérations. Il vous guide à travers un menu interactif pour installer les dépendances, compiler et flasher le firmware.
 
-### Installation express
+### Lancement en un clic
 
-```bash
-git clone https://github.com/GaspardD78/BMCU_C-to-Klipper.git
-cd BMCU_C-to-Klipper/flash_automation
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install --upgrade pip
-pip install -r requirements.txt
-python3 install_wchisp.py
-python3 automation_cli.py
-```
+1.  **Clonez le dépôt et naviguez dans le bon dossier :**
+    ```bash
+    git clone https://github.com/GaspardD78/BMCU_C-to-Klipper.git
+    cd BMCU_C-to-Klipper/flash_automation
+    ```
 
-> ⚠️ L'outil `wchisp` n'étant pas packagé sur PyPI, ce script s'assure qu'il est
-> installé depuis les releases officielles.
+2.  **Préparez l'environnement virtuel (une seule fois) :**
+    ```bash
+    python3 -m venv .venv
+    source .venv/bin/activate
+    python3 -m pip install --upgrade pip
+    pip install -r requirements.txt
+    python3 install_wchisp.py
+    ```
 
-Dans le menu, suivez la séquence recommandée :
+3.  **Lancez l'outil principal :**
+    ```bash
+    python3 bmcu_tool.py
+    ```
 
-1. `1` – **Vérifier les permissions** : rend `build.sh` et `flash_automation.sh` exécutables.
-2. `2` – **Installer les dépendances Python** : s'assure que `pyserial` est prêt (vous avez déjà installé `wchisp` dans l'étape précédente).
-3. `3` – **Compiler le firmware** : lance `./build.sh` et enregistre la sortie.
-4. **Avant l'étape 4**, quittez temporairement le menu (option `X`) ou ouvrez un second terminal **dans le même dossier** pour exécuter :
+### Utilisation du menu
 
-   ```bash
-   python3 -m compileall flash.py
-   ```
+Une fois l'outil lancé, suivez les options du menu dans l'ordre suggéré :
 
-   Cette vérification compile `flash.py` sans toucher au matériel et sécurise la suite.
-5. Relancez `python3 automation_cli.py` si besoin, puis `4` – **Flash interactif (flash.py)** : suivez l'assistant étape par étape.
-
-> 🧾 Besoin d'automatiser encore plus ? Utilisez le mode direct sans menu :
->
-> ```bash
-> python3 automation_cli.py --action 1
-> python3 automation_cli.py --action 2
-> python3 automation_cli.py --action 3
-> python3 -m compileall flash.py
-> python3 automation_cli.py --action 4
-> ```
->
-> Ajoutez `--dry-run` à n'importe quelle commande pour vérifier ce qui serait exécuté.
-
-> ✋ **Nouvelle ergonomie :** Un appui sur `Ctrl+C` pendant que le menu attend
-> une entrée n'interrompt plus l'application. Le gestionnaire affiche
-> `Menu principal réarmé ; choisissez une option.` puis redessine les choix.
-> Les actions déclenchées continuent d'accepter `Ctrl+C` pour revenir au menu
-> principal après nettoyage.
-
-> 📊 **Suivi de progression :** Les logs `~/BMCU_C_to_Klipper_logs/automation-*.log` contiennent
-> désormais des lignes `[progress]` indiquant l'étape en cours (ex.
-> `receiving objects`, `compilation [#####.....] 45%`). Consultez-les pour
-> vérifier rapidement qu'une action longue ne s'est pas figée.
-
-> 🧪 Un protocole de validation manuel et ses retours d'expérience sont
-> disponibles dans [`docs/manual-test-protocol.md`](docs/manual-test-protocol.md)
-> et `docs/test-logs/`. Inspirez-vous-en pour vos propres vérifications.
-
----
-
-## ⚡ Mode turbo (tout-en-un)
-
-Ce bloc prépare un environnement propre, compile Klipper, vérifie `flash.py` et lance l'assistant de flash. À utiliser sur une machine fraîchement configurée.
-
-```bash
-git clone https://github.com/GaspardD78/BMCU_C-to-Klipper.git
-cd BMCU_C-to-Klipper/flash_automation
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install --upgrade pip
-pip install -r requirements.txt
-python3 install_wchisp.py
-./build.sh
-python3 -m compileall flash.py
-python3 flash.py
-```
-
-> 🧹 `python3 -m compileall flash.py` crée `__pycache__/flash.cpython-*.pyc`. Ce fichier est normal : il confirme que Python comprend le script avant de toucher au matériel.
-> 🔁 À chaque nouvelle session terminal, pensez à relancer `source .venv/bin/activate` avant d'utiliser `flash.py`.
+1.  **Vérifier et installer les dépendances** : Cette option détecte votre système d'exploitation et vous propose d'installer les paquets manquants (comme `gcc-riscv`, etc.) automatiquement.
+2.  **Compiler le firmware** : Lance le script de compilation `build.sh`.
+3.  **Flasher le firmware (assistant)** : Démarre l'assistant de flashage qui vous guide pas à pas.
+4.  **Aide à la configuration post-flash** : Une fois le flash réussi, cette option vous aide à trouver le port série de votre BMCU et génère le bloc de configuration Klipper à copier dans votre `printer.cfg`.
 
 ---
 
