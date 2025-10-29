@@ -1,3 +1,4 @@
+import hashlib
 import os
 import shutil
 import subprocess
@@ -8,6 +9,9 @@ import pytest
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "flash_automation.sh"
 FLASH_ROOT = SCRIPT_PATH.parent
+
+STUB_ARCHIVE_CONTENT = b"stub archive"
+STUB_ARCHIVE_SHA256 = hashlib.sha256(STUB_ARCHIVE_CONTENT).hexdigest()
 
 
 def ensure_real_command(name: str) -> str:
@@ -175,19 +179,25 @@ PROMPT_OVERRIDE = textwrap.dedent(
 
 
 @pytest.mark.parametrize(
-    "missing_command,expected_message",
+    "missing_command,expected_messages",
     [
-        (None, "Utilisateur membre du groupe 'dialout'."),
-        ("sha256sum", "La dépendance obligatoire 'sha256sum' est introuvable."),
+        (None, ["Utilisateur membre du groupe 'dialout'."]),
+        (
+            "sha256sum",
+            [
+                "La dépendance obligatoire 'sha256sum' est introuvable.",
+                "Installez le paquet fournissant 'sha256sum' (ex: sudo apt install coreutils).",
+            ],
+        ),
     ],
 )
-def test_verify_environment_dependency_checks(tmp_path, missing_command, expected_message):
+def test_verify_environment_dependency_checks(tmp_path, missing_command, expected_messages):
     env, bin_dir = create_stub_environment(tmp_path)
     add_symlink(bin_dir, "bash")
     add_id_stub(bin_dir, "dialout")
     populate_common_commands(bin_dir)
 
-    required_commands = ["sha256sum", "stat", "find", "python3", "make"]
+    required_commands = ["curl", "tar", "sha256sum", "stat", "find", "python3", "make"]
     for command in required_commands:
         if command == missing_command:
             continue
@@ -201,7 +211,8 @@ def test_verify_environment_dependency_checks(tmp_path, missing_command, expecte
         assert result.returncode != 0
 
     combined_output = result.stdout + result.stderr
-    assert expected_message in combined_output
+    for expected_message in expected_messages:
+        assert expected_message in combined_output
 
 
 def test_verify_environment_warns_when_python_missing(tmp_path):
@@ -209,12 +220,13 @@ def test_verify_environment_warns_when_python_missing(tmp_path):
     add_symlink(bin_dir, "bash")
     add_id_stub(bin_dir, "dialout")
     populate_common_commands(bin_dir)
-    for command in ["sha256sum", "stat", "find", "make"]:
+    for command in ["curl", "tar", "sha256sum", "stat", "find", "make"]:
         add_symlink(bin_dir, command)
 
     result = run_flash_script("verify_environment || true", env=env)
     assert result.returncode == 0
     assert "La dépendance optionnelle 'python3' est absente" in result.stdout
+    assert "Installez 'python3' via votre gestionnaire de paquets" in result.stdout
 
 
 def test_verify_environment_uses_permission_cache(tmp_path):
@@ -222,7 +234,7 @@ def test_verify_environment_uses_permission_cache(tmp_path):
     add_symlink(bin_dir, "bash")
     add_id_stub(bin_dir, "dialout")
     populate_common_commands(bin_dir)
-    for command in ["sha256sum", "stat", "find", "python3", "make"]:
+    for command in ["curl", "tar", "sha256sum", "stat", "find", "python3", "make"]:
         add_symlink(bin_dir, command)
 
     cache_file = tmp_path / "perm_cache.json"
@@ -256,7 +268,7 @@ def test_check_group_membership_warns_without_user(tmp_path):
 
 def make_stub_curl(bin_dir: Path):
     script = textwrap.dedent(
-        """#!/bin/sh
+        f"""#!/bin/sh
         output=""
         while [ "$#" -gt 0 ]; do
             case "$1" in
@@ -270,7 +282,7 @@ def make_stub_curl(bin_dir: Path):
         if [ -z "$output" ]; then
             exit 1
         fi
-        printf 'stub archive' >"$output"
+        printf '%s' '{STUB_ARCHIVE_CONTENT.decode()}' >"$output"
         exit 0
         """
     )
@@ -334,6 +346,7 @@ def test_ensure_wchisp_installs_tool_when_missing(tmp_path):
 
     env["WCHISP_BASE_URL"] = "https://example.invalid"
     env["WCHISP_AUTO_INSTALL"] = "true"
+    env["WCHISP_ARCHIVE_CHECKSUM_OVERRIDE"] = STUB_ARCHIVE_SHA256
 
     cache_dir = FLASH_ROOT / ".cache/tools/wchisp"
     if cache_dir.exists():
@@ -468,6 +481,7 @@ def test_flash_with_wchisp_runs_command(tmp_path):
     (tmp_path / "wchisp").chmod(0o755)
 
     env["WCHISP_BIN"] = str(tmp_path / "wchisp")
+    env["WCHISP_ARCHIVE_CHECKSUM_OVERRIDE"] = STUB_ARCHIVE_SHA256
 
     commands = textwrap.dedent(
         f"""
@@ -480,7 +494,7 @@ def test_flash_with_wchisp_runs_command(tmp_path):
     result = run_flash_script(commands, env=env)
     assert result.returncode == 0
     assert "wchisp a terminé le flash" in result.stdout
-    assert wchisp_invocation.read_text().startswith("-d")
+    assert wchisp_invocation.read_text().startswith("--usb")
 
 
 def test_select_flash_method_warns_when_no_serial_device(tmp_path):
