@@ -113,8 +113,8 @@ declare -A FIRMWARE_CANDIDATE_MTIMES=()
 declare -A FIRMWARE_CANDIDATE_TIMESTAMPS=()
 readonly TOOLS_ROOT="${CACHE_ROOT}/tools"
 
-source "${FLASH_ROOT}/lib/ui.sh"
 source "${FLASH_ROOT}/lib/permissions_cache.sh"
+source "${FLASH_ROOT}/lib/ui.sh"
 source "${FLASH_ROOT}/lib/wchisp.sh"
 source "${FLASH_ROOT}/lib/firmware.sh"
 
@@ -150,6 +150,8 @@ COLOR_SUCCESS=""
 COLOR_SECTION=""
 COLOR_BORDER=""
 
+TOTAL_STEPS=6
+CURRENT_STEP_NUMBER=0
 CURRENT_STEP="Initialisation"
 FIRMWARE_SIZE=""
 FIRMWARE_SHA=""
@@ -1981,8 +1983,20 @@ finalize_method_selection() {
             fi
 
             if [[ -z "${SELECTED_DEVICE}" ]]; then
-                prompt_serial_device
-                SERIAL_SELECTION_SOURCE="sélection interactive"
+                if [[ "${AUTO_CONFIRM_MODE}" == "true" ]]; then
+                    local -a devices
+                    detect_serial_devices devices
+                    if [[ ${#devices[@]} -eq 0 ]]; then
+                        error_msg "Mode --auto-confirm : méthode série choisie mais aucun port série détecté."
+                        exit 1
+                    fi
+                    SELECTED_DEVICE="${devices[0]}"
+                    SERIAL_SELECTION_SOURCE="détection automatique"
+                    success "Port série auto-sélectionné : ${SELECTED_DEVICE}."
+                else
+                    prompt_serial_device
+                    SERIAL_SELECTION_SOURCE="sélection interactive"
+                fi
             else
                 if [[ -n "${SERIAL_SELECTION_SOURCE}" ]]; then
                     success "Port série imposé (${SERIAL_SELECTION_SOURCE}) : ${SELECTED_DEVICE}."
@@ -2032,7 +2046,8 @@ finalize_method_selection() {
 }
 
 function verify_environment() {
-    CURRENT_STEP="Étape 0: Diagnostic de l'environnement"
+    let "CURRENT_STEP_NUMBER+=1"
+    CURRENT_STEP="Étape ${CURRENT_STEP_NUMBER}/${TOTAL_STEPS}: Diagnostic de l'environnement"
     render_box "${CURRENT_STEP}"
 
     reset_check_command_results
@@ -2110,9 +2125,9 @@ function perform_bootstrap_if_requested() {
 }
 
 function select_flash_method() {
-    CURRENT_STEP="Étape 2: Sélection de la méthode de flash"
+    let "CURRENT_STEP_NUMBER+=1"
+    CURRENT_STEP="Étape ${CURRENT_STEP_NUMBER}/${TOTAL_STEPS}: Sélection de la méthode de flash"
     render_box "${CURRENT_STEP}"
-    info "Choisissez la méthode adaptée à votre configuration."
 
     if [[ "${FORCED_METHOD}" == "true" ]]; then
         info "Méthode imposée par ${METHOD_SOURCE_LABEL}."
@@ -2124,7 +2139,7 @@ function select_flash_method() {
     if [[ -n "${suggestion}" ]]; then
         local suggestion_label
         suggestion_label="$(flash_method_to_human "${suggestion}")"
-        info "Suggestion détectée : ${suggestion_label}."
+        note "Suggestion basée sur la détection : ${suggestion_label}."
         if [[ -n "${AUTO_METHOD_REASON}" ]]; then
             info "Raison : ${AUTO_METHOD_REASON}"
         fi
@@ -2137,7 +2152,7 @@ function select_flash_method() {
         fi
         local auto_label
         auto_label="$(flash_method_to_human "${chosen_method}")"
-        info "Mode auto-confirm : sélection automatique de ${auto_label}."
+        info "Mode --auto-confirm : sélection automatique de ${auto_label}."
         SELECTED_METHOD="${chosen_method}"
         finalize_method_selection
         return
@@ -2150,24 +2165,35 @@ function select_flash_method() {
         "Flash DFU via $(dfu_command_display)"
     )
 
-    local prompt_hint=""
+    local -a hints=("Options : saisir un numéro (1-4), un mot-clé (ex: 'wchisp', 'serial'), ou 'q' (quitter).")
     if [[ -n "${suggestion}" ]]; then
         local human_hint
         human_hint="$(flash_method_to_human "${suggestion}")"
-        prompt_hint=" (Entrée = ${human_hint})"
+        hints+=("Appuyer sur Entrée sélectionnera la méthode suggérée : ${human_hint}.")
     fi
-
-    echo "Saisissez le numéro correspondant ou 'q' pour quitter rapidement."
+    info "$(IFS=" "; echo "${hints[*]}")"
+    echo
 
     while true; do
         local index=1
         for option in "${options[@]}"; do
-            printf "  [%d] %s\n" "${index}" "${option}"
+            local is_default=""
+            local option_key
+            case ${index} in
+                1) option_key="wchisp" ;;
+                2) option_key="serial" ;;
+                3) option_key="sdcard" ;;
+                4) option_key="dfu" ;;
+            esac
+            if [[ "${option_key}" == "${suggestion}" ]]; then
+                is_default=" (défaut)"
+            fi
+            printf "  [%d] %s%s\n" "${index}" "${option}" "${is_default}"
             ((index++))
         done
         printf "  [q] Quitter et annuler la procédure\n"
 
-        read -rp "Méthode choisie${prompt_hint} ('q' pour quitter) : " answer
+        read -rp "Votre choix [q pour quitter] : " answer
 
         if [[ -z "${answer}" ]]; then
             if [[ -n "${suggestion}" ]]; then
@@ -2224,33 +2250,40 @@ function select_flash_method() {
 
 function prompt_serial_device() {
     local -a devices
+    info "Détection des ports série disponibles..."
 
     while true; do
         detect_serial_devices devices
         local default_device=""
 
         if [[ ${#devices[@]} -gt 0 ]]; then
-            echo "Ports série détectés :"
+            note "Ports série détectés :"
             local index=1
             for dev in "${devices[@]}"; do
-                printf "  [%d] %s\n" "${index}" "${dev}"
+                local is_default=""
+                if [[ "${index}" -eq 1 ]]; then
+                    is_default=" (défaut)"
+                    default_device="${dev}"
+                fi
+                printf "  [%d] %s%s\n" "${index}" "${dev}" "${is_default}"
                 ((index++))
             done
-            default_device="${devices[0]}"
         else
-            warn "Aucun port série détecté pour le moment."
+            warn "Aucun port série détecté. Branchez votre périphérique ou vérifiez les permissions (udev)."
         fi
 
-        echo "Astuce : saisissez un numéro, un chemin /dev/tty* ou 'q' pour quitter rapidement."
-        local prompt_hint=""
+        local -a hints=("Options : saisir un numéro, un chemin (ex: /dev/ttyUSB0), 'r' (rafraîchir), 'q' (quitter).")
         if [[ -n "${default_device}" ]]; then
-            prompt_hint=" (Entrée = ${default_device})"
+            hints+=("Appuyer sur Entrée sélectionnera le port par défaut : ${default_device}.")
         fi
+        info "$(IFS=" "; echo "${hints[*]}")"
 
-        read -rp "Sélectionnez un port${prompt_hint} ('r' pour rafraîchir, 'q' pour quitter) : " answer
+        read -rp "Votre choix [r pour rafraîchir, q pour quitter] : " answer
 
         case "${answer}" in
             r|R)
+                info "Rafraîchissement de la liste des périphériques..."
+                echo
                 continue
                 ;;
             q|Q)
@@ -2319,18 +2352,18 @@ function prompt_sdcard_mountpoint() {
         shopt -u nullglob
     fi
 
+    local -a hints=("Options : saisir un chemin absolu/relatif, 'q' (quitter).")
     if [[ -n "${default_mount}" ]]; then
-        echo "Chemin détecté : ${default_mount} (Entrée pour utiliser ce chemin)."
+        note "Point de montage suggéré : ${default_mount}"
+        hints+=("Appuyer sur Entrée sélectionnera ce chemin.")
+    else
+        warn "Aucun point de montage automatique détecté. Veuillez en fournir un."
     fi
-    echo "Astuce : saisissez un dossier monté accessible en écriture (ex: /media/${USER:-<utilisateur>}/<volume>) ou 'q' pour quitter."
+    info "$(IFS=" "; echo "${hints[*]}")"
+    echo
 
     while true; do
-        local prompt_hint=""
-        if [[ -n "${default_mount}" ]]; then
-            prompt_hint=" (Entrée = ${default_mount})"
-        fi
-
-        read -rp "Point de montage de la carte SD${prompt_hint} ('q' pour quitter) : " mountpoint
+        read -rp "Votre chemin [q pour quitter] : " mountpoint
 
         if [[ -z "${mountpoint}" ]]; then
             if [[ -n "${default_mount}" ]]; then
@@ -2353,7 +2386,7 @@ function prompt_sdcard_mountpoint() {
 
         if [[ -d "${resolved}" && -w "${resolved}" ]]; then
             SDCARD_MOUNTPOINT="${resolved}"
-            success "Carte SD détectée sur ${SDCARD_MOUNTPOINT}."
+            success "Point de montage sélectionné : ${SDCARD_MOUNTPOINT}."
             break
         fi
 
@@ -2362,7 +2395,8 @@ function prompt_sdcard_mountpoint() {
 }
 
 function prepare_target() {
-    CURRENT_STEP="Étape 3: Préparation de la cible"
+    let "CURRENT_STEP_NUMBER+=1"
+    CURRENT_STEP="Étape ${CURRENT_STEP_NUMBER}/${TOTAL_STEPS}: Préparation de la cible"
     render_box "${CURRENT_STEP}"
 
     case "${SELECTED_METHOD}" in
@@ -2556,8 +2590,12 @@ function flash_with_sdcard() {
 }
 
 function execute_flash() {
+    let "CURRENT_STEP_NUMBER+=1"
+    local initial_step_number=${CURRENT_STEP_NUMBER}
+
     while true; do
-        CURRENT_STEP="Étape 4: Flashage (${SELECTED_METHOD})"
+        CURRENT_STEP_NUMBER=${initial_step_number}
+        CURRENT_STEP="Étape ${CURRENT_STEP_NUMBER}/${TOTAL_STEPS}: Flashage (${SELECTED_METHOD})"
         render_box "${CURRENT_STEP}"
 
         case "${SELECTED_METHOD}" in
@@ -2594,57 +2632,71 @@ function execute_flash() {
 }
 
 function post_flash() {
-    CURRENT_STEP="Étape 5: Résumé"
+    END_TIME=$(date +%s)
+    local duration=$((END_TIME - START_TIME))
+
+    let "CURRENT_STEP_NUMBER+=1"
+    CURRENT_STEP="Étape ${CURRENT_STEP_NUMBER}/${TOTAL_STEPS}: Rapport final"
     render_box "${CURRENT_STEP}"
 
     restart_klipper_services
 
-    cat <<EOF
-Résumé :
-  - Firmware : ${FIRMWARE_DISPLAY_PATH}
-  - Format   : ${FIRMWARE_FORMAT}
-  - Méthode  : ${SELECTED_METHOD}
-EOF
-
+    local -a summary=()
+    summary+=("Rapport de flash")
+    summary+=("----------------")
+    summary+=("Firmware   : ${FIRMWARE_DISPLAY_PATH} (${FIRMWARE_FORMAT})")
     if [[ "${FIRMWARE_METADATA_AVAILABLE}" == "false" ]]; then
-        echo "  - Taille   : N/A (flux simulé)"
-        echo "  - SHA256   : N/A (flux simulé)"
+        summary+=("Taille     : N/A (flux simulé)")
+        summary+=("SHA256     : N/A (flux simulé)")
     else
-        echo "  - Taille   : ${FIRMWARE_SIZE} octets"
-        echo "  - SHA256   : ${FIRMWARE_SHA}"
+        summary+=("Taille     : ${FIRMWARE_SIZE} octets")
+        summary+=("SHA256     : ${FIRMWARE_SHA}")
     fi
+    summary+=("Méthode    : $(flash_method_to_human "${SELECTED_METHOD}")")
 
-    if [[ "${SELECTED_METHOD}" == "serial" ]]; then
-        echo "  - Port     : ${SELECTED_DEVICE}"
-    elif [[ "${SELECTED_METHOD}" == "sdcard" ]]; then
-        echo "  - Cible    : ${SDCARD_MOUNTPOINT}"
-    elif [[ "${SELECTED_METHOD}" == "dfu" ]]; then
-        local dfu_label
-        dfu_label="$(dfu_command_display)"
-        local alt_summary="${DFU_ALT_SETTING:-0}"
-        printf '  - %s : alt=%s' "${dfu_label}" "${alt_summary}"
-        if [[ -n "${DFU_SERIAL_NUMBER}" ]]; then
-            printf ', serial=%s' "${DFU_SERIAL_NUMBER}"
-        fi
-        printf '\n'
+    case "${SELECTED_METHOD}" in
+        serial)
+            summary+=("Port série : ${SELECTED_DEVICE}")
+            ;;
+        sdcard)
+            summary+=("Cible      : ${SDCARD_MOUNTPOINT}")
+            ;;
+        dfu)
+            local dfu_label
+            dfu_label="$(dfu_command_display)"
+            local alt_summary="${DFU_ALT_SETTING:-0}"
+            local dfu_details="${dfu_label} (alt=${alt_summary}"
+            if [[ -n "${DFU_SERIAL_NUMBER}" ]]; then
+                dfu_details+=", serial=${DFU_SERIAL_NUMBER}"
+            fi
+            dfu_details+=")"
+            summary+=("Interface  : ${dfu_details}")
+            ;;
+    esac
+
+    summary+=("Durée      : $(format_duration_seconds "${duration}")")
+    summary+=("Journal    : ${LOG_FILE}")
+    if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+        summary+=("Mode       : Simulation (dry-run), aucune action réelle.")
     fi
 
     echo
+    local line
+    for line in "${summary[@]}"; do
+        info "${line}"
+    done
+    echo
+
     success ">>> Procédure terminée avec succès. <<<"
-    info "Les logs détaillés sont disponibles ici : ${LOG_FILE}"
-    if [[ "${DRY_RUN_MODE}" == "true" ]]; then
-        info "Mode --dry-run : aucune opération de flash n'a été appliquée à la cible."
-    fi
+
     if [[ "${QUIET_MODE}" == "true" ]]; then
         echo "Procédure terminée. Consultez ${LOG_FILE} pour le détail."
-        if [[ "${DRY_RUN_MODE}" == "true" ]]; then
-            echo "Mode --dry-run : aucune opération de flash n'a été appliquée à la cible."
-        fi
     fi
     log_message "INFO" "Procédure complète terminée avec succès."
 }
 
 function main() {
+    START_TIME=$(date +%s)
     if [[ "${DRY_RUN_MODE}" == "true" ]]; then
         info "Mode --dry-run actif : le script valide le déroulé sans effectuer d'actions destructrices."
     fi

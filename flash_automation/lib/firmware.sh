@@ -255,12 +255,12 @@ prompt_firmware_selection() {
         default_display="$(format_path_for_display "${default_choice}")"
     fi
 
-    if [[ ${#DEFAULT_FIRMWARE_RELATIVE_PATHS[@]} -gt 0 ]]; then
-        local joined_paths
-        joined_paths="${DEFAULT_FIRMWARE_RELATIVE_PATHS[*]}"
-        echo "Chemins valides (relatifs au dépôt) : ${joined_paths}"
+    local -a hints=("Options : saisir un numéro, un chemin absolu/relatif, ou 'q' (quitter).")
+    if [[ -n "${default_display}" ]]; then
+        hints+=("Appuyer sur Entrée sélectionnera le firmware le plus récent.")
+        note "Le firmware le plus récent est présélectionné : ${default_display}"
     fi
-    echo "Saisissez le numéro correspondant, un chemin absolu ou relatif, ou 'q' pour quitter rapidement."
+    info "$(IFS=" "; echo "${hints[*]}")"
 
     while true; do
         echo
@@ -271,19 +271,21 @@ prompt_firmware_selection() {
             timestamp="$(get_candidate_timestamp_display "${file}")"
             local display
             display="$(format_path_for_display "${file}")"
+            local is_default=""
+            if [[ "${file}" == "${default_choice}" ]]; then
+                is_default=" (défaut)"
+            fi
             if [[ -n "${timestamp}" ]]; then
-                printf "  [%d] %s (%s)\n" "${index}" "${display}" "${timestamp}"
+                printf "  [%d] %s (%s)%s\n" "${index}" "${display}" "${timestamp}" "${is_default}"
             else
-                printf "  [%d] %s\n" "${index}" "${display}"
+                printf "  [%d] %s%s\n" "${index}" "${display}" "${is_default}"
             fi
             ((index++))
         done
         printf "  [q] Quitter et annuler la procédure\n"
-        if [[ -n "${default_display}" ]]; then
-            printf "Sélection par défaut : %s\n" "${default_display}"
-        fi
 
-        read -rp "Choix ('q' pour quitter) : " choice
+        local prompt_hint="Entrée pour le choix par défaut"
+        read -rp "Votre choix [q pour quitter] : " choice
 
         case "${choice}" in
             q|Q)
@@ -332,7 +334,8 @@ prompt_firmware_selection() {
 }
 
 prepare_firmware() {
-    CURRENT_STEP="Étape 1: Sélection du firmware"
+    let "CURRENT_STEP_NUMBER+=1"
+    CURRENT_STEP="Étape ${CURRENT_STEP_NUMBER}/${TOTAL_STEPS}: Sélection du firmware"
     render_box "${CURRENT_STEP}"
     FIRMWARE_METADATA_AVAILABLE="true"
     local -a include_ext_display=()
@@ -465,8 +468,10 @@ prepare_firmware() {
     fi
 
     if [[ "${FIRMWARE_METADATA_AVAILABLE}" != "false" ]]; then
+        spinner_start "Calcul du checksum SHA256..."
         FIRMWARE_SIZE=$(portable_stat "--printf=%s" "${FIRMWARE_FILE}")
         FIRMWARE_SHA=$(portable_sha256 "${FIRMWARE_FILE}")
+        spinner_stop
         success "Firmware sélectionné : ${FIRMWARE_DISPLAY_PATH} (${FIRMWARE_FORMAT})"
         info "Taille : ${FIRMWARE_SIZE} octets"
         info "SHA256 : ${FIRMWARE_SHA}"
