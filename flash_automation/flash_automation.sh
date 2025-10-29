@@ -583,30 +583,30 @@ ensure_wchisp() {
 }
 
 function detect_serial_devices() {
-    local -n result=$1
-    result=()
+    local -n serial_devices_ref=$1
+    serial_devices_ref=()
 
     if compgen -G "/dev/serial/by-id/*" >/dev/null 2>&1; then
         for path in /dev/serial/by-id/*; do
-            [[ -e "${path}" ]] && result+=("${path}")
+            [[ -e "${path}" ]] && serial_devices_ref+=("${path}")
         done
     fi
 
     local patterns=(/dev/ttyUSB* /dev/ttyACM* /dev/ttyAMA* /dev/ttyS* /dev/ttyCH*)
     for pattern in "${patterns[@]}"; do
         for dev in ${pattern}; do
-            [[ -e "${dev}" ]] && result+=("${dev}")
+            [[ -e "${dev}" ]] && serial_devices_ref+=("${dev}")
         done
     done
 
-    if [[ ${#result[@]} -gt 0 ]]; then
-        mapfile -t result < <(printf '%s\n' "${result[@]}" | awk '!seen[$0]++')
+    if [[ ${#serial_devices_ref[@]} -gt 0 ]]; then
+        mapfile -t serial_devices_ref < <(printf '%s\n' "${serial_devices_ref[@]}" | awk '!seen[$0]++')
     fi
 }
 
 function detect_dfu_devices() {
-    local -n result=$1
-    result=()
+    local -n dfu_devices_ref=$1
+    dfu_devices_ref=()
 
     if ! command_exists dfu-util; then
         return
@@ -614,7 +614,7 @@ function detect_dfu_devices() {
 
     while IFS= read -r line; do
         [[ -z "${line}" ]] && continue
-        result+=("${line}")
+        dfu_devices_ref+=("${line}")
     done < <(dfu-util -l 2>/dev/null | awk -F':' '/Found DFU:/{gsub(/^\s+|\s+$/, "", $2); print $2}' )
 }
 
@@ -688,8 +688,8 @@ function verify_environment() {
 }
 
 function collect_firmware_candidates() {
-    local -n result=$1
-    result=()
+    local -n firmware_candidates_ref=$1
+    firmware_candidates_ref=()
 
     declare -A seen
     local resolved_hint=""
@@ -698,13 +698,13 @@ function collect_firmware_candidates() {
         resolved_hint="$(resolve_path_relative_to_flash_root "${FIRMWARE_DISPLAY_PATH}")"
         if [[ -f "${resolved_hint}" ]]; then
             seen["${resolved_hint}"]=1
-            result+=("${resolved_hint}")
+            firmware_candidates_ref+=("${resolved_hint}")
         elif [[ -d "${resolved_hint}" ]]; then
             local dir="${resolved_hint}"
             while IFS= read -r -d '' file; do
                 [[ -n "${seen["${file}"]-}" ]] && continue
                 seen["${file}"]=1
-                result+=("${file}")
+                firmware_candidates_ref+=("${file}")
             done < <(find "${dir}" -maxdepth 3 -type f \( -name '*.bin' -o -name '*.uf2' -o -name '*.elf' \) -print0 2>/dev/null)
         fi
     fi
@@ -715,7 +715,7 @@ function collect_firmware_candidates() {
         while IFS= read -r -d '' file; do
             [[ -n "${seen["${file}"]-}" ]] && continue
             seen["${file}"]=1
-            result+=("${file}")
+            firmware_candidates_ref+=("${file}")
         done < <(find "${default_dir}" -maxdepth 2 -type f \( -name '*.bin' -o -name '*.uf2' -o -name '*.elf' \) -print0 2>/dev/null)
     done
 
@@ -725,24 +725,24 @@ function collect_firmware_candidates() {
         while IFS= read -r -d '' file; do
             [[ -n "${seen["${file}"]-}" ]] && continue
             seen["${file}"]=1
-            result+=("${file}")
+            firmware_candidates_ref+=("${file}")
         done < <(find "${dir}" -maxdepth 4 -type f \( -name '*.bin' -o -name '*.uf2' -o -name '*.elf' \) -print0 2>/dev/null)
     done
 
-    if [[ ${#result[@]} -gt 0 ]]; then
-        mapfile -t result < <(printf '%s\n' "${result[@]}" | awk '!seen[$0]++')
+    if [[ ${#firmware_candidates_ref[@]} -gt 0 ]]; then
+        mapfile -t firmware_candidates_ref < <(printf '%s\n' "${firmware_candidates_ref[@]}" | awk '!seen[$0]++')
     fi
 }
 
 function prompt_firmware_selection() {
-    local -n candidates=$1
+    local -n candidates_ref=$1
     local choice=""
 
     while true; do
         echo
         echo "Sélectionnez le firmware à utiliser :"
         local index=1
-        for file in "${candidates[@]}"; do
+        for file in "${candidates_ref[@]}"; do
             local display
             display="$(format_path_for_display "${file}")"
             local extension="${file##*.}"
@@ -755,8 +755,8 @@ function prompt_firmware_selection() {
 
         if [[ "${answer}" =~ ^[0-9]+$ ]]; then
             local numeric=$((answer))
-            if (( numeric >= 1 && numeric <= ${#candidates[@]} )); then
-                choice="${candidates[$((numeric-1))]}"
+            if (( numeric >= 1 && numeric <= ${#candidates_ref[@]} )); then
+                choice="${candidates_ref[$((numeric-1))]}"
                 break
             elif (( numeric == index )); then
                 read -rp "Chemin complet du firmware : " custom_path
