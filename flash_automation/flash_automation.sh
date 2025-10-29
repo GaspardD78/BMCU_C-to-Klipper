@@ -36,6 +36,22 @@ resolve_path_relative_to_flash_root() {
     printf '%s\n' "${expanded}"
 }
 
+resolve_serial_port_path() {
+    local raw_path="$1"
+    if [[ -z "${raw_path}" ]]; then
+        return
+    fi
+
+    local cleaned="${raw_path}"
+    cleaned="${cleaned#/dev/}"
+
+    if [[ "${raw_path}" == /* ]]; then
+        printf '%s\n' "${raw_path}"
+    else
+        printf '/dev/%s\n' "${cleaned}"
+    fi
+}
+
 if [[ -f "${LOGO_FILE}" ]]; then
     cat "${LOGO_FILE}"
     echo
@@ -54,6 +70,8 @@ declare -a CLI_FIRMWARE_SCAN_EXCLUDES=()
 FIRMWARE_DISPLAY_PATH="${KLIPPER_FIRMWARE_PATH:-}"
 FIRMWARE_FILE=""
 FIRMWARE_FORMAT=""
+PRESELECTED_FIRMWARE_FILE=""
+FIRMWARE_SELECTION_SOURCE=""
 readonly TOOLS_ROOT="${CACHE_ROOT}/tools"
 readonly WCHISP_CACHE_DIR="${TOOLS_ROOT}/wchisp"
 readonly WCHISP_RELEASE="${WCHISP_RELEASE:-v0.3.0}"
@@ -82,6 +100,11 @@ readonly DFU_EXTRA_ARGS="${DFU_EXTRA_ARGS:-}"
 
 CLI_METHOD_OVERRIDE=""
 ENV_METHOD_OVERRIDE="${FLASH_AUTOMATION_METHOD:-}"
+CLI_FIRMWARE_OVERRIDE=""
+CLI_SERIAL_PORT_OVERRIDE=""
+CLI_SDCARD_PATH_OVERRIDE=""
+CLI_AUTO_CONFIRM_REQUESTED="false"
+CLI_DRY_RUN_REQUESTED="false"
 
 DEFAULT_CACHE_HOME="${XDG_CACHE_HOME:-${HOME}/.cache}"
 PERMISSIONS_CACHE_FILE="${BMCU_PERMISSION_CACHE_FILE:-${DEFAULT_CACHE_HOME}/bmcu_permissions.json}"
@@ -126,6 +149,12 @@ METHOD_SOURCE_LABEL=""
 FORCED_METHOD="false"
 AUTO_METHOD_REASON=""
 DEPENDENCIES_VERIFIED_FOR_METHOD=""
+AUTO_CONFIRM_MODE="false"
+AUTO_CONFIRM_SOURCE=""
+DRY_RUN_MODE="false"
+DRY_RUN_SOURCE=""
+SERIAL_SELECTION_SOURCE=""
+SDCARD_SELECTION_SOURCE=""
 declare -a ACTIVE_KLIPPER_SERVICES=()
 SERVICES_STOPPED="false"
 SERVICES_RESTORED="false"
@@ -203,13 +232,23 @@ Usage: ${script_name} [options]
 Options:
   --wchisp-checksum <sha256>   Remplace la somme de contrôle attendue pour l'archive wchisp.
   --allow-unsigned-wchisp      Active le mode dégradé : conserve l'archive même si la vérification échoue.
+  --firmware <chemin>          Sélectionne directement le firmware à flasher.
   --method <mode>              Force la méthode (wchisp, serial, sdcard, dfu, auto).
+  --serial-port <chemin>       Fixe le port série à utiliser pour flash_usb.py.
+  --sdcard-path <chemin>       Fixe le point de montage cible pour la copie sur carte SD.
   --deep-scan                  Étend la recherche de firmwares à l'ensemble du dépôt.
   --exclude-path <chemin>      Ajoute un chemin à exclure de la découverte automatique.
+  --auto-confirm               Accepte automatiquement les choix suggérés (mode non interactif).
+  --no-confirm                 Alias de --auto-confirm.
+  --dry-run                    Valide l'enchaînement des étapes sans appliquer les actions destructrices.
   -h, --help                   Affiche cette aide et quitte.
 
 Variables d'environnement associées :
   FLASH_AUTOMATION_METHOD            Définit la méthode par défaut (wchisp|serial|sdcard|dfu|auto).
+  FLASH_AUTOMATION_AUTO_CONFIRM      "true"/"1" pour activer le mode non interactif.
+  FLASH_AUTOMATION_DRY_RUN           Active le mode simulation sans flash réel.
+  FLASH_AUTOMATION_SERIAL_PORT       Port série forcé (équivalent --serial-port).
+  FLASH_AUTOMATION_SDCARD_PATH       Point de montage forcé pour la méthode sdcard.
   WCHISP_ARCHIVE_CHECKSUM_OVERRIDE  Injecte une somme de contrôle SHA-256 personnalisée.
   ALLOW_UNVERIFIED_WCHISP           "true"/"1" pour autoriser le mode dégradé.
   KLIPPER_FIRMWARE_SCAN_EXCLUDES    Liste (séparée par ':') de chemins à ignorer durant la découverte.
@@ -246,6 +285,25 @@ parse_cli_arguments() {
                 ALLOW_UNVERIFIED_WCHISP="true"
                 shift
                 ;;
+            --firmware)
+                if [[ $# -lt 2 ]]; then
+                    echo "L'option --firmware requiert un chemin." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                CLI_FIRMWARE_OVERRIDE="$(resolve_path_relative_to_flash_root "$2")"
+                shift 2
+                ;;
+            --firmware=*)
+                local raw_firmware="${1#*=}"
+                if [[ -z "${raw_firmware}" ]]; then
+                    echo "L'option --firmware nécessite un chemin non vide." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                CLI_FIRMWARE_OVERRIDE="$(resolve_path_relative_to_flash_root "${raw_firmware}")"
+                shift
+                ;;
             --method)
                 if [[ $# -lt 2 ]]; then
                     echo "L'option --method requiert une valeur." >&2
@@ -266,6 +324,46 @@ parse_cli_arguments() {
                     print_usage >&2
                     exit 1
                 fi
+                shift
+                ;;
+            --serial-port)
+                if [[ $# -lt 2 ]]; then
+                    echo "L'option --serial-port requiert une valeur." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                CLI_SERIAL_PORT_OVERRIDE="$2"
+                shift 2
+                ;;
+            --serial-port=*)
+                CLI_SERIAL_PORT_OVERRIDE="${1#*=}"
+                shift
+                ;;
+            --sdcard-path)
+                if [[ $# -lt 2 ]]; then
+                    echo "L'option --sdcard-path requiert une valeur." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                CLI_SDCARD_PATH_OVERRIDE="$(resolve_path_relative_to_flash_root "$2")"
+                shift 2
+                ;;
+            --sdcard-path=*)
+                local raw_mount="${1#*=}"
+                if [[ -z "${raw_mount}" ]]; then
+                    echo "L'option --sdcard-path nécessite un chemin non vide." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                CLI_SDCARD_PATH_OVERRIDE="$(resolve_path_relative_to_flash_root "${raw_mount}")"
+                shift
+                ;;
+            --auto-confirm|--no-confirm)
+                CLI_AUTO_CONFIRM_REQUESTED="true"
+                shift
+                ;;
+            --dry-run)
+                CLI_DRY_RUN_REQUESTED="true"
                 shift
                 ;;
             --deep-scan)
@@ -351,6 +449,95 @@ apply_configuration_defaults() {
 
     FIRMWARE_SCAN_EXCLUDES=("${excludes[@]}")
     dedupe_array_in_place FIRMWARE_SCAN_EXCLUDES
+
+    PRESELECTED_FIRMWARE_FILE=""
+    FIRMWARE_SELECTION_SOURCE=""
+    SERIAL_SELECTION_SOURCE=""
+    SDCARD_SELECTION_SOURCE=""
+
+    if [[ "${CLI_AUTO_CONFIRM_REQUESTED}" == "true" ]]; then
+        AUTO_CONFIRM_MODE="true"
+        AUTO_CONFIRM_SOURCE="option CLI (--auto-confirm)"
+    else
+        AUTO_CONFIRM_MODE="$(normalize_boolean "${FLASH_AUTOMATION_AUTO_CONFIRM:-false}")"
+        if [[ "${AUTO_CONFIRM_MODE}" == "true" ]]; then
+            AUTO_CONFIRM_SOURCE="variable d'environnement FLASH_AUTOMATION_AUTO_CONFIRM"
+        fi
+    fi
+
+    if [[ "${CLI_DRY_RUN_REQUESTED}" == "true" ]]; then
+        DRY_RUN_MODE="true"
+        DRY_RUN_SOURCE="option CLI (--dry-run)"
+    else
+        DRY_RUN_MODE="$(normalize_boolean "${FLASH_AUTOMATION_DRY_RUN:-false}")"
+        if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+            DRY_RUN_SOURCE="variable d'environnement FLASH_AUTOMATION_DRY_RUN"
+        fi
+    fi
+
+    if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+        AUTO_CONFIRM_MODE="true"
+        if [[ -z "${AUTO_CONFIRM_SOURCE}" ]]; then
+            AUTO_CONFIRM_SOURCE="mode --dry-run"
+        fi
+    fi
+
+    if [[ -n "${CLI_FIRMWARE_OVERRIDE}" ]]; then
+        if [[ ! -f "${CLI_FIRMWARE_OVERRIDE}" ]]; then
+            error_msg "Le firmware spécifié (--firmware) est introuvable : ${CLI_FIRMWARE_OVERRIDE}"
+            exit 1
+        fi
+        PRESELECTED_FIRMWARE_FILE="${CLI_FIRMWARE_OVERRIDE}"
+        FIRMWARE_SELECTION_SOURCE="option CLI (--firmware)"
+        FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${PRESELECTED_FIRMWARE_FILE}")"
+    elif [[ -n "${KLIPPER_FIRMWARE_PATH:-}" ]]; then
+        local resolved_hint
+        resolved_hint="$(resolve_path_relative_to_flash_root "${KLIPPER_FIRMWARE_PATH}")"
+        if [[ -f "${resolved_hint}" ]]; then
+            PRESELECTED_FIRMWARE_FILE="${resolved_hint}"
+            FIRMWARE_SELECTION_SOURCE="variable d'environnement KLIPPER_FIRMWARE_PATH"
+            FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${PRESELECTED_FIRMWARE_FILE}")"
+        else
+            FIRMWARE_DISPLAY_PATH="${KLIPPER_FIRMWARE_PATH}"
+        fi
+    fi
+
+    local serial_candidate=""
+    local serial_source=""
+    if [[ -n "${CLI_SERIAL_PORT_OVERRIDE}" ]]; then
+        serial_candidate="$(resolve_serial_port_path "${CLI_SERIAL_PORT_OVERRIDE}")"
+        serial_source="option CLI (--serial-port)"
+    elif [[ -n "${FLASH_AUTOMATION_SERIAL_PORT:-}" ]]; then
+        serial_candidate="$(resolve_serial_port_path "${FLASH_AUTOMATION_SERIAL_PORT}")"
+        serial_source="variable d'environnement FLASH_AUTOMATION_SERIAL_PORT"
+    fi
+
+    SELECTED_DEVICE="${serial_candidate}"
+    SERIAL_SELECTION_SOURCE="${serial_source}"
+
+    local sdcard_candidate=""
+    local sdcard_source=""
+    if [[ -n "${CLI_SDCARD_PATH_OVERRIDE}" ]]; then
+        sdcard_candidate="${CLI_SDCARD_PATH_OVERRIDE}"
+        sdcard_source="option CLI (--sdcard-path)"
+    elif [[ -n "${FLASH_AUTOMATION_SDCARD_PATH:-}" ]]; then
+        sdcard_candidate="$(resolve_path_relative_to_flash_root "${FLASH_AUTOMATION_SDCARD_PATH}")"
+        sdcard_source="variable d'environnement FLASH_AUTOMATION_SDCARD_PATH"
+    fi
+
+    if [[ -n "${sdcard_candidate}" ]]; then
+        if [[ ! -d "${sdcard_candidate}" ]]; then
+            if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+                warn "Point de montage fourni introuvable (${sdcard_candidate}); poursuite en mode --dry-run."
+            else
+                error_msg "Le point de montage spécifié est introuvable : ${sdcard_candidate}"
+                exit 1
+            fi
+        fi
+    fi
+
+    SDCARD_MOUNTPOINT="${sdcard_candidate}"
+    SDCARD_SELECTION_SOURCE="${sdcard_source}"
 }
 
 function log_message() {
@@ -884,6 +1071,13 @@ function stop_klipper_services() {
         return
     fi
 
+    if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+        for service in "${ACTIVE_KLIPPER_SERVICES[@]}"; do
+            info "[DRY-RUN] Service ${service} serait arrêté."
+        done
+        return
+    fi
+
     for service in "${ACTIVE_KLIPPER_SERVICES[@]}"; do
         info "Arrêt du service ${service}."
         if systemctl stop "${service}" >/dev/null 2>&1; then
@@ -898,6 +1092,14 @@ function stop_klipper_services() {
 
 function restart_klipper_services() {
     if [[ ${#ACTIVE_KLIPPER_SERVICES[@]} -eq 0 ]]; then
+        SERVICES_RESTORED="true"
+        return
+    fi
+
+    if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+        for service in "${ACTIVE_KLIPPER_SERVICES[@]}"; do
+            info "[DRY-RUN] Service ${service} serait relancé."
+        done
         SERVICES_RESTORED="true"
         return
     fi
@@ -1505,14 +1707,22 @@ finalize_method_selection() {
     case "${SELECTED_METHOD}" in
         wchisp)
             success "Méthode sélectionnée : ${human}."
-            ensure_wchisp
+            if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+                info "Mode --dry-run : vérification wchisp ignorée (aucun téléchargement)."
+            else
+                ensure_wchisp
+            fi
             ;;
         serial)
             success "Méthode sélectionnée : ${human}."
             if [[ -z "${SELECTED_DEVICE}" ]]; then
                 prompt_serial_device
             else
-                success "Port série imposé : ${SELECTED_DEVICE}."
+                if [[ -n "${SERIAL_SELECTION_SOURCE}" ]]; then
+                    success "Port série imposé (${SERIAL_SELECTION_SOURCE}) : ${SELECTED_DEVICE}."
+                else
+                    success "Port série imposé : ${SELECTED_DEVICE}."
+                fi
             fi
             ;;
         sdcard)
@@ -1520,7 +1730,11 @@ finalize_method_selection() {
             if [[ -z "${SDCARD_MOUNTPOINT}" ]]; then
                 prompt_sdcard_mountpoint
             else
-                success "Point de montage imposé : ${SDCARD_MOUNTPOINT}."
+                if [[ -n "${SDCARD_SELECTION_SOURCE}" ]]; then
+                    success "Point de montage imposé (${SDCARD_SELECTION_SOURCE}) : ${SDCARD_MOUNTPOINT}."
+                else
+                    success "Point de montage imposé : ${SDCARD_MOUNTPOINT}."
+                fi
             fi
             ;;
         dfu)
@@ -1700,19 +1914,40 @@ function prepare_firmware() {
         info "Utilisez --deep-scan pour élargir la recherche à l'ensemble du dépôt."
     fi
 
-    local -a candidates
-    collect_firmware_candidates candidates
-
-    if [[ ${#candidates[@]} -eq 0 ]]; then
-        local message="Aucun firmware compatible détecté (recherché dans ${search_roots_display})."
-        if [[ "${DEEP_SCAN_ENABLED}" != "true" ]]; then
-            message+=" Utilisez --deep-scan pour élargir la recherche."
+    if [[ -n "${PRESELECTED_FIRMWARE_FILE}" ]]; then
+        if [[ -n "${FIRMWARE_SELECTION_SOURCE}" ]]; then
+            info "Firmware imposé par ${FIRMWARE_SELECTION_SOURCE}."
         fi
-        error_msg "${message} Lancer './build.sh' ou fournir KLIPPER_FIRMWARE_PATH."
-        exit 1
-    fi
+        FIRMWARE_FILE="${PRESELECTED_FIRMWARE_FILE}"
+        FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${FIRMWARE_FILE}")"
+        FIRMWARE_FORMAT="${FIRMWARE_FILE##*.}"
+    else
+        local -a candidates
+        collect_firmware_candidates candidates
 
-    prompt_firmware_selection candidates
+        if [[ ${#candidates[@]} -eq 0 ]]; then
+            local message="Aucun firmware compatible détecté (recherché dans ${search_roots_display})."
+            if [[ "${DEEP_SCAN_ENABLED}" != "true" ]]; then
+                message+=" Utilisez --deep-scan pour élargir la recherche."
+            fi
+            error_msg "${message} Lancer './build.sh' ou fournir KLIPPER_FIRMWARE_PATH."
+            exit 1
+        fi
+
+        if [[ "${AUTO_CONFIRM_MODE}" == "true" ]]; then
+            if [[ ${#candidates[@]} -eq 1 ]]; then
+                FIRMWARE_FILE="${candidates[0]}"
+                FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${FIRMWARE_FILE}")"
+                FIRMWARE_FORMAT="${FIRMWARE_FILE##*.}"
+                info "Mode auto-confirm : sélection automatique du firmware ${FIRMWARE_DISPLAY_PATH}."
+            else
+                error_msg "Plusieurs firmwares détectés mais --auto-confirm actif. Précisez --firmware pour lever l'ambiguïté."
+                exit 1
+            fi
+        else
+            prompt_firmware_selection candidates
+        fi
+    fi
 
     FIRMWARE_SIZE=$(stat --printf="%s" "${FIRMWARE_FILE}")
     FIRMWARE_SHA=$(sha256sum "${FIRMWARE_FILE}" | awk '{print $1}')
@@ -1741,6 +1976,19 @@ function select_flash_method() {
         if [[ -n "${AUTO_METHOD_REASON}" ]]; then
             info "Raison : ${AUTO_METHOD_REASON}"
         fi
+    fi
+
+    if [[ "${AUTO_CONFIRM_MODE}" == "true" ]]; then
+        local chosen_method="${suggestion}"
+        if [[ -z "${chosen_method}" ]]; then
+            chosen_method="${RESOLVED_METHOD:-wchisp}"
+        fi
+        local auto_label
+        auto_label="$(flash_method_to_human "${chosen_method}")"
+        info "Mode auto-confirm : sélection automatique de ${auto_label}."
+        SELECTED_METHOD="${chosen_method}"
+        finalize_method_selection
+        return
     fi
 
     local options=(
@@ -1898,14 +2146,23 @@ Actions recommandées :
   2. Appuyer brièvement sur RESET.
   3. Relâcher BOOT0 puis attendre la détection USB.
 INSTRUCTIONS
-            read -rp "Appuyez sur Entrée après le passage en bootloader pour rescanner les périphériques..." _
-            display_available_devices
+            if [[ "${AUTO_CONFIRM_MODE}" != "true" ]]; then
+                read -rp "Appuyez sur Entrée après le passage en bootloader pour rescanner les périphériques..." _
+                display_available_devices
+            else
+                info "Mode auto-confirm : saut du prompt de rescan (affichage automatique des périphériques)."
+                display_available_devices
+            fi
             ;;
         serial)
             info "Validation du port série ${SELECTED_DEVICE}."
             if [[ ! -e "${SELECTED_DEVICE}" ]]; then
-                warn "Le port sélectionné est introuvable."
-                prompt_serial_device
+                if [[ "${AUTO_CONFIRM_MODE}" == "true" ]]; then
+                    warn "Le port sélectionné est introuvable. Mode auto-confirm : aucun nouveau port ne sera proposé."
+                else
+                    warn "Le port sélectionné est introuvable."
+                    prompt_serial_device
+                fi
             fi
             display_available_devices
             ;;
@@ -1921,6 +2178,11 @@ INSTRUCTIONS
 }
 
 function flash_with_wchisp() {
+    if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+        info "[DRY-RUN] wchisp flasherait ${FIRMWARE_DISPLAY_PATH}."
+        return
+    fi
+
     ensure_wchisp
 
     local transport="${WCHISP_TRANSPORT,,}"
@@ -1969,6 +2231,11 @@ function flash_with_wchisp() {
 }
 
 function flash_with_dfu() {
+    if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+        info "[DRY-RUN] dfu-util flasherait ${FIRMWARE_DISPLAY_PATH} (alt=${DFU_ALT_SETTING:-0})."
+        return
+    fi
+
     if ! command_exists dfu-util; then
         error_msg "dfu-util est requis pour la méthode DFU."
         exit 1
@@ -1999,6 +2266,11 @@ function flash_with_dfu() {
 }
 
 function flash_with_serial() {
+    if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+        info "[DRY-RUN] flash_usb.py programmerait ${FIRMWARE_DISPLAY_PATH} sur ${SELECTED_DEVICE}."
+        return
+    fi
+
     if ! command_exists python3; then
         error_msg "python3 est requis pour la méthode de flash série."
         exit 1
@@ -2018,6 +2290,11 @@ function flash_with_serial() {
 }
 
 function flash_with_sdcard() {
+    if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+        info "[DRY-RUN] Copie simulée de ${FIRMWARE_DISPLAY_PATH} vers ${SDCARD_MOUNTPOINT}."
+        return
+    fi
+
     local destination="${SDCARD_MOUNTPOINT}/$(basename "${FIRMWARE_FILE}")"
     info "Copie de ${FIRMWARE_DISPLAY_PATH} vers ${destination}."
     if ! cp "${FIRMWARE_FILE}" "${destination}"; then
@@ -2078,10 +2355,16 @@ EOF
     echo
     success ">>> Procédure terminée avec succès. <<<"
     info "Les logs détaillés sont disponibles ici : ${LOG_FILE}"
+    if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+        info "Mode --dry-run : aucune opération de flash n'a été appliquée à la cible."
+    fi
     log_message "INFO" "Procédure complète terminée avec succès."
 }
 
 function main() {
+    if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+        info "Mode --dry-run actif : le script valide le déroulé sans effectuer d'actions destructrices."
+    fi
     resolve_flash_method
     verify_environment
     prepare_firmware
