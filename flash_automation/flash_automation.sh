@@ -76,6 +76,12 @@ readonly WCHISP_TRANSPORT="${WCHISP_TRANSPORT:-usb}"
 readonly WCHISP_USB_INDEX="${WCHISP_USB_INDEX:-}"
 readonly WCHISP_SERIAL_PORT="${WCHISP_SERIAL_PORT:-}"
 readonly WCHISP_SERIAL_BAUDRATE="${WCHISP_SERIAL_BAUDRATE:-}"
+readonly DFU_ALT_SETTING="${DFU_ALT_SETTING:-0}"
+readonly DFU_SERIAL_NUMBER="${DFU_SERIAL_NUMBER:-}"
+readonly DFU_EXTRA_ARGS="${DFU_EXTRA_ARGS:-}"
+
+CLI_METHOD_OVERRIDE=""
+ENV_METHOD_OVERRIDE="${FLASH_AUTOMATION_METHOD:-}"
 
 DEFAULT_CACHE_HOME="${XDG_CACHE_HOME:-${HOME}/.cache}"
 PERMISSIONS_CACHE_FILE="${BMCU_PERMISSION_CACHE_FILE:-${DEFAULT_CACHE_HOME}/bmcu_permissions.json}"
@@ -111,6 +117,12 @@ FIRMWARE_SHA=""
 SELECTED_METHOD=""
 SELECTED_DEVICE=""
 SDCARD_MOUNTPOINT=""
+DEFAULT_METHOD=""
+RESOLVED_METHOD=""
+METHOD_SOURCE_LABEL=""
+FORCED_METHOD="false"
+AUTO_METHOD_REASON=""
+DEPENDENCIES_VERIFIED_FOR_METHOD=""
 declare -a ACTIVE_KLIPPER_SERVICES=()
 SERVICES_STOPPED="false"
 SERVICES_RESTORED="false"
@@ -152,6 +164,33 @@ dedupe_array_in_place() {
     array_ref=("${unique[@]}")
 }
 
+normalize_flash_method() {
+    local raw="${1:-}"
+    local lowered="${raw,,}"
+    lowered="${lowered// /}"
+
+    case "${lowered}" in
+        ""|auto)
+            printf '%s\n' "auto"
+            ;;
+        wchisp|usb|bootloader)
+            printf '%s\n' "wchisp"
+            ;;
+        serial|uart|usb-serial|usbserial)
+            printf '%s\n' "serial"
+            ;;
+        sd|sdcard|storage)
+            printf '%s\n' "sdcard"
+            ;;
+        dfu|dfu-util|dfuutil)
+            printf '%s\n' "dfu"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 print_usage() {
     local script_name
     script_name="$(basename "${BASH_SOURCE[0]}")"
@@ -161,14 +200,26 @@ Usage: ${script_name} [options]
 Options:
   --wchisp-checksum <sha256>   Remplace la somme de contrôle attendue pour l'archive wchisp.
   --allow-unsigned-wchisp      Active le mode dégradé : conserve l'archive même si la vérification échoue.
+  --method <mode>              Force la méthode (wchisp, serial, sdcard, dfu, auto).
   --deep-scan                  Étend la recherche de firmwares à l'ensemble du dépôt.
   --exclude-path <chemin>      Ajoute un chemin à exclure de la découverte automatique.
   -h, --help                   Affiche cette aide et quitte.
 
 Variables d'environnement associées :
+  FLASH_AUTOMATION_METHOD            Définit la méthode par défaut (wchisp|serial|sdcard|dfu|auto).
   WCHISP_ARCHIVE_CHECKSUM_OVERRIDE  Injecte une somme de contrôle SHA-256 personnalisée.
   ALLOW_UNVERIFIED_WCHISP           "true"/"1" pour autoriser le mode dégradé.
   KLIPPER_FIRMWARE_SCAN_EXCLUDES    Liste (séparée par ':') de chemins à ignorer durant la découverte.
+  DFU_ALT_SETTING                   Sélectionne l'interface DFU (par défaut : 0).
+  DFU_SERIAL_NUMBER                 Filtre dfu-util sur un numéro de série spécifique.
+  DFU_EXTRA_ARGS                    Arguments supplémentaires passés à dfu-util.
+
+Scénarios & dépendances clés :
+  wchisp (auto-install)        curl, tar, sha256sum (pour vérifier et extraire l'archive).
+  wchisp (local)              wchisp déjà présent dans le PATH ou via WCHISP_BIN.
+  serial (flash_usb.py)       python3, build Klipper préalable pour obtenir flash_usb.py.
+  dfu                         dfu-util.
+  sdcard                      Aucun outil supplémentaire : simple copie du firmware.
 EOF
 }
 
@@ -190,6 +241,28 @@ parse_cli_arguments() {
                 ;;
             --allow-unsigned-wchisp)
                 ALLOW_UNVERIFIED_WCHISP="true"
+                shift
+                ;;
+            --method)
+                if [[ $# -lt 2 ]]; then
+                    echo "L'option --method requiert une valeur." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                if ! CLI_METHOD_OVERRIDE=$(normalize_flash_method "$2"); then
+                    echo "Méthode inconnue : $2" >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --method=*)
+                local raw_method="${1#*=}"
+                if ! CLI_METHOD_OVERRIDE=$(normalize_flash_method "${raw_method}"); then
+                    echo "Méthode inconnue : ${raw_method}" >&2
+                    print_usage >&2
+                    exit 1
+                fi
                 shift
                 ;;
             --deep-scan)
@@ -1061,6 +1134,116 @@ function display_available_devices() {
     fi
 }
 
+flash_method_to_human() {
+    local method="$1"
+
+    case "${method}" in
+        wchisp)
+            printf '%s\n' "flash direct via wchisp"
+            ;;
+        serial)
+            printf '%s\n' "flash série via flash_usb.py"
+            ;;
+        sdcard)
+            printf '%s\n' "copie sur carte SD / stockage"
+            ;;
+        dfu)
+            printf '%s\n' "flash DFU via dfu-util"
+            ;;
+        *)
+            printf '%s\n' "méthode inconnue"
+            ;;
+    esac
+}
+
+auto_detect_flash_method() {
+    AUTO_METHOD_REASON=""
+
+    if command_exists "${WCHISP_COMMAND}"; then
+        AUTO_METHOD_REASON="wchisp détecté : ${WCHISP_COMMAND} est disponible."
+        printf '%s\n' "wchisp"
+        return
+    fi
+
+    if [[ "${WCHISP_AUTO_INSTALL}" == "true" ]]; then
+        AUTO_METHOD_REASON="wchisp sélectionné : installation automatique autorisée."
+        printf '%s\n' "wchisp"
+        return
+    fi
+
+    local -a dfu_devices=()
+    detect_dfu_devices dfu_devices
+    if [[ ${#dfu_devices[@]} -gt 0 ]]; then
+        AUTO_METHOD_REASON="Mode DFU détecté via dfu-util (${dfu_devices[0]})."
+        printf '%s\n' "dfu"
+        return
+    fi
+
+    local -a serial_devices=()
+    detect_serial_devices serial_devices
+    if [[ ${#serial_devices[@]} -gt 0 ]]; then
+        AUTO_METHOD_REASON="Ports série détectés (${serial_devices[0]})."
+        printf '%s\n' "serial"
+        return
+    fi
+
+    AUTO_METHOD_REASON="Aucune interface dédiée détectée : bascule sur carte SD."
+    printf '%s\n' "sdcard"
+}
+
+resolve_flash_method() {
+    local candidate=""
+    local source_label="détection automatique"
+    local forced="false"
+
+    AUTO_METHOD_REASON=""
+
+    if [[ -n "${CLI_METHOD_OVERRIDE}" ]]; then
+        if [[ "${CLI_METHOD_OVERRIDE}" == "auto" ]]; then
+            candidate="$(auto_detect_flash_method)"
+            source_label="détection automatique (--method auto)"
+        else
+            candidate="${CLI_METHOD_OVERRIDE}"
+            source_label="option CLI (--method)"
+            forced="true"
+        fi
+    elif [[ -n "${ENV_METHOD_OVERRIDE}" ]]; then
+        local normalized
+        if ! normalized=$(normalize_flash_method "${ENV_METHOD_OVERRIDE}"); then
+            warn "Valeur FLASH_AUTOMATION_METHOD invalide (${ENV_METHOD_OVERRIDE}). Retour à la détection automatique."
+            candidate="$(auto_detect_flash_method)"
+            source_label="détection automatique"
+        elif [[ "${normalized}" == "auto" ]]; then
+            candidate="$(auto_detect_flash_method)"
+            source_label="détection automatique (FLASH_AUTOMATION_METHOD=auto)"
+        else
+            candidate="${normalized}"
+            source_label="variable d'environnement FLASH_AUTOMATION_METHOD"
+            forced="true"
+        fi
+        ENV_METHOD_OVERRIDE="${normalized:-}"
+    else
+        candidate="$(auto_detect_flash_method)"
+        source_label="détection automatique"
+    fi
+
+    if [[ -z "${candidate}" ]]; then
+        candidate="wchisp"
+    fi
+
+    RESOLVED_METHOD="${candidate}"
+    METHOD_SOURCE_LABEL="${source_label}"
+    FORCED_METHOD="${forced}"
+
+    if [[ "${FORCED_METHOD}" == "true" ]]; then
+        SELECTED_METHOD="${RESOLVED_METHOD}"
+        DEFAULT_METHOD=""
+    else
+        DEFAULT_METHOD="${RESOLVED_METHOD}"
+        SELECTED_METHOD=""
+    fi
+}
+
 function format_path_for_display() {
     local path="$1"
     if [[ "${path}" == "${FLASH_ROOT}"* ]]; then
@@ -1114,18 +1297,116 @@ run_find_firmware_files() {
     "${find_cmd[@]}"
 }
 
+verify_common_dependencies() {
+    check_command "stat" true
+    check_command "find" true
+    check_command "sha256sum" true
+}
+
+verify_method_dependencies() {
+    local method="$1"
+    local context="$2"
+    local human
+    human="$(flash_method_to_human "${method}")"
+
+    if [[ "${context}" == "selection" ]]; then
+        info "Validation des dépendances pour ${human} (méthode ajustée)."
+    else
+        info "Validation des dépendances spécifiques à ${human}."
+    fi
+
+    case "${method}" in
+        wchisp)
+            if command_exists "${WCHISP_COMMAND}"; then
+                success "wchisp disponible (${WCHISP_COMMAND})."
+            else
+                if [[ "${WCHISP_AUTO_INSTALL}" == "true" ]]; then
+                    info "wchisp sera installé automatiquement : vérification de curl/tar."
+                    check_command "curl" true
+                    check_command "tar" true
+                else
+                    error_msg "wchisp est requis pour la méthode sélectionnée. Exportez WCHISP_BIN ou installez l'outil."
+                    exit 1
+                fi
+            fi
+            ;;
+        serial)
+            check_command "python3" true
+            check_command "make" false
+            ;;
+        dfu)
+            check_command "dfu-util" true
+            ;;
+        sdcard)
+            :
+            ;;
+        *)
+            warn "Aucune règle de vérification spécifique pour '${method}'."
+            ;;
+    esac
+}
+
+finalize_method_selection() {
+    if [[ -z "${SELECTED_METHOD}" ]]; then
+        return
+    fi
+
+    if [[ -n "${DEPENDENCIES_VERIFIED_FOR_METHOD}" && "${SELECTED_METHOD}" != "${DEPENDENCIES_VERIFIED_FOR_METHOD}" ]]; then
+        verify_method_dependencies "${SELECTED_METHOD}" "selection"
+        DEPENDENCIES_VERIFIED_FOR_METHOD="${SELECTED_METHOD}"
+    fi
+
+    local human
+    human="$(flash_method_to_human "${SELECTED_METHOD}")"
+
+    case "${SELECTED_METHOD}" in
+        wchisp)
+            success "Méthode sélectionnée : ${human}."
+            ensure_wchisp
+            ;;
+        serial)
+            success "Méthode sélectionnée : ${human}."
+            if [[ -z "${SELECTED_DEVICE}" ]]; then
+                prompt_serial_device
+            else
+                success "Port série imposé : ${SELECTED_DEVICE}."
+            fi
+            ;;
+        sdcard)
+            success "Méthode sélectionnée : ${human}."
+            if [[ -z "${SDCARD_MOUNTPOINT}" ]]; then
+                prompt_sdcard_mountpoint
+            else
+                success "Point de montage imposé : ${SDCARD_MOUNTPOINT}."
+            fi
+            ;;
+        dfu)
+            success "Méthode sélectionnée : ${human}."
+            ;;
+        *)
+            error_msg "Méthode de flash inconnue: ${SELECTED_METHOD}"
+            exit 1
+            ;;
+    esac
+}
+
 function verify_environment() {
     CURRENT_STEP="Étape 0: Diagnostic de l'environnement"
     render_box "${CURRENT_STEP}"
-    info "Vérification des dépendances et des permissions."
 
-    check_command "curl" true
-    check_command "tar" true
-    check_command "sha256sum" true
-    check_command "stat" true
-    check_command "find" true
-    check_command "python3" false
-    check_command "make" false
+    local planned_method="${RESOLVED_METHOD:-wchisp}"
+    local method_label
+    method_label="$(flash_method_to_human "${planned_method}")"
+
+    info "Méthode anticipée : ${method_label} (${METHOD_SOURCE_LABEL:-détection automatique})."
+    if [[ -n "${AUTO_METHOD_REASON}" && "${METHOD_SOURCE_LABEL}" == *"détection automatique"* ]]; then
+        info "Indice auto-détection : ${AUTO_METHOD_REASON}"
+    fi
+
+    info "Vérification des dépendances communes."
+    verify_common_dependencies
+    verify_method_dependencies "${planned_method}" "initial"
+    DEPENDENCIES_VERIFIED_FOR_METHOD="${planned_method}"
 
     if should_skip_permission_checks; then
         info "Vérification des permissions sautée : ${PERMISSIONS_CACHE_MESSAGE}."
@@ -1141,7 +1422,7 @@ function verify_environment() {
         fi
     fi
 
-    info "Analyse des périphériques série disponibles."
+    info "Analyse des périphériques série et DFU disponibles."
     display_available_devices
 }
 
@@ -1303,11 +1584,35 @@ function select_flash_method() {
     render_box "${CURRENT_STEP}"
     info "Choisissez la méthode adaptée à votre configuration."
 
+    if [[ "${FORCED_METHOD}" == "true" ]]; then
+        info "Méthode imposée par ${METHOD_SOURCE_LABEL}."
+        finalize_method_selection
+        return
+    fi
+
+    local suggestion="${DEFAULT_METHOD}"
+    if [[ -n "${suggestion}" ]]; then
+        local suggestion_label
+        suggestion_label="$(flash_method_to_human "${suggestion}")"
+        info "Suggestion détectée : ${suggestion_label}."
+        if [[ -n "${AUTO_METHOD_REASON}" ]]; then
+            info "Raison : ${AUTO_METHOD_REASON}"
+        fi
+    fi
+
     local options=(
         "Flash direct via wchisp (mode bootloader USB)"
         "Flash série via flash_usb.py (port /dev/tty*)"
         "Copie du firmware sur carte SD / stockage"
+        "Flash DFU via dfu-util"
     )
+
+    local prompt_hint=""
+    if [[ -n "${suggestion}" ]]; then
+        local human_hint
+        human_hint="$(flash_method_to_human "${suggestion}")"
+        prompt_hint=" (Entrée = ${human_hint})"
+    fi
 
     while true; do
         local index=1
@@ -1316,25 +1621,43 @@ function select_flash_method() {
             ((index++))
         done
 
-        read -rp "Méthode choisie : " answer
+        read -rp "Méthode choisie${prompt_hint} : " answer
+
+        if [[ -z "${answer}" && -n "${suggestion}" ]]; then
+            SELECTED_DEVICE=""
+            SDCARD_MOUNTPOINT=""
+            SELECTED_METHOD="${suggestion}"
+            finalize_method_selection
+            break
+        fi
 
         case "${answer}" in
-            1)
+            1|wchisp|WCHISP|usb|USB)
+                SELECTED_DEVICE=""
+                SDCARD_MOUNTPOINT=""
                 SELECTED_METHOD="wchisp"
-                success "Méthode sélectionnée : flash direct via wchisp."
-                ensure_wchisp
+                finalize_method_selection
                 break
                 ;;
-            2)
+            2|serial|SERIAL)
+                SDCARD_MOUNTPOINT=""
                 SELECTED_METHOD="serial"
-                success "Méthode sélectionnée : flash série."
-                prompt_serial_device
+                SELECTED_DEVICE=""
+                finalize_method_selection
                 break
                 ;;
-            3)
+            3|sd|sdcard|SD|SDCARD)
+                SELECTED_DEVICE=""
                 SELECTED_METHOD="sdcard"
-                success "Méthode sélectionnée : copie sur carte SD."
-                prompt_sdcard_mountpoint
+                SDCARD_MOUNTPOINT=""
+                finalize_method_selection
+                break
+                ;;
+            dfu|DFU|4)
+                SELECTED_DEVICE=""
+                SDCARD_MOUNTPOINT=""
+                SELECTED_METHOD="dfu"
+                finalize_method_selection
                 break
                 ;;
             *)
@@ -1446,6 +1769,11 @@ INSTRUCTIONS
         sdcard)
             info "Préparez la carte SD montée sur ${SDCARD_MOUNTPOINT}."
             ;;
+        dfu)
+            info "Basculez la carte en mode DFU (BOOT0 maintenu puis RESET)."
+            info "Assurez-vous que dfu-util détecte la cible (dfu-util -l)."
+            display_available_devices
+            ;;
     esac
 }
 
@@ -1497,6 +1825,36 @@ function flash_with_wchisp() {
     success "wchisp a terminé le flash sans erreur."
 }
 
+function flash_with_dfu() {
+    if ! command_exists dfu-util; then
+        error_msg "dfu-util est requis pour la méthode DFU."
+        exit 1
+    fi
+
+    local alt="${DFU_ALT_SETTING}"
+    if [[ -z "${alt}" ]]; then
+        alt=0
+    fi
+
+    info "Flash DFU via dfu-util (alt=${alt})."
+
+    local cmd=(dfu-util -a "${alt}" -D "${FIRMWARE_FILE}")
+
+    if [[ -n "${DFU_SERIAL_NUMBER}" ]]; then
+        cmd+=(-S "${DFU_SERIAL_NUMBER}")
+    fi
+
+    if [[ -n "${DFU_EXTRA_ARGS}" ]]; then
+        # shellcheck disable=SC2206
+        local extra=( ${DFU_EXTRA_ARGS} )
+        cmd+=("${extra[@]}")
+    fi
+
+    log_message "DEBUG" "Commande exécutée: ${cmd[*]}"
+    "${cmd[@]}" 2>&1 | tee -a "${LOG_FILE}"
+    success "dfu-util a terminé sans erreur."
+}
+
 function flash_with_serial() {
     if ! command_exists python3; then
         error_msg "python3 est requis pour la méthode de flash série."
@@ -1535,6 +1893,9 @@ function execute_flash() {
         wchisp)
             flash_with_wchisp
             ;;
+        dfu)
+            flash_with_dfu
+            ;;
         serial)
             flash_with_serial
             ;;
@@ -1567,6 +1928,8 @@ EOF
         echo "  - Port     : ${SELECTED_DEVICE}"
     elif [[ "${SELECTED_METHOD}" == "sdcard" ]]; then
         echo "  - Cible    : ${SDCARD_MOUNTPOINT}"
+    elif [[ "${SELECTED_METHOD}" == "dfu" ]]; then
+        echo "  - dfu-util : alt=${DFU_ALT_SETTING}"${DFU_SERIAL_NUMBER:+", serial=${DFU_SERIAL_NUMBER}"}
     fi
 
     echo
@@ -1576,6 +1939,7 @@ EOF
 }
 
 function main() {
+    resolve_flash_method
     verify_environment
     prepare_firmware
     select_flash_method
