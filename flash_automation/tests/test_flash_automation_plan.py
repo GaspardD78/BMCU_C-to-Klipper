@@ -9,6 +9,7 @@ import pytest
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "flash_automation.sh"
 FLASH_ROOT = SCRIPT_PATH.parent
+BANNER_TEXT = (FLASH_ROOT / "banner.txt").read_text()
 
 STUB_ARCHIVE_CONTENT = b"stub archive"
 STUB_ARCHIVE_SHA256 = hashlib.sha256(STUB_ARCHIVE_CONTENT).hexdigest()
@@ -352,12 +353,44 @@ def test_ensure_wchisp_installs_tool_when_missing(tmp_path):
     if cache_dir.exists():
         shutil.rmtree(cache_dir)
 
-    result = run_flash_script("ensure_wchisp", env=env)
+    result = run_flash_script("flash_automation_initialize\nensure_wchisp", env=env)
     assert result.returncode == 0
     assert "wchisp installé automatiquement" in result.stdout
 
     install_dir = cache_dir / "v0.3.0-x86_64"
     assert (install_dir / "wchisp").exists()
+
+
+def test_ensure_wchisp_respects_quiet_mode(tmp_path):
+    env, bin_dir = create_stub_environment(tmp_path)
+    add_symlink(bin_dir, "bash")
+    add_id_stub(bin_dir, "dialout")
+    populate_common_commands(bin_dir)
+    for command in ["sha256sum", "stat", "find", "python3", "make"]:
+        add_symlink(bin_dir, command)
+    make_stub_curl(bin_dir)
+    make_stub_tar(bin_dir)
+    make_stub_uname(bin_dir, arch="armv7l")
+
+    env["WCHISP_AUTO_INSTALL"] = "true"
+    env["WCHISP_FALLBACK_ARCHIVE_URL"] = "https://example.invalid/wchisp-fallback.tar.gz"
+    env["WCHISP_FALLBACK_CHECKSUM"] = STUB_ARCHIVE_SHA256
+
+    cache_dir = FLASH_ROOT / ".cache/tools/wchisp"
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir)
+
+    result = run_flash_script('flash_automation_initialize\nQUIET_MODE="true"\nensure_wchisp', env=env)
+
+    assert result.returncode == 0
+    stdout = result.stdout
+    if stdout.startswith(BANNER_TEXT):
+        stdout = stdout[len(BANNER_TEXT) :]
+        if stdout.startswith("\n"):
+            stdout = stdout[1:]
+
+    assert stdout == ""
+    assert result.stderr == ""
 
 
 def test_ensure_wchisp_stops_on_download_failure(tmp_path):
@@ -381,7 +414,7 @@ def test_ensure_wchisp_stops_on_download_failure(tmp_path):
     if cache_dir.exists():
         shutil.rmtree(cache_dir)
 
-    result = run_flash_script("ensure_wchisp", env=env)
+    result = run_flash_script("flash_automation_initialize\nensure_wchisp", env=env)
     assert result.returncode != 0
     assert "Échec du téléchargement de wchisp" in result.stderr + result.stdout
 
