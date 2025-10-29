@@ -99,13 +99,12 @@ def test_wchisp_dry_run_success(firmware: Path, flash_env: dict[str, str]):
             "--auto-confirm",
             "--method",
             "wchisp",
-            "--quiet",
         ],
         flash_env,
     )
     assert result.returncode == 0, result.stdout
-    assert "Méthode  : wchisp" in result.stdout
-    assert "Mode --dry-run : aucune opération de flash n'a été appliquée" in result.stdout
+    assert "Méthode    : flash direct via wchisp" in result.stdout
+    assert "Mode       : Simulation (dry-run), aucune action réelle." in result.stdout
 
 
 def test_serial_dry_run_with_forced_port(tmp_path: Path, firmware: Path, flash_env: dict[str, str]):
@@ -121,14 +120,13 @@ def test_serial_dry_run_with_forced_port(tmp_path: Path, firmware: Path, flash_e
             "serial",
             "--serial-port",
             str(serial_stub),
-            "--quiet",
         ],
         flash_env,
     )
     assert result.returncode == 0, result.stdout
-    assert "Méthode  : serial" in result.stdout
-    assert f"Port     : {serial_stub}" in result.stdout
-    assert "Mode --dry-run : aucune opération de flash n'a été appliquée" in result.stdout
+    assert "Méthode    : flash série via flash_usb.py" in result.stdout
+    assert f"Port série : {serial_stub}" in result.stdout
+    assert "Mode       : Simulation (dry-run), aucune action réelle." in result.stdout
 
 
 def test_dfu_dry_run_with_stubbed_binary(firmware: Path, flash_env: dict[str, str]):
@@ -140,13 +138,12 @@ def test_dfu_dry_run_with_stubbed_binary(firmware: Path, flash_env: dict[str, st
             "--auto-confirm",
             "--method",
             "dfu",
-            "--quiet",
         ],
         flash_env,
     )
     assert result.returncode == 0, result.stdout
-    assert "Méthode  : dfu" in result.stdout
-    assert "Mode --dry-run : aucune opération de flash n'a été appliquée" in result.stdout
+    assert "Méthode    : flash DFU via /bin/true" in result.stdout
+    assert "Mode       : Simulation (dry-run), aucune action réelle." in result.stdout
 
 
 def test_sdcard_copy_writes_to_target(tmp_path: Path, firmware: Path, flash_env: dict[str, str]):
