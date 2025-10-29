@@ -61,6 +61,12 @@ readonly WCHISP_FALLBACK_ARCHIVE_URL="${WCHISP_FALLBACK_ARCHIVE_URL:-}"
 readonly WCHISP_FALLBACK_CHECKSUM="${WCHISP_FALLBACK_CHECKSUM:-}"
 readonly WCHISP_FALLBACK_ARCHIVE_NAME="${WCHISP_FALLBACK_ARCHIVE_NAME:-}"
 readonly WCHISP_MANUAL_DOC="${FLASH_ROOT}/docs/wchisp_manual_install.md"
+
+WCHISP_ARCHIVE_CHECKSUM_OVERRIDE_DEFAULT="${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE:-}"
+ALLOW_UNVERIFIED_WCHISP_DEFAULT="${ALLOW_UNVERIFIED_WCHISP:-false}"
+WCHISP_ARCHIVE_CHECKSUM_OVERRIDE=""
+ALLOW_UNVERIFIED_WCHISP=""
+
 WCHISP_COMMAND="${WCHISP_BIN:-wchisp}"
 readonly WCHISP_TRANSPORT="${WCHISP_TRANSPORT:-usb}"
 readonly WCHISP_USB_INDEX="${WCHISP_USB_INDEX:-}"
@@ -107,6 +113,97 @@ SERVICES_RESTORED="false"
 
 mkdir -p "${LOG_DIR}"
 touch "${LOG_FILE}"
+
+normalize_boolean() {
+    local raw_value="${1:-}"
+    case "${raw_value}" in
+        1|true|TRUE|True|yes|YES|on|ON)
+            printf '%s\n' "true"
+            ;;
+        0|false|FALSE|False|no|NO|off|OFF|'')
+            printf '%s\n' "false"
+            ;;
+        *)
+            printf '%s\n' "false"
+            ;;
+    esac
+}
+
+print_usage() {
+    local script_name
+    script_name="$(basename "${BASH_SOURCE[0]}")"
+    cat <<EOF
+Usage: ${script_name} [options]
+
+Options:
+  --wchisp-checksum <sha256>   Remplace la somme de contrôle attendue pour l'archive wchisp.
+  --allow-unsigned-wchisp      Active le mode dégradé : conserve l'archive même si la vérification échoue.
+  -h, --help                   Affiche cette aide et quitte.
+
+Variables d'environnement associées :
+  WCHISP_ARCHIVE_CHECKSUM_OVERRIDE  Injecte une somme de contrôle SHA-256 personnalisée.
+  ALLOW_UNVERIFIED_WCHISP           "true"/"1" pour autoriser le mode dégradé.
+EOF
+}
+
+parse_cli_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --wchisp-checksum)
+                if [[ $# -lt 2 ]]; then
+                    echo "L'option --wchisp-checksum requiert une valeur." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                WCHISP_ARCHIVE_CHECKSUM_OVERRIDE="$2"
+                shift 2
+                ;;
+            --wchisp-checksum=*)
+                WCHISP_ARCHIVE_CHECKSUM_OVERRIDE="${1#*=}"
+                shift
+                ;;
+            --allow-unsigned-wchisp)
+                ALLOW_UNVERIFIED_WCHISP="true"
+                shift
+                ;;
+            -h|--help)
+                print_usage
+                exit 0
+                ;;
+            --)
+                shift
+                break
+                ;;
+            -*|+*)
+                echo "Option inconnue : $1" >&2
+                print_usage >&2
+                exit 1
+                ;;
+            *)
+                echo "Argument inattendu : $1" >&2
+                print_usage >&2
+                exit 1
+                ;;
+        esac
+    done
+
+    if [[ $# -gt 0 ]]; then
+        echo "Arguments supplémentaires non pris en charge : $*" >&2
+        print_usage >&2
+        exit 1
+    fi
+}
+
+apply_configuration_defaults() {
+    if [[ -z "${ALLOW_UNVERIFIED_WCHISP}" ]]; then
+        ALLOW_UNVERIFIED_WCHISP="${ALLOW_UNVERIFIED_WCHISP_DEFAULT}"
+    fi
+    ALLOW_UNVERIFIED_WCHISP="$(normalize_boolean "${ALLOW_UNVERIFIED_WCHISP}")"
+
+    if [[ -z "${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE}" ]]; then
+        WCHISP_ARCHIVE_CHECKSUM_OVERRIDE="${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE_DEFAULT}"
+    fi
+}
 
 function log_message() {
     local level="$1"
@@ -643,11 +740,30 @@ verify_wchisp_archive() {
     local asset="$1"
     local archive_path="$2"
     local expected="${3:-__auto__}"
+    local degraded="${ALLOW_UNVERIFIED_WCHISP}"
+
+    if [[ "${degraded}" == "true" ]]; then
+        warn "Mode dégradé actif : la vérification SHA-256 de ${asset} sera tolérée en cas d'échec."
+        log_message "WARN" "Mode dégradé actif pour ${asset} : les écarts de checksum seront ignorés."
+    fi
 
     if [[ "${expected}" == "__auto__" ]]; then
         if ! expected=$(lookup_wchisp_checksum "${asset}"); then
+            if [[ "${degraded}" == "true" ]]; then
+                warn "Impossible de récupérer la somme de contrôle officielle pour ${asset}. Le mode dégradé permet de continuer."
+                log_message "WARN" "Checksum officiel introuvable pour ${asset}, poursuite en mode dégradé."
+                return 0
+            fi
             return 1
         fi
+    fi
+
+    if [[ -n "${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE}" ]]; then
+        if [[ "${expected}" != "${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE}" ]]; then
+            warn "Somme de contrôle wchisp remplacée par la valeur fournie par l'utilisateur."
+            log_message "WARN" "Checksum de ${asset} remplacé par l'override utilisateur."
+        fi
+        expected="${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE}"
     fi
 
     if [[ -z "${expected}" ]]; then
@@ -664,6 +780,11 @@ verify_wchisp_archive() {
     fi
 
     if [[ "${actual}" != "${expected}" ]]; then
+        if [[ "${degraded}" == "true" ]]; then
+            warn "Empreinte SHA-256 inattendue pour ${asset} (${actual}). L'archive est conservée car le mode dégradé est actif."
+            log_message "WARN" "Checksum inattendu pour ${asset} (attendu=${expected}; obtenu=${actual}) mais conservation de l'archive (mode dégradé)."
+            return 0
+        fi
         rm -f "${archive_path}" || true
         error_msg "La vérification d'intégrité de l'archive ${asset} a échoué."
         printf "Empreinte attendue : %s\nEmpreinte calculée : %s\n" "${expected}" "${actual}" >&2
@@ -1279,5 +1400,9 @@ function main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    parse_cli_arguments "$@"
+    apply_configuration_defaults
     main
+else
+    apply_configuration_defaults
 fi
