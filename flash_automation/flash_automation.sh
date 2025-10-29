@@ -72,6 +72,10 @@ FIRMWARE_FILE=""
 FIRMWARE_FORMAT=""
 PRESELECTED_FIRMWARE_FILE=""
 FIRMWARE_SELECTION_SOURCE=""
+CLI_FIRMWARE_PATTERN=""
+FIRMWARE_PATTERN=""
+declare -A FIRMWARE_CANDIDATE_MTIMES=()
+declare -A FIRMWARE_CANDIDATE_TIMESTAMPS=()
 readonly TOOLS_ROOT="${CACHE_ROOT}/tools"
 
 source "${FLASH_ROOT}/lib/ui.sh"
@@ -188,6 +192,96 @@ dedupe_array_in_place() {
     array_ref=("${unique[@]}")
 }
 
+get_file_mtime_epoch() {
+    local target="$1"
+    if [[ ! -f "${target}" ]]; then
+        return 1
+    fi
+
+    if ! resolve_stat_command; then
+        return 1
+    fi
+
+    local epoch=""
+    case "${STAT_COMMAND_FLAVOR}" in
+        bsd)
+            epoch=$(stat -f "%m" "${target}" 2>/dev/null) || return 1
+            ;;
+        *)
+            epoch=$("${STAT_COMMAND}" --printf='%Y' "${target}" 2>/dev/null) || return 1
+            ;;
+    esac
+
+    printf '%s\n' "${epoch}"
+}
+
+format_epoch_for_display() {
+    local epoch="$1"
+    if [[ -z "${epoch}" ]]; then
+        return
+    fi
+
+    local formatted=""
+    if formatted=$(date -u -d "@${epoch}" '+%Y-%m-%d %H:%M:%S UTC' 2>/dev/null); then
+        printf '%s' "${formatted}"
+        return
+    fi
+
+    if formatted=$(date -u -r "${epoch}" '+%Y-%m-%d %H:%M:%S UTC' 2>/dev/null); then
+        printf '%s' "${formatted}"
+        return
+    fi
+
+    if command_exists python3; then
+        formatted=$(python3 - "${epoch}" <<'PY' 2>/dev/null || true
+import datetime
+import sys
+
+try:
+    value = float(sys.argv[1])
+except (ValueError, IndexError):
+    sys.exit(1)
+
+ts = datetime.datetime.utcfromtimestamp(value)
+print(ts.strftime("%Y-%m-%d %H:%M:%S UTC"))
+PY
+)
+        if [[ -n "${formatted}" ]]; then
+            printf '%s' "${formatted}"
+            return
+        fi
+    fi
+
+    printf '%s' "${epoch}"
+}
+
+ensure_candidate_metadata() {
+    local path="$1"
+    if [[ -z "${path}" ]]; then
+        return
+    fi
+
+    if [[ -n "${FIRMWARE_CANDIDATE_MTIMES["${path}"]+set}" ]]; then
+        return
+    fi
+
+    local raw_mtime
+    raw_mtime=$(get_file_mtime_epoch "${path}" 2>/dev/null) || raw_mtime=""
+    local mtime="${raw_mtime:-0}"
+    FIRMWARE_CANDIDATE_MTIMES["${path}"]="${mtime}"
+    if [[ -n "${raw_mtime}" ]]; then
+        FIRMWARE_CANDIDATE_TIMESTAMPS["${path}"]="$(format_epoch_for_display "${mtime}")"
+    else
+        FIRMWARE_CANDIDATE_TIMESTAMPS["${path}"]=""
+    fi
+}
+
+get_candidate_timestamp_display() {
+    local path="$1"
+    ensure_candidate_metadata "${path}"
+    printf '%s' "${FIRMWARE_CANDIDATE_TIMESTAMPS["${path}"]:-}"
+}
+
 normalize_flash_method() {
     local raw="${1:-}"
     local lowered="${raw,,}"
@@ -225,6 +319,7 @@ Options:
   --wchisp-checksum <sha256>   Remplace la somme de contrôle attendue pour l'archive wchisp.
   --allow-unsigned-wchisp      Active le mode dégradé : conserve l'archive même si la vérification échoue.
   --firmware <chemin>          Sélectionne directement le firmware à flasher.
+  --firmware-pattern <motif>   Applique un motif (glob shell) pour filtrer les firmwares détectés.
   --method <mode>              Force la méthode (wchisp, serial, sdcard, dfu, auto).
   --serial-port <chemin>       Fixe le port série à utiliser pour flash_usb.py.
   --sdcard-path <chemin>       Fixe le point de montage cible pour la copie sur carte SD.
@@ -251,6 +346,10 @@ Variables d'environnement associées :
   DFU_ALT_SETTING                   Sélectionne l'interface DFU (par défaut : 0).
   DFU_SERIAL_NUMBER                 Filtre dfu-util sur un numéro de série spécifique.
   DFU_EXTRA_ARGS                    Arguments supplémentaires passés à dfu-util.
+
+Comportement automatique :
+  En mode --auto-confirm, le script applique --firmware-pattern lorsqu'il est fourni.
+  Sans correspondance explicite, le firmware le plus récent est choisi automatiquement.
 
 Scénarios & dépendances clés :
   wchisp (auto-install)        curl, tar, sha256sum (pour vérifier et extraire l'archive).
@@ -298,6 +397,25 @@ parse_cli_arguments() {
                     exit 1
                 fi
                 CLI_FIRMWARE_OVERRIDE="$(resolve_path_relative_to_flash_root "${raw_firmware}")"
+                shift
+                ;;
+            --firmware-pattern)
+                if [[ $# -lt 2 ]]; then
+                    echo "L'option --firmware-pattern requiert un motif." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                CLI_FIRMWARE_PATTERN="$2"
+                shift 2
+                ;;
+            --firmware-pattern=*)
+                local raw_pattern="${1#*=}"
+                if [[ -z "${raw_pattern}" ]]; then
+                    echo "L'option --firmware-pattern nécessite un motif non vide." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                CLI_FIRMWARE_PATTERN="${raw_pattern}"
                 shift
                 ;;
             --method)
@@ -458,6 +576,7 @@ apply_configuration_defaults() {
     FIRMWARE_SELECTION_SOURCE=""
     SERIAL_SELECTION_SOURCE=""
     SDCARD_SELECTION_SOURCE=""
+    FIRMWARE_PATTERN=""
 
     if [[ "${CLI_AUTO_CONFIRM_REQUESTED}" == "true" ]]; then
         AUTO_CONFIRM_MODE="true"
@@ -500,6 +619,8 @@ apply_configuration_defaults() {
         PRESELECTED_FIRMWARE_FILE="${CLI_FIRMWARE_OVERRIDE}"
         FIRMWARE_SELECTION_SOURCE="option CLI (--firmware)"
         FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${PRESELECTED_FIRMWARE_FILE}")"
+    elif [[ -n "${CLI_FIRMWARE_PATTERN}" ]]; then
+        FIRMWARE_PATTERN="${CLI_FIRMWARE_PATTERN}"
     elif [[ -n "${KLIPPER_FIRMWARE_PATH:-}" ]]; then
         local resolved_hint
         resolved_hint="$(resolve_path_relative_to_flash_root "${KLIPPER_FIRMWARE_PATH}")"
@@ -509,6 +630,13 @@ apply_configuration_defaults() {
             FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${PRESELECTED_FIRMWARE_FILE}")"
         else
             FIRMWARE_DISPLAY_PATH="${KLIPPER_FIRMWARE_PATH}"
+        fi
+        if [[ -z "${FIRMWARE_PATTERN}" && -n "${CLI_FIRMWARE_PATTERN}" ]]; then
+            FIRMWARE_PATTERN="${CLI_FIRMWARE_PATTERN}"
+        fi
+    else
+        if [[ -n "${CLI_FIRMWARE_PATTERN}" ]]; then
+            FIRMWARE_PATTERN="${CLI_FIRMWARE_PATTERN}"
         fi
     fi
 
@@ -1456,32 +1584,52 @@ function verify_environment() {
 function collect_firmware_candidates() {
     local -n firmware_candidates_ref=$1
     firmware_candidates_ref=()
+    FIRMWARE_CANDIDATE_MTIMES=()
+    FIRMWARE_CANDIDATE_TIMESTAMPS=()
 
-    declare -A seen
-    local resolved_hint=""
+    declare -A seen_paths=()
+    local -a decorated=()
+
+    add_candidate() {
+        local path="$1"
+        [[ -f "${path}" ]] || return
+        if [[ -n "${seen_paths["${path}"]:-}" ]]; then
+            return
+        fi
+        seen_paths["${path}"]=1
+        local raw_mtime
+        raw_mtime=$(get_file_mtime_epoch "${path}" 2>/dev/null) || raw_mtime=""
+        local mtime="${raw_mtime:-0}"
+        FIRMWARE_CANDIDATE_MTIMES["${path}"]="${mtime}"
+        if [[ -n "${raw_mtime}" ]]; then
+            FIRMWARE_CANDIDATE_TIMESTAMPS["${path}"]="$(format_epoch_for_display "${mtime}")"
+        else
+            FIRMWARE_CANDIDATE_TIMESTAMPS["${path}"]=""
+        fi
+        decorated+=("${mtime}"$'\t'"${path}")
+    }
 
     if [[ -n "${FIRMWARE_DISPLAY_PATH}" ]]; then
+        local resolved_hint
         resolved_hint="$(resolve_path_relative_to_flash_root "${FIRMWARE_DISPLAY_PATH}")"
-        if [[ -f "${resolved_hint}" ]]; then
-            seen["${resolved_hint}"]=1
-            firmware_candidates_ref+=("${resolved_hint}")
-        elif [[ -d "${resolved_hint}" ]]; then
-            local dir="${resolved_hint}"
+        if [[ -d "${resolved_hint}" ]]; then
             while IFS= read -r -d '' file; do
-                [[ -n "${seen["${file}"]-}" ]] && continue
-                seen["${file}"]=1
-                firmware_candidates_ref+=("${file}")
-            done < <(run_find_firmware_files "${dir}" 3 false 2>/dev/null)
+                add_candidate "${file}"
+            done < <(run_find_firmware_files "${resolved_hint}" 3 false 2>/dev/null)
+        else
+            add_candidate "${resolved_hint}"
         fi
+    fi
+
+    if [[ -n "${PRESELECTED_FIRMWARE_FILE}" ]]; then
+        add_candidate "${PRESELECTED_FIRMWARE_FILE}"
     fi
 
     for rel_path in "${DEFAULT_FIRMWARE_RELATIVE_PATHS[@]}"; do
         local default_dir="${FLASH_ROOT}/${rel_path}"
         [[ -d "${default_dir}" ]] || continue
         while IFS= read -r -d '' file; do
-            [[ -n "${seen["${file}"]-}" ]] && continue
-            seen["${file}"]=1
-            firmware_candidates_ref+=("${file}")
+            add_candidate "${file}"
         done < <(run_find_firmware_files "${default_dir}" 2 true 2>/dev/null)
     done
 
@@ -1490,16 +1638,19 @@ function collect_firmware_candidates() {
         for dir in "${extra_search[@]}"; do
             [[ -d "${dir}" ]] || continue
             while IFS= read -r -d '' file; do
-                [[ -n "${seen["${file}"]-}" ]] && continue
-                seen["${file}"]=1
-                firmware_candidates_ref+=("${file}")
+                add_candidate "${file}"
             done < <(run_find_firmware_files "${dir}" 4 true 2>/dev/null)
         done
     fi
 
-    if [[ ${#firmware_candidates_ref[@]} -gt 0 ]]; then
-        mapfile -t firmware_candidates_ref < <(printf '%s\n' "${firmware_candidates_ref[@]}" | awk '!seen[$0]++')
+    if [[ ${#decorated[@]} -gt 0 ]]; then
+        mapfile -t decorated < <(printf '%s\n' "${decorated[@]}" | sort -t $'\t' -k1,1nr -k2,2)
+        for entry in "${decorated[@]}"; do
+            firmware_candidates_ref+=("${entry#*$'\t'}")
+        done
     fi
+
+    unset -f add_candidate 2>/dev/null || true
 }
 
 function prompt_firmware_selection() {
@@ -1528,7 +1679,13 @@ function prompt_firmware_selection() {
             local display
             display="$(format_path_for_display "${file}")"
             local extension="${file##*.}"
-            printf "  [%d] %s (%s)\n" "${index}" "${display}" "${extension}";
+            local timestamp
+            timestamp="$(get_candidate_timestamp_display "${file}")"
+            if [[ -n "${timestamp}" ]]; then
+                printf "  [%d] %s (%s, modifié le %s)\n" "${index}" "${display}" "${extension}" "${timestamp}";
+            else
+                printf "  [%d] %s (%s)\n" "${index}" "${display}" "${extension}";
+            fi
             ((index++))
         done
         printf "  [%d] Saisir un chemin personnalisé\n" "${index}"
@@ -1636,6 +1793,24 @@ function prepare_firmware() {
     if [[ -z "${FIRMWARE_FILE}" ]]; then
         local -a discovered
         collect_firmware_candidates discovered
+
+        if [[ -n "${FIRMWARE_PATTERN}" && ${#discovered[@]} -gt 0 ]]; then
+            local -a filtered=()
+            for file in "${discovered[@]}"; do
+                local basename
+                basename="$(basename "${file}")"
+                if [[ "${basename}" == ${FIRMWARE_PATTERN} ]]; then
+                    filtered+=("${file}")
+                fi
+            done
+            if [[ ${#filtered[@]} -gt 0 ]]; then
+                info "Motif --firmware-pattern appliqué (${FIRMWARE_PATTERN})."
+                discovered=("${filtered[@]}")
+            else
+                warn "Aucun firmware ne correspond au motif '${FIRMWARE_PATTERN}'. Sélection sur la base du plus récent."
+            fi
+        fi
+
         if [[ ${#candidates[@]} -gt 0 ]]; then
             candidates+=("${discovered[@]}")
             dedupe_array_in_place candidates
@@ -1653,14 +1828,17 @@ function prepare_firmware() {
         fi
 
         if [[ "${AUTO_CONFIRM_MODE}" == "true" ]]; then
-            if [[ ${#candidates[@]} -eq 1 ]]; then
-                FIRMWARE_FILE="${candidates[0]}"
-                FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${FIRMWARE_FILE}")"
-                FIRMWARE_FORMAT="${FIRMWARE_FILE##*.}"
+            FIRMWARE_FILE="${candidates[0]}"
+            FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${FIRMWARE_FILE}")"
+            FIRMWARE_FORMAT="${FIRMWARE_FILE##*.}"
+            if [[ ${#candidates[@]} -le 1 ]]; then
                 info "Mode auto-confirm : sélection automatique du firmware ${FIRMWARE_DISPLAY_PATH}."
             else
-                error_msg "Plusieurs firmwares détectés mais --auto-confirm actif. Précisez --firmware pour lever l'ambiguïté."
-                exit 1
+                if [[ -n "${FIRMWARE_PATTERN}" ]]; then
+                    info "Mode auto-confirm : plusieurs correspondances au motif '${FIRMWARE_PATTERN}', utilisation du firmware le plus récent (${FIRMWARE_DISPLAY_PATH})."
+                else
+                    info "Mode auto-confirm : plusieurs firmwares détectés, utilisation du plus récent (${FIRMWARE_DISPLAY_PATH})."
+                fi
             fi
         else
             prompt_firmware_selection candidates
