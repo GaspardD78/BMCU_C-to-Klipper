@@ -156,6 +156,7 @@ Le script shell accepte également quelques options CLI avancées :
 1. `./build.sh` – vérifie le téléchargement de Klipper et la compilation.
 2. `python3 flash.py --dry-run` – valide le parcours interactif sans flasher.
 3. `./flash_automation.sh` – teste le flash local avec un BMCU-C connecté.
+4. `pytest tests/integration/flash_automation -q` – vérifie les scénarios d'intégration (dry-run, dépendances manquantes, wchisp/serial/dfu/SD) en mode automatisé.
 
 ## 📄 Licence
 
