@@ -56,8 +56,10 @@ readonly WCHISP_RELEASE="${WCHISP_RELEASE:-v0.3.0}"
 readonly WCHISP_AUTO_INSTALL="${WCHISP_AUTO_INSTALL:-true}"
 readonly WCHISP_BASE_URL="${WCHISP_BASE_URL:-https://github.com/ch32-rs/wchisp/releases/download}"
 WCHISP_COMMAND="${WCHISP_BIN:-wchisp}"
-readonly WCHISP_TARGET="${WCHISP_TARGET:-ch32v20x}"
-readonly WCHISP_DELAY="${WCHISP_DELAY:-30}"
+readonly WCHISP_TRANSPORT="${WCHISP_TRANSPORT:-usb}"
+readonly WCHISP_USB_INDEX="${WCHISP_USB_INDEX:-}"
+readonly WCHISP_SERIAL_PORT="${WCHISP_SERIAL_PORT:-}"
+readonly WCHISP_SERIAL_BAUDRATE="${WCHISP_SERIAL_BAUDRATE:-}"
 
 DEFAULT_CACHE_HOME="${XDG_CACHE_HOME:-${HOME}/.cache}"
 PERMISSIONS_CACHE_FILE="${BMCU_PERMISSION_CACHE_FILE:-${DEFAULT_CACHE_HOME}/bmcu_permissions.json}"
@@ -960,8 +962,47 @@ INSTRUCTIONS
 
 function flash_with_wchisp() {
     ensure_wchisp
-    info "Début du flash via ${WCHISP_COMMAND} (cible ${WCHISP_TARGET})."
-    local cmd=("${WCHISP_COMMAND}" -d "${WCHISP_DELAY}" -c "${WCHISP_TARGET}" flash "${FIRMWARE_FILE}")
+
+    local transport="${WCHISP_TRANSPORT,,}"
+    if [[ -z "${transport}" ]]; then
+        transport="usb"
+    fi
+
+    info "Début du flash via ${WCHISP_COMMAND} (transport ${transport})."
+
+    local cmd=("${WCHISP_COMMAND}")
+
+    case "${transport}" in
+        usb)
+            cmd+=("--usb")
+            if [[ -n "${WCHISP_USB_INDEX}" ]]; then
+                if [[ "${WCHISP_USB_INDEX}" =~ ^[0-9]+$ ]]; then
+                    cmd+=("--device" "${WCHISP_USB_INDEX}")
+                else
+                    warn "Valeur WCHISP_USB_INDEX invalide (${WCHISP_USB_INDEX}). Utilisation de la détection automatique."
+                fi
+            fi
+            ;;
+        serial)
+            cmd+=("--serial")
+            if [[ -n "${WCHISP_SERIAL_PORT}" ]]; then
+                cmd+=("--port" "${WCHISP_SERIAL_PORT}")
+            else
+                error_msg "WCHISP_SERIAL_PORT doit être défini pour utiliser le transport série de wchisp."
+                exit 1
+            fi
+            if [[ -n "${WCHISP_SERIAL_BAUDRATE}" ]]; then
+                cmd+=("--baudrate" "${WCHISP_SERIAL_BAUDRATE}")
+            fi
+            ;;
+        *)
+            warn "Transport WCHISP_TRANSPORT=${WCHISP_TRANSPORT} non reconnu. Retour au mode USB."
+            cmd+=("--usb")
+            ;;
+    esac
+
+    cmd+=(flash "${FIRMWARE_FILE}")
+
     log_message "DEBUG" "Commande exécutée: ${cmd[*]}"
     "${cmd[@]}" 2>&1 | tee -a "${LOG_FILE}"
     success "wchisp a terminé le flash sans erreur."
