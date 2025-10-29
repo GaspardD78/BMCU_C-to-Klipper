@@ -482,7 +482,7 @@ def test_ensure_wchisp_stops_on_download_failure(tmp_path):
     assert "Échec du téléchargement de wchisp" in result.stderr + result.stdout
 
 
-def test_prepare_firmware_errors_when_no_candidates(tmp_path):
+def test_prepare_firmware_errors_when_no_candidates(tmp_path, isolated_cache):
     env, bin_dir = create_stub_environment(tmp_path, include_system_path=True)
     add_id_stub(bin_dir, "dialout")
     result = run_flash_script("prepare_firmware", env=env)
@@ -490,65 +490,72 @@ def test_prepare_firmware_errors_when_no_candidates(tmp_path):
     assert "Aucun firmware compatible détecté" in result.stderr + result.stdout
 
 
-def test_prepare_firmware_selects_single_candidate(tmp_path):
-    firmware = tmp_path / "klipper.bin"
+def test_prepare_firmware_selects_single_candidate(tmp_path, isolated_cache):
+    firmware_dir = isolated_cache / "firmware"
+    firmware_dir.mkdir()
+    firmware = firmware_dir / "klipper.bin"
     firmware.write_text("payload")
 
     env, bin_dir = create_stub_environment(tmp_path, include_system_path=True)
-    env["KLIPPER_FIRMWARE_PATH"] = str(firmware)
     add_id_stub(bin_dir, "dialout")
 
-    result = run_flash_script(PROMPT_OVERRIDE + "\nprepare_firmware", env=env, input_text="1\n")
+    result = run_flash_script("prepare_firmware", env=env, input_text="\n")
     assert result.returncode == 0
-    assert str(firmware) in result.stdout
+    assert "Firmware sélectionné" in result.stdout
+    assert "klipper.bin" in result.stdout
 
-
-def test_prepare_firmware_lists_multiple_candidates(tmp_path):
-    firmware_a = tmp_path / "a.bin"
-    firmware_b = tmp_path / "b.elf"
+def test_prepare_firmware_lists_multiple_candidates(tmp_path, isolated_cache):
+    firmware_dir = isolated_cache / "firmware"
+    firmware_dir.mkdir()
+    firmware_a = firmware_dir / "a.bin"
+    firmware_b = firmware_dir / "b.elf"
     firmware_a.write_text("A")
     firmware_b.write_text("B")
 
     env, bin_dir = create_stub_environment(tmp_path, include_system_path=True)
-    env["KLIPPER_FIRMWARE_PATH"] = str(tmp_path)
     add_id_stub(bin_dir, "dialout")
 
-    result = run_flash_script(PROMPT_OVERRIDE + "\nprepare_firmware", env=env, input_text="2\n")
+    result = run_flash_script("prepare_firmware", env=env, input_text="2\n")
     assert result.returncode == 0
     assert "a.bin" in result.stdout
     assert "b.elf" in result.stdout
     assert "Firmware sélectionné" in result.stdout
 
 
-def test_prepare_firmware_accepts_custom_path(tmp_path):
-    default_fw = tmp_path / "default.bin"
-    custom_fw = tmp_path / "custom.bin"
+def test_prepare_firmware_accepts_custom_path(tmp_path, isolated_cache):
+    firmware_dir = isolated_cache / "firmware"
+    firmware_dir.mkdir()
+    default_fw = firmware_dir / "default.bin"
     default_fw.write_text("default")
+
+    custom_fw = tmp_path / "custom.bin"
     custom_fw.write_text("custom")
 
     env, bin_dir = create_stub_environment(tmp_path, include_system_path=True)
-    env["KLIPPER_FIRMWARE_PATH"] = str(default_fw)
     add_id_stub(bin_dir, "dialout")
 
-    # Option 2 corresponds to "Saisir un chemin personnalisé"
+    # Menu: 1. default.bin, 2. Saisir chemin, 3. Quitter
     input_sequence = f"2\n{custom_fw}\n"
-    result = run_flash_script(PROMPT_OVERRIDE + "\nprepare_firmware", env=env, input_text=input_sequence)
+    result = run_flash_script("prepare_firmware", env=env, input_text=input_sequence)
     assert result.returncode == 0
-    assert str(custom_fw) in result.stdout
+    assert str(custom_fw.name) in result.stdout
+    assert "Firmware sélectionné" in result.stdout
 
 
-def test_prepare_firmware_reprompts_on_invalid_custom_path(tmp_path):
-    default_fw = tmp_path / "default.bin"
+def test_prepare_firmware_reprompts_on_invalid_custom_path(tmp_path, isolated_cache):
+    firmware_dir = isolated_cache / "firmware"
+    firmware_dir.mkdir()
+    default_fw = firmware_dir / "default.bin"
     default_fw.write_text("default")
 
     env, bin_dir = create_stub_environment(tmp_path, include_system_path=True)
-    env["KLIPPER_FIRMWARE_PATH"] = str(default_fw)
     add_id_stub(bin_dir, "dialout")
 
-    input_sequence = f"2\n/tmp/does-not-exist.bin\n1\n"
-    result = run_flash_script(PROMPT_OVERRIDE + "\nprepare_firmware", env=env, input_text=input_sequence)
+    # Menu: 1. default.bin, 2. Saisir chemin, 3. Quitter
+    input_sequence = f"2\n/invalid/path.bin\n1\n"
+    result = run_flash_script("prepare_firmware", env=env, input_text=input_sequence)
     assert result.returncode == 0
-    assert "Le fichier spécifié est introuvable" in result.stderr + result.stdout
+    assert "Firmware introuvable" in result.stderr
     assert "Firmware sélectionné" in result.stdout
 
 
@@ -617,11 +624,14 @@ def test_select_flash_method_warns_when_no_serial_device(tmp_path):
     assert "Port série sélectionné" not in (result.stdout + result.stderr)
 
 
-def test_flash_with_serial_errors_when_script_missing(tmp_path):
+def test_flash_with_serial_errors_when_script_missing(tmp_path, isolated_cache):
     env, bin_dir = create_stub_environment(tmp_path, include_system_path=True)
     add_id_stub(bin_dir, "dialout")
     firmware = tmp_path / "klipper.bin"
     firmware.write_text("binary")
+
+    # Ensure the script is not found by overriding its expected path
+    env["FLASH_AUTOMATION_FLASH_USB_SCRIPT"] = str(tmp_path / "nonexistent/flash_usb.py")
 
     commands = textwrap.dedent(
         f"""

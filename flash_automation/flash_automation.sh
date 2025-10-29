@@ -69,7 +69,7 @@ readonly LOG_FILE="${LOG_DIR}/flash.log"
 readonly FAILURE_REPORT="${LOG_DIR}/FAILURE_REPORT.txt"
 readonly DEFAULT_FIRMWARE_RELATIVE_PATHS=(".cache/klipper/out" ".cache/firmware")
 readonly DEFAULT_FIRMWARE_RELATIVE_PATH="${DEFAULT_FIRMWARE_RELATIVE_PATHS[0]}"
-readonly DEFAULT_FLASH_USB_RELATIVE_PATH=".cache/klipper/scripts/flash_usb.py"
+readonly DEFAULT_FLASH_USB_RELATIVE_PATH=".cache/scripts/flash_usb.py"
 readonly DEFAULT_FIRMWARE_EXCLUDE_RELATIVE_PATHS=(
     "logs"
     "tests"
