@@ -301,6 +301,20 @@ La documentation complète d'intégration est disponible dans [`addon/docs/setup
 - `automation_cli.py` : menu interactif façon KIAUH qui regroupe build, flash et journalisation.
 - Toolchains personnalisées : exportez `KLIPPER_SRC_DIR` ou `KLIPPER_FIRMWARE_PATH` pour réutiliser des artefacts existants.
 
+### `flash_automation.sh` : choisir la bonne méthode
+
+Le script [`flash_automation/flash_automation.sh`](flash_automation/flash_automation.sh) détecte automatiquement la méthode de flash la plus pertinente, mais vous pouvez la forcer avec `--method <wchisp|serial|sdcard|dfu|auto>` ou via la variable d'environnement `FLASH_AUTOMATION_METHOD`. Cette détection est désormais effectuée **avant** les vérifications d'environnement afin de ne contrôler que les outils nécessaires au scénario choisi.
+
+| Scénario | Dépendances clés | Notes |
+| --- | --- | --- |
+| `wchisp` (auto-install) | `curl`, `tar`, `sha256sum` | Requises uniquement si `WCHISP_BIN` est absent et que `WCHISP_AUTO_INSTALL=true` (cas par défaut). |
+| `wchisp` (local) | `wchisp` disponible dans le `PATH` ou via `WCHISP_BIN` | Aucun téléchargement si l'outil est déjà installé. |
+| `serial` (`flash_usb.py`) | `python3`, Klipper compilé (`.cache/klipper/scripts/flash_usb.py`) | Option idéale lorsque le bootloader USB n'est pas accessible. |
+| `dfu` | `dfu-util` (+ `DFU_ALT_SETTING`, `DFU_SERIAL_NUMBER`, `DFU_EXTRA_ARGS` optionnels) | Pour les cartes exposant un mode DFU classique. |
+| `sdcard` | `cp`, `sync` (outils de base) | Copie directe du firmware sur un stockage amovible. |
+
+Astuce : laissez `--method auto` (valeur par défaut) pour bénéficier de la détection guidée ; le script indiquera la raison du choix proposé (ex. périphérique DFU détecté, wchisp présent, etc.).
+
 Tous ces outils se trouvent dans le dossier [`flash_automation/`](flash_automation) et respectent les conventions décrites dans [AGENTS.md](AGENTS.md).
 
 ---
