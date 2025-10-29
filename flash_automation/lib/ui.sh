@@ -249,3 +249,54 @@ display_check_command_summary() {
 
     printf "%b%s%b\n" "${COLOR_BORDER}" "${border_line}" "${COLOR_RESET}"
 }
+
+SPINNER_PID=""
+
+_spinner_chars="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+_spinner() {
+    # Hide cursor
+    if command -v tput >/dev/null; then
+        tput civis
+    fi
+    while true; do
+        for (( i=0; i<${#_spinner_chars}; i++ )); do
+            char="${_spinner_chars:$i:1}"
+            printf "\r%b[ %s ]%b %s" "${COLOR_INFO}" "${char}" "${COLOR_RESET}" "${1}"
+            sleep 0.1
+        done
+    done
+}
+
+spinner_start() {
+    local message="${1:-}"
+    if [[ "${QUIET_MODE}" == "true" || -n "${SPINNER_PID}" ]]; then
+        return
+    fi
+    if [[ ! -t 1 && "${FLASH_AUTOMATION_FORCE_SPINNER:-}" != "true" ]]; then
+        # Affichage statique si non interactif et non forcé
+        printf "%b[INFO]%b %s\n" "${COLOR_INFO}" "${COLOR_RESET}" "${message}"
+        return
+    fi
+    _spinner "${message}" &
+    SPINNER_PID=$!
+    # Ensure spinner is killed on exit
+    trap 'spinner_stop >/dev/null 2>&1' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
+}
+
+spinner_stop() {
+    if [[ -z "${SPINNER_PID}" ]]; then
+        return
+    fi
+    if kill -0 "$SPINNER_PID" >/dev/null 2>&1; then
+        kill "$SPINNER_PID" >/dev/null 2>&1
+        wait "$SPINNER_PID" 2>/dev/null
+    fi
+    # Clear the line and show cursor
+    printf "\r\033[K"
+    if command -v tput >/dev/null; then
+        tput cnorm
+    fi
+    SPINNER_PID=""
+    trap - EXIT SIGHUP SIGINT SIGQUIT SIGTERM
+}
