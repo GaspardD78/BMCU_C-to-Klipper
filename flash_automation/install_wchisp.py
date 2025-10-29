@@ -21,7 +21,7 @@ import tarfile
 import tempfile
 import urllib.error
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 SUPPORTED_SUFFIXES = {
@@ -149,12 +149,50 @@ def verify_checksum(path: Path, expected: str | None) -> None:
         )
 
 
+def _is_safe_member(member: tarfile.TarInfo, destination_root: Path) -> bool:
+    """Vérifie que le membre peut être extrait sans échapper ``destination_root``."""
+
+    name = member.name
+    if not name:
+        return False
+
+    if member.islnk() or member.issym():
+        return False
+
+    if name.startswith("/") or name.startswith("\\"):
+        return False
+
+    posix_path = PurePosixPath(name)
+    if posix_path.is_absolute():
+        return False
+
+    if any(part in {"..", ""} for part in posix_path.parts):
+        return False
+
+    member_path = Path(*posix_path.parts)
+    target_path = destination_root.joinpath(member_path).resolve(strict=False)
+    try:
+        target_path.relative_to(destination_root)
+    except ValueError:
+        return False
+
+    return True
+
+
 def extract_binary(archive_path: Path, workdir: Path) -> Path:
     """Extrait l'archive dans ``workdir`` et retourne le chemin du binaire wchisp."""
 
     try:
         with tarfile.open(archive_path, mode="r:gz") as tar:
-            tar.extractall(path=workdir)
+            members = tar.getmembers()
+            destination_root = workdir.resolve()
+            for member in members:
+                if not _is_safe_member(member, destination_root):
+                    raise RuntimeError(
+                        "L'archive wchisp contient un membre avec un chemin potentiellement dangereux: "
+                        f"{member.name!r}."
+                    )
+            tar.extractall(path=workdir, members=members)
     except (OSError, tarfile.TarError) as err:
         raise RuntimeError("Impossible d'extraire l'archive wchisp.") from err
 
