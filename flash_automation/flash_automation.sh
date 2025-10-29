@@ -1681,19 +1681,20 @@ ensure_wchisp() {
 
     if [[ "${WCHISP_AUTO_INSTALL}" != "true" ]]; then
         log_message "ERROR" "wchisp est introuvable et l'installation automatique est désactivée."
-        echo "La dépendance 'wchisp' est introuvable. Exportez WCHISP_BIN ou activez WCHISP_AUTO_INSTALL=true pour autoriser le téléchargement automatique."
+        error_msg "La dépendance 'wchisp' est introuvable."
+        error_msg "Exportez WCHISP_BIN ou activez WCHISP_AUTO_INSTALL=true pour autoriser le téléchargement automatique."
         exit 1
     fi
 
     if ! command_exists curl; then
         log_message "ERROR" "Impossible d'installer wchisp automatiquement: curl est absent."
-        echo "curl est requis pour installer automatiquement wchisp. Installez curl ou wchisp manuellement."
+        error_msg "curl est requis pour installer automatiquement wchisp. Installez curl ou wchisp manuellement."
         exit 1
     fi
 
     if ! command_exists tar; then
         log_message "ERROR" "Impossible d'installer wchisp automatiquement: tar est absent."
-        echo "tar est requis pour installer automatiquement wchisp. Installez tar ou wchisp manuellement."
+        error_msg "tar est requis pour installer automatiquement wchisp. Installez tar ou wchisp manuellement."
         exit 1
     fi
 
@@ -1724,7 +1725,7 @@ ensure_wchisp() {
         if ! curl --fail --location --progress-bar "${url}" -o "${archive_path}"; then
             rm -f "${archive_path}"
             log_message "ERROR" "Échec du téléchargement de wchisp depuis ${url}."
-            echo "Échec du téléchargement de wchisp (${url}). Installez wchisp manuellement."
+            error_msg "Échec du téléchargement de wchisp (${url}). Installez wchisp manuellement."
             exit 1
         fi
     else
@@ -1745,20 +1746,20 @@ ensure_wchisp() {
     if ! tar -xf "${archive_path}" --strip-components=1 -C "${install_dir}"; then
         rm -rf "${install_dir}"
         log_message "ERROR" "Échec de l'extraction de wchisp depuis ${archive_path}."
-        echo "Impossible d'extraire wchisp. Vérifiez l'archive ou installez l'outil manuellement."
+        error_msg "Impossible d'extraire wchisp. Vérifiez l'archive ou installez l'outil manuellement."
         exit 1
     fi
 
     local candidate="${install_dir}/wchisp"
     if [[ ! -x "${candidate}" ]]; then
         log_message "ERROR" "Le binaire wchisp est introuvable après extraction (${candidate})."
-        echo "Le binaire wchisp est manquant après extraction. Installez l'outil manuellement."
+        error_msg "Le binaire wchisp est manquant après extraction. Installez l'outil manuellement."
         exit 1
     fi
 
     WCHISP_COMMAND="${candidate}"
     log_message "INFO" "wchisp disponible localement via ${WCHISP_COMMAND} (architecture détectée : ${arch_raw} -> ${arch})."
-    echo "wchisp installé automatiquement dans ${install_dir}."
+    success "wchisp installé automatiquement dans ${install_dir}."
 }
 
 function detect_serial_devices() {
