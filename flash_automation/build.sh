@@ -552,6 +552,16 @@ preserve_final_binary() {
     local reason="$1"
     local update_final_path="${2:-false}"
 
+    local klipper_scripts_dir="${KLIPPER_DIR}/scripts"
+    local archive_scripts_dir="${CACHE_ROOT}/scripts"
+    if [[ -d "${klipper_scripts_dir}" ]]; then
+        print_info "Sauvegarde des scripts Klipper..."
+        mkdir -p "${archive_scripts_dir}"
+        if ! cp -a "${klipper_scripts_dir}/." "${archive_scripts_dir}/"; then
+            print_error "Impossible de sauvegarder les scripts de flashage Klipper."
+        fi
+    fi
+
     if [[ "${ARCHIVED_FIRMWARE_STORED}" == "true" && "${update_final_path}" != "true" ]]; then
         return 0
     fi

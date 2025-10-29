@@ -654,6 +654,7 @@ def find_default_firmware() -> Path | None:
 
     base_dir = Path(__file__).resolve().parent
     candidates = [
+        base_dir / ".cache/firmware/klipper.bin",
         base_dir / ".cache/klipper/out/klipper.bin",
         base_dir / "klipper.bin",
     ]
@@ -1141,6 +1142,15 @@ def build_command(choices: UserChoices) -> list[str]:
 
 def run_build() -> bool:
     """Lance le script de build et retourne le succès."""
+
+    existing_firmware = find_default_firmware()
+    if existing_firmware:
+        if not ask_yes_no(
+            f"Un firmware existe déjà ({existing_firmware.name}). Voulez-vous le recompiler ?",
+            default=False
+        ):
+            print(colorize("Compilation annulée.", Colors.WARNING))
+            return True
 
     build_script = Path(__file__).resolve().with_name("build.sh")
     if not build_script.exists():
