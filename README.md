@@ -305,6 +305,8 @@ La documentation complète d'intégration est disponible dans [`addon/docs/setup
 
 Le script [`flash_automation/flash_automation.sh`](flash_automation/flash_automation.sh) détecte automatiquement la méthode de flash la plus pertinente, mais vous pouvez la forcer avec `--method <wchisp|serial|sdcard|dfu|auto>` ou via la variable d'environnement `FLASH_AUTOMATION_METHOD`. Cette détection est désormais effectuée **avant** les vérifications d'environnement afin de ne contrôler que les outils nécessaires au scénario choisi.
 
+> ℹ️ Depuis la version courante, `flash_automation.sh` ne propose `wchisp` automatiquement que si un périphérique USB WCH (VID `1a86` par défaut) est détecté. En cas d'échec du flash via `wchisp`, le script tente automatiquement un basculement vers DFU puis vers le flash série si des périphériques correspondants sont détectés, en journalisant la décision dans `logs/`.
+
 | Scénario | Dépendances clés | Notes |
 | --- | --- | --- |
 | `wchisp` (auto-install) | `curl`, `tar`, `sha256sum` | Requises uniquement si `WCHISP_BIN` est absent et que `WCHISP_AUTO_INSTALL=true` (cas par défaut). |

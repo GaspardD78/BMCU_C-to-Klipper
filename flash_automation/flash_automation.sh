@@ -64,9 +64,11 @@ readonly FAILURE_REPORT="${LOG_DIR}/FAILURE_REPORT.txt"
 readonly DEFAULT_FIRMWARE_RELATIVE_PATHS=(".cache/klipper/out" ".cache/firmware")
 readonly DEFAULT_FIRMWARE_RELATIVE_PATH="${DEFAULT_FIRMWARE_RELATIVE_PATHS[0]}"
 readonly DEFAULT_FIRMWARE_EXCLUDE_RELATIVE_PATHS=("logs" "tests" ".cache/tools")
+readonly -a WCH_USB_VENDOR_IDS_DEFAULT=("1a86")
 DEEP_SCAN_ENABLED="false"
 declare -a FIRMWARE_SCAN_EXCLUDES=()
 declare -a CLI_FIRMWARE_SCAN_EXCLUDES=()
+declare -a WCH_USB_VENDOR_IDS=()
 FIRMWARE_DISPLAY_PATH="${KLIPPER_FIRMWARE_PATH:-}"
 FIRMWARE_FILE=""
 FIRMWARE_FORMAT=""
@@ -340,6 +342,7 @@ Variables d'environnement associées :
   FLASH_AUTOMATION_SDCARD_PATH       Point de montage forcé pour la méthode sdcard.
   FLASH_AUTOMATION_QUIET             "true"/"1" pour réduire les sorties console.
   FLASH_AUTOMATION_NO_COLOR          "true"/"1" pour forcer la sortie sans couleurs.
+  FLASH_AUTOMATION_WCH_USB_IDS       Liste (séparée par ',') des VID USB WCH à considérer (par défaut : 1a86).
   WCHISP_ARCHIVE_CHECKSUM_OVERRIDE  Injecte une somme de contrôle SHA-256 personnalisée.
   ALLOW_UNVERIFIED_WCHISP           "true"/"1" pour autoriser le mode dégradé.
   KLIPPER_FIRMWARE_SCAN_EXCLUDES    Liste (séparée par ':') de chemins à ignorer durant la découverte.
@@ -350,6 +353,8 @@ Variables d'environnement associées :
 Comportement automatique :
   En mode --auto-confirm, le script applique --firmware-pattern lorsqu'il est fourni.
   Sans correspondance explicite, le firmware le plus récent est choisi automatiquement.
+  La méthode wchisp n'est proposée automatiquement que si un périphérique WCH est détecté.
+  Si wchisp échoue, une tentative DFU puis série est effectuée automatiquement si possible.
 
 Scénarios & dépendances clés :
   wchisp (auto-install)        curl, tar, sha256sum (pour vérifier et extraire l'archive).
@@ -544,6 +549,27 @@ apply_configuration_defaults() {
         ALLOW_UNVERIFIED_WCHISP="${ALLOW_UNVERIFIED_WCHISP_DEFAULT}"
     fi
     ALLOW_UNVERIFIED_WCHISP="$(normalize_boolean "${ALLOW_UNVERIFIED_WCHISP}")"
+
+    if [[ -n "${FLASH_AUTOMATION_WCH_USB_IDS:-}" ]]; then
+        IFS=',' read -r -a WCH_USB_VENDOR_IDS <<< "${FLASH_AUTOMATION_WCH_USB_IDS}"
+    else
+        WCH_USB_VENDOR_IDS=("${WCH_USB_VENDOR_IDS_DEFAULT[@]}")
+    fi
+
+    if [[ ${#WCH_USB_VENDOR_IDS[@]} -gt 0 ]]; then
+        local -a sanitized=()
+        local raw
+        for raw in "${WCH_USB_VENDOR_IDS[@]}"; do
+            raw="${raw//[[:space:]]/}"
+            [[ -n "${raw}" ]] || continue
+            sanitized+=("${raw,,}")
+        done
+        WCH_USB_VENDOR_IDS=("${sanitized[@]}")
+    fi
+
+    if [[ ${#WCH_USB_VENDOR_IDS[@]} -eq 0 ]]; then
+        WCH_USB_VENDOR_IDS=("${WCH_USB_VENDOR_IDS_DEFAULT[@]}")
+    fi
 
     if [[ -z "${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE}" ]]; then
         WCHISP_ARCHIVE_CHECKSUM_OVERRIDE="${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE_DEFAULT}"
@@ -1241,6 +1267,72 @@ function detect_dfu_devices() {
     done < <("${DFU_UTIL_COMMAND}" -l 2>/dev/null | awk -F':' '/Found DFU:/{gsub(/^\s+|\s+$/, "", $2); print $2}' )
 }
 
+function detect_wch_bootloader_devices() {
+    local -n wch_devices_ref=$1
+    wch_devices_ref=()
+
+    if [[ ${#WCH_USB_VENDOR_IDS[@]} -eq 0 ]]; then
+        return
+    fi
+
+    local usb_root="/sys/bus/usb/devices"
+    if [[ ! -d "${usb_root}" ]]; then
+        return
+    fi
+
+    local nullglob_was_set=0
+    if shopt -q nullglob; then
+        nullglob_was_set=1
+    fi
+    shopt -s nullglob
+
+    local path
+    for path in "${usb_root}"/*; do
+        [[ -d "${path}" ]] || continue
+        local base="${path##*/}"
+        if [[ "${base}" == *:* ]]; then
+            continue
+        fi
+
+        local vendor_file="${path}/idVendor"
+        local product_file="${path}/idProduct"
+        [[ -f "${vendor_file}" ]] || continue
+
+        local vendor
+        vendor=$(<"${vendor_file}") || continue
+        vendor="${vendor,,}"
+
+        local match="false"
+        local vid
+        for vid in "${WCH_USB_VENDOR_IDS[@]}"; do
+            if [[ "${vendor}" == "${vid}" ]]; then
+                match="true"
+                break
+            fi
+        done
+
+        if [[ "${match}" != "true" ]]; then
+            continue
+        fi
+
+        local product="unknown"
+        if [[ -f "${product_file}" ]]; then
+            product=$(<"${product_file}")
+            product="${product,,}"
+        fi
+
+        wch_devices_ref+=("usb:${vendor}:${product}")
+    done
+
+    if (( nullglob_was_set == 0 )); then
+        shopt -u nullglob
+    fi
+
+    if [[ ${#wch_devices_ref[@]} -gt 0 ]]; then
+        mapfile -t wch_devices_ref < <(printf '%s\n' "${wch_devices_ref[@]}" | awk '!seen[$0]++')
+    fi
+}
+
 function display_available_devices() {
     local -a serial_devices
     local -a dfu_devices
@@ -1301,14 +1393,21 @@ flash_method_to_human() {
 auto_detect_flash_method() {
     AUTO_METHOD_REASON=""
 
-    if command_exists "${WCHISP_COMMAND}"; then
-        AUTO_METHOD_REASON="wchisp détecté : ${WCHISP_COMMAND} est disponible."
+    local -a wch_devices=()
+    detect_wch_bootloader_devices wch_devices
+    local wch_hint=""
+    if [[ ${#wch_devices[@]} -gt 0 ]]; then
+        wch_hint=" (${wch_devices[0]})"
+    fi
+
+    if command_exists "${WCHISP_COMMAND}" && [[ ${#wch_devices[@]} -gt 0 ]]; then
+        AUTO_METHOD_REASON="wchisp détecté : ${WCHISP_COMMAND} est disponible${wch_hint}."
         printf '%s\n' "wchisp"
         return
     fi
 
-    if [[ "${WCHISP_AUTO_INSTALL}" == "true" ]]; then
-        AUTO_METHOD_REASON="wchisp sélectionné : installation automatique autorisée."
+    if [[ "${WCHISP_AUTO_INSTALL}" == "true" && ${#wch_devices[@]} -gt 0 ]]; then
+        AUTO_METHOD_REASON="wchisp sélectionné : installation automatique autorisée${wch_hint}."
         printf '%s\n' "wchisp"
         return
     fi
@@ -2152,6 +2251,47 @@ INSTRUCTIONS
     esac
 }
 
+function handle_wchisp_failure() {
+    local status="${1:-1}"
+
+    warn "Échec de wchisp (code ${status}). Recherche d'une méthode alternative."
+
+    local -a dfu_devices=()
+    detect_dfu_devices dfu_devices
+    if [[ ${#dfu_devices[@]} -gt 0 ]]; then
+        local dfu_target="${dfu_devices[0]}"
+        info "Bascule automatique vers le flash DFU (${dfu_target})."
+        SELECTED_METHOD="dfu"
+        RESOLVED_METHOD="dfu"
+        SELECTED_DEVICE=""
+        SERIAL_SELECTION_SOURCE=""
+        SDCARD_SELECTION_SOURCE=""
+        SDCARD_MOUNTPOINT=""
+        finalize_method_selection
+        prepare_target
+        return 0
+    fi
+
+    local -a serial_devices=()
+    detect_serial_devices serial_devices
+    if [[ ${#serial_devices[@]} -gt 0 ]]; then
+        local serial_target="${serial_devices[0]}"
+        info "Bascule automatique vers le flash série (${serial_target})."
+        SELECTED_METHOD="serial"
+        RESOLVED_METHOD="serial"
+        SELECTED_DEVICE="${serial_target}"
+        SERIAL_SELECTION_SOURCE="détection automatique (fallback wchisp)"
+        SDCARD_SELECTION_SOURCE=""
+        SDCARD_MOUNTPOINT=""
+        finalize_method_selection
+        prepare_target
+        return 0
+    fi
+
+    warn "Aucun périphérique DFU ou série détecté pour reprendre après l'échec de wchisp."
+    return 1
+}
+
 
 function flash_with_dfu() {
     local dfu_label
@@ -2233,27 +2373,41 @@ function flash_with_sdcard() {
 }
 
 function execute_flash() {
-    CURRENT_STEP="Étape 4: Flashage (${SELECTED_METHOD})"
-    render_box "${CURRENT_STEP}"
+    while true; do
+        CURRENT_STEP="Étape 4: Flashage (${SELECTED_METHOD})"
+        render_box "${CURRENT_STEP}"
 
-    case "${SELECTED_METHOD}" in
-        wchisp)
-            flash_with_wchisp
-            ;;
-        dfu)
-            flash_with_dfu
-            ;;
-        serial)
-            flash_with_serial
-            ;;
-        sdcard)
-            flash_with_sdcard
-            ;;
-        *)
-            error_msg "Méthode de flash inconnue: ${SELECTED_METHOD}"
-            exit 1
-            ;;
-    esac
+        case "${SELECTED_METHOD}" in
+            wchisp)
+                local wch_status
+                if flash_with_wchisp; then
+                    break
+                fi
+                wch_status=$?
+                if handle_wchisp_failure "${wch_status}"; then
+                    continue
+                fi
+                error_msg "Échec de wchisp et aucune méthode alternative disponible."
+                exit 1
+                ;;
+            dfu)
+                flash_with_dfu
+                break
+                ;;
+            serial)
+                flash_with_serial
+                break
+                ;;
+            sdcard)
+                flash_with_sdcard
+                break
+                ;;
+            *)
+                error_msg "Méthode de flash inconnue: ${SELECTED_METHOD}"
+                exit 1
+                ;;
+        esac
+    done
 }
 
 function post_flash() {

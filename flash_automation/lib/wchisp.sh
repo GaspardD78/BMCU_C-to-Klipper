@@ -350,6 +350,16 @@ flash_with_wchisp() {
     cmd+=(flash "${FIRMWARE_FILE}")
 
     log_message "DEBUG" "Commande exécutée: ${cmd[*]}"
+
+    set +e
     "${cmd[@]}" 2>&1 | tee -a "${LOG_FILE}"
+    local result=${PIPESTATUS[0]}
+    set -e
+
+    if (( result != 0 )); then
+        error_msg "wchisp a échoué avec le code ${result}. Consultez ${LOG_FILE} pour le détail."
+        return "${result}"
+    fi
+
     success "wchisp a terminé le flash sans erreur."
 }
