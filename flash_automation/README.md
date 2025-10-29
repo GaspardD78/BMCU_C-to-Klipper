@@ -54,6 +54,11 @@ python3 flash.py
   `automation_cli.py` centralise ces procédures dans un menu inspiré de KIAUH
   et consigne toutes les étapes dans `~/BMCU_C_to_Klipper_logs/automation-<horodatage>.log`.
 
+> 🔍 Par défaut, `flash_automation.sh` recherche les firmwares dans `.cache/klipper/out`
+> et `.cache/firmware`. Activez `--deep-scan` pour étendre l'exploration à tout
+> le dépôt (hors `logs/`, `tests/`, `.cache/tools/` par défaut) ou ajustez la
+> liste via `KLIPPER_FIRMWARE_SCAN_EXCLUDES` / `--exclude-path`.
+
 ### 🔐 Vérification du firmware
 
 - `flash.py` calcule désormais automatiquement l'empreinte **SHA-256** du firmware
@@ -81,6 +86,7 @@ python3 flash.py
 | `KLIPPER_FETCH_REFSPEC` | Référence distante suivie (`refs/heads/...` ou `refs/tags/...`) | `refs/heads/${KLIPPER_REF}` (déduit automatiquement) |
 | `KLIPPER_SRC_DIR` | Répertoire Klipper à réutiliser (aucun clone/checkout automatique) | `flash_automation/.cache/klipper` |
 | `KLIPPER_FIRMWARE_PATH` | Firmware attendu par `flash_automation.sh` | `.cache/klipper/out/klipper.bin` |
+| `KLIPPER_FIRMWARE_SCAN_EXCLUDES` | Chemins exclus de la découverte automatique (séparés par `:`) | `logs:.cache/tools:tests` |
 | `CROSS_PREFIX` | Toolchain RISC-V installée manuellement | `riscv32-unknown-elf-` |
 | `TOOLCHAIN_RELEASE` | Tag de la toolchain RISC-V officielle à télécharger | `2025.10.18` |
 | `TOOLCHAIN_ARCHIVE_X86_64` | Nom d'archive utilisé pour `TOOLCHAIN_RELEASE` | `riscv32-elf-ubuntu-22.04-gcc.tar.xz` |
@@ -105,6 +111,10 @@ Le script shell accepte également quelques options CLI avancées :
 - `--allow-unsigned-wchisp` pour activer le mode dégradé qui laisse le binaire
   en place malgré une vérification SHA-256 échouée ; un avertissement est
   affiché et journalisé pour rappeler le risque encouru.
+- `--deep-scan` pour étendre la recherche de firmwares à tout le dépôt (avec
+  exclusions par défaut `logs/`, `tests/`, `.cache/tools/`).
+- `--exclude-path <chemin>` pour ajouter dynamiquement un répertoire à ignorer
+  lors de la découverte automatique.
 
 ### 🔄 Flux de synchronisation
 

@@ -47,6 +47,10 @@ readonly LOG_FILE="${LOG_DIR}/flash.log"
 readonly FAILURE_REPORT="${LOG_DIR}/FAILURE_REPORT.txt"
 readonly DEFAULT_FIRMWARE_RELATIVE_PATHS=(".cache/klipper/out" ".cache/firmware")
 readonly DEFAULT_FIRMWARE_RELATIVE_PATH="${DEFAULT_FIRMWARE_RELATIVE_PATHS[0]}"
+readonly DEFAULT_FIRMWARE_EXCLUDE_RELATIVE_PATHS=("logs" "tests" ".cache/tools")
+DEEP_SCAN_ENABLED="false"
+declare -a FIRMWARE_SCAN_EXCLUDES=()
+declare -a CLI_FIRMWARE_SCAN_EXCLUDES=()
 FIRMWARE_DISPLAY_PATH="${KLIPPER_FIRMWARE_PATH:-}"
 FIRMWARE_FILE=""
 FIRMWARE_FORMAT=""
@@ -129,6 +133,25 @@ normalize_boolean() {
     esac
 }
 
+dedupe_array_in_place() {
+    local -n array_ref=$1
+    if [[ ${#array_ref[@]} -eq 0 ]]; then
+        return
+    fi
+
+    declare -A seen_paths=()
+    local -a unique=()
+    for element in "${array_ref[@]}"; do
+        [[ -n "${element}" ]] || continue
+        if [[ -z "${seen_paths["${element}"]-}" ]]; then
+            seen_paths["${element}"]=1
+            unique+=("${element}")
+        fi
+    done
+
+    array_ref=("${unique[@]}")
+}
+
 print_usage() {
     local script_name
     script_name="$(basename "${BASH_SOURCE[0]}")"
@@ -138,11 +161,14 @@ Usage: ${script_name} [options]
 Options:
   --wchisp-checksum <sha256>   Remplace la somme de contrôle attendue pour l'archive wchisp.
   --allow-unsigned-wchisp      Active le mode dégradé : conserve l'archive même si la vérification échoue.
+  --deep-scan                  Étend la recherche de firmwares à l'ensemble du dépôt.
+  --exclude-path <chemin>      Ajoute un chemin à exclure de la découverte automatique.
   -h, --help                   Affiche cette aide et quitte.
 
 Variables d'environnement associées :
   WCHISP_ARCHIVE_CHECKSUM_OVERRIDE  Injecte une somme de contrôle SHA-256 personnalisée.
   ALLOW_UNVERIFIED_WCHISP           "true"/"1" pour autoriser le mode dégradé.
+  KLIPPER_FIRMWARE_SCAN_EXCLUDES    Liste (séparée par ':') de chemins à ignorer durant la découverte.
 EOF
 }
 
@@ -164,6 +190,29 @@ parse_cli_arguments() {
                 ;;
             --allow-unsigned-wchisp)
                 ALLOW_UNVERIFIED_WCHISP="true"
+                shift
+                ;;
+            --deep-scan)
+                DEEP_SCAN_ENABLED="true"
+                shift
+                ;;
+            --exclude-path)
+                if [[ $# -lt 2 ]]; then
+                    echo "L'option --exclude-path requiert une valeur." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                CLI_FIRMWARE_SCAN_EXCLUDES+=("$(resolve_path_relative_to_flash_root "$2")")
+                shift 2
+                ;;
+            --exclude-path=*)
+                local raw_path="${1#*=}"
+                if [[ -z "${raw_path}" ]]; then
+                    echo "L'option --exclude-path nécessite un chemin non vide." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                CLI_FIRMWARE_SCAN_EXCLUDES+=("$(resolve_path_relative_to_flash_root "${raw_path}")")
                 shift
                 ;;
             -h|--help)
@@ -203,6 +252,29 @@ apply_configuration_defaults() {
     if [[ -z "${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE}" ]]; then
         WCHISP_ARCHIVE_CHECKSUM_OVERRIDE="${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE_DEFAULT}"
     fi
+
+    local -a excludes=()
+    for rel_path in "${DEFAULT_FIRMWARE_EXCLUDE_RELATIVE_PATHS[@]}"; do
+        excludes+=("$(resolve_path_relative_to_flash_root "${rel_path}")")
+    done
+
+    if [[ -n "${KLIPPER_FIRMWARE_SCAN_EXCLUDES:-}" ]]; then
+        local old_ifs="${IFS}"
+        IFS=':'
+        read -r -a env_excludes <<< "${KLIPPER_FIRMWARE_SCAN_EXCLUDES}"
+        IFS="${old_ifs}"
+        for raw in "${env_excludes[@]}"; do
+            [[ -n "${raw}" ]] || continue
+            excludes+=("$(resolve_path_relative_to_flash_root "${raw}")")
+        done
+    fi
+
+    if [[ ${#CLI_FIRMWARE_SCAN_EXCLUDES[@]} -gt 0 ]]; then
+        excludes+=("${CLI_FIRMWARE_SCAN_EXCLUDES[@]}")
+    fi
+
+    FIRMWARE_SCAN_EXCLUDES=("${excludes[@]}")
+    dedupe_array_in_place FIRMWARE_SCAN_EXCLUDES
 }
 
 function log_message() {
@@ -998,6 +1070,50 @@ function format_path_for_display() {
     fi
 }
 
+run_find_firmware_files() {
+    local search_dir="$1"
+    local max_depth="${2:-}"
+    local respect_excludes="${3:-true}"
+
+    local -a find_cmd=(find "${search_dir}")
+    if [[ -n "${max_depth}" ]]; then
+        find_cmd+=(-maxdepth "${max_depth}")
+    fi
+
+    if [[ "${respect_excludes}" == "true" && ${#FIRMWARE_SCAN_EXCLUDES[@]} -gt 0 ]]; then
+        find_cmd+=(\()
+        local first_pattern=true
+        for exclude in "${FIRMWARE_SCAN_EXCLUDES[@]}"; do
+            local sanitized="${exclude%/}"
+            [[ -n "${sanitized}" ]] || continue
+            for pattern in "${sanitized}" "${sanitized}/*"; do
+                if [[ "${first_pattern}" == "true" ]]; then
+                    first_pattern=false
+                else
+                    find_cmd+=(-o)
+                fi
+                find_cmd+=(-path "${pattern}")
+            done
+        done
+        find_cmd+=(\))
+        find_cmd+=(-prune)
+        find_cmd+=(-o)
+    fi
+
+    find_cmd+=(-type)
+    find_cmd+=(f)
+    find_cmd+=(\()
+    find_cmd+=(-name "*.bin")
+    find_cmd+=(-o)
+    find_cmd+=(-name "*.uf2")
+    find_cmd+=(-o)
+    find_cmd+=(-name "*.elf")
+    find_cmd+=(\))
+    find_cmd+=(-print0)
+
+    "${find_cmd[@]}"
+}
+
 function verify_environment() {
     CURRENT_STEP="Étape 0: Diagnostic de l'environnement"
     render_box "${CURRENT_STEP}"
@@ -1047,7 +1163,7 @@ function collect_firmware_candidates() {
                 [[ -n "${seen["${file}"]-}" ]] && continue
                 seen["${file}"]=1
                 firmware_candidates_ref+=("${file}")
-            done < <(find "${dir}" -maxdepth 3 -type f \( -name '*.bin' -o -name '*.uf2' -o -name '*.elf' \) -print0 2>/dev/null)
+            done < <(run_find_firmware_files "${dir}" 3 false 2>/dev/null)
         fi
     fi
 
@@ -1058,18 +1174,20 @@ function collect_firmware_candidates() {
             [[ -n "${seen["${file}"]-}" ]] && continue
             seen["${file}"]=1
             firmware_candidates_ref+=("${file}")
-        done < <(find "${default_dir}" -maxdepth 2 -type f \( -name '*.bin' -o -name '*.uf2' -o -name '*.elf' \) -print0 2>/dev/null)
+        done < <(run_find_firmware_files "${default_dir}" 2 true 2>/dev/null)
     done
 
-    local -a extra_search=("${FLASH_ROOT}")
-    for dir in "${extra_search[@]}"; do
-        [[ -d "${dir}" ]] || continue
-        while IFS= read -r -d '' file; do
-            [[ -n "${seen["${file}"]-}" ]] && continue
-            seen["${file}"]=1
-            firmware_candidates_ref+=("${file}")
-        done < <(find "${dir}" -maxdepth 4 -type f \( -name '*.bin' -o -name '*.uf2' -o -name '*.elf' \) -print0 2>/dev/null)
-    done
+    if [[ "${DEEP_SCAN_ENABLED}" == "true" ]]; then
+        local -a extra_search=("${FLASH_ROOT}")
+        for dir in "${extra_search[@]}"; do
+            [[ -d "${dir}" ]] || continue
+            while IFS= read -r -d '' file; do
+                [[ -n "${seen["${file}"]-}" ]] && continue
+                seen["${file}"]=1
+                firmware_candidates_ref+=("${file}")
+            done < <(run_find_firmware_files "${dir}" 4 true 2>/dev/null)
+        done
+    fi
 
     if [[ ${#firmware_candidates_ref[@]} -gt 0 ]]; then
         mapfile -t firmware_candidates_ref < <(printf '%s\n' "${firmware_candidates_ref[@]}" | awk '!seen[$0]++')
@@ -1129,13 +1247,44 @@ function prepare_firmware() {
     render_box "${CURRENT_STEP}"
     info "Recherche des artefacts firmware (.bin, .elf, .uf2)."
 
+    local search_roots_display=""
+    for rel_path in "${DEFAULT_FIRMWARE_RELATIVE_PATHS[@]}"; do
+        if [[ -n "${search_roots_display}" ]]; then
+            search_roots_display+=", "
+        fi
+        search_roots_display+="${rel_path}"
+    done
+    info "Répertoires analysés par défaut : ${search_roots_display}"
+
+    if [[ "${DEEP_SCAN_ENABLED}" == "true" ]]; then
+        local exclude_display=""
+        if [[ ${#FIRMWARE_SCAN_EXCLUDES[@]} -gt 0 ]]; then
+            for exclude in "${FIRMWARE_SCAN_EXCLUDES[@]}"; do
+                local formatted
+                formatted="$(format_path_for_display "${exclude}")"
+                if [[ -n "${exclude_display}" ]]; then
+                    exclude_display+=", "
+                fi
+                exclude_display+="${formatted}"
+            done
+        fi
+        info "Mode --deep-scan actif : recherche étendue dans ${FLASH_ROOT}."
+        if [[ -n "${exclude_display}" ]]; then
+            info "Chemins ignorés : ${exclude_display}"
+        fi
+    else
+        info "Utilisez --deep-scan pour élargir la recherche à l'ensemble du dépôt."
+    fi
+
     local -a candidates
     collect_firmware_candidates candidates
 
     if [[ ${#candidates[@]} -eq 0 ]]; then
-        local search_roots
-        search_roots=$(printf '%s' "${DEFAULT_FIRMWARE_RELATIVE_PATHS[*]}")
-        error_msg "Aucun firmware compatible détecté (recherché dans ${search_roots}). Lancer './build.sh' ou fournir KLIPPER_FIRMWARE_PATH."
+        local message="Aucun firmware compatible détecté (recherché dans ${search_roots_display})."
+        if [[ "${DEEP_SCAN_ENABLED}" != "true" ]]; then
+            message+=" Utilisez --deep-scan pour élargir la recherche."
+        fi
+        error_msg "${message} Lancer './build.sh' ou fournir KLIPPER_FIRMWARE_PATH."
         exit 1
     fi
 
