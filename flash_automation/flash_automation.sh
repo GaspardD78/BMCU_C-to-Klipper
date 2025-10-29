@@ -47,7 +47,7 @@ readonly LOG_FILE="${LOG_DIR}/flash.log"
 readonly FAILURE_REPORT="${LOG_DIR}/FAILURE_REPORT.txt"
 readonly DEFAULT_FIRMWARE_RELATIVE_PATHS=(".cache/klipper/out" ".cache/firmware")
 readonly DEFAULT_FIRMWARE_RELATIVE_PATH="${DEFAULT_FIRMWARE_RELATIVE_PATHS[0]}"
-FIRMWARE_DISPLAY_PATH="${KLIPPER_FIRMWARE_PATH:-}" 
+FIRMWARE_DISPLAY_PATH="${KLIPPER_FIRMWARE_PATH:-}"
 FIRMWARE_FILE=""
 FIRMWARE_FORMAT=""
 readonly TOOLS_ROOT="${CACHE_ROOT}/tools"
@@ -56,6 +56,11 @@ readonly WCHISP_RELEASE="${WCHISP_RELEASE:-v0.3.0}"
 readonly WCHISP_AUTO_INSTALL="${WCHISP_AUTO_INSTALL:-true}"
 readonly WCHISP_BASE_URL="${WCHISP_BASE_URL:-https://github.com/ch32-rs/wchisp/releases/download}"
 readonly WCHISP_CHECKSUM_FILE="${FLASH_ROOT}/wchisp_sha256sums.txt"
+readonly WCHISP_ARCH_OVERRIDE="${WCHISP_ARCH_OVERRIDE:-}"
+readonly WCHISP_FALLBACK_ARCHIVE_URL="${WCHISP_FALLBACK_ARCHIVE_URL:-}"
+readonly WCHISP_FALLBACK_CHECKSUM="${WCHISP_FALLBACK_CHECKSUM:-}"
+readonly WCHISP_FALLBACK_ARCHIVE_NAME="${WCHISP_FALLBACK_ARCHIVE_NAME:-}"
+readonly WCHISP_MANUAL_DOC="${FLASH_ROOT}/docs/wchisp_manual_install.md"
 WCHISP_COMMAND="${WCHISP_BIN:-wchisp}"
 readonly WCHISP_TRANSPORT="${WCHISP_TRANSPORT:-usb}"
 readonly WCHISP_USB_INDEX="${WCHISP_USB_INDEX:-}"
@@ -109,6 +114,111 @@ function log_message() {
     local timestamp
     timestamp=$(date "+%Y-%m-%d %H:%M:%S")
     echo "[$timestamp] [$level] - $message" >> "${LOG_FILE}"
+}
+
+detect_wchisp_machine() {
+    if [[ -n "${WCHISP_ARCH_OVERRIDE}" ]]; then
+        printf '%s\n' "${WCHISP_ARCH_OVERRIDE}"
+        return
+    fi
+
+    uname -m
+}
+
+normalize_wchisp_machine() {
+    local raw="$1"
+
+    case "${raw}" in
+        amd64)
+            printf '%s\n' "x86_64"
+            ;;
+        arm64)
+            printf '%s\n' "aarch64"
+            ;;
+        armv8l|armv7|armv7l|armhf)
+            printf '%s\n' "armv7l"
+            ;;
+        armv6|armv6l|armel)
+            printf '%s\n' "armv6l"
+            ;;
+        i386|i486|i586|i686)
+            printf '%s\n' "i686"
+            ;;
+        *)
+            printf '%s\n' "${raw}"
+            ;;
+    esac
+}
+
+wchisp_architecture_not_supported() {
+    local arch="$1"
+
+    log_message "ERROR" "Aucun binaire wchisp pré-compilé disponible pour ${arch}."
+    cat <<EOF >&2
+Aucun binaire wchisp pré-compilé n'est disponible pour l'architecture '${arch}'.
+Vous pouvez :
+  1. Compiler wchisp depuis les sources (voir ${WCHISP_MANUAL_DOC}).
+  2. Fournir une archive compatible via WCHISP_FALLBACK_ARCHIVE_URL et, si possible, WCHISP_FALLBACK_CHECKSUM
+     (ajoutez WCHISP_FALLBACK_ARCHIVE_NAME si l'URL comporte des paramètres).
+  3. Exporter WCHISP_BIN vers un binaire wchisp déjà installé sur votre système.
+
+Pour simuler une architecture différente (tests ou CI), exportez WCHISP_ARCH_OVERRIDE.
+EOF
+    return 1
+}
+
+resolve_wchisp_download() {
+    local raw_arch normalized_arch asset url mode checksum
+
+    raw_arch="$(detect_wchisp_machine)"
+    normalized_arch="$(normalize_wchisp_machine "${raw_arch}")"
+    mode="official"
+    checksum=""
+
+    case "${normalized_arch}" in
+        x86_64)
+            asset="wchisp-${WCHISP_RELEASE}-linux-x64.tar.gz"
+            url="${WCHISP_BASE_URL}/${WCHISP_RELEASE}/${asset}"
+            ;;
+        aarch64)
+            asset="wchisp-${WCHISP_RELEASE}-linux-aarch64.tar.gz"
+            url="${WCHISP_BASE_URL}/${WCHISP_RELEASE}/${asset}"
+            ;;
+        armv7l|armv6l|i686)
+            if [[ -n "${WCHISP_FALLBACK_ARCHIVE_URL}" ]]; then
+                asset="${WCHISP_FALLBACK_ARCHIVE_NAME:-${WCHISP_FALLBACK_ARCHIVE_URL##*/}}"
+                asset="${asset%%\?*}"
+                url="${WCHISP_FALLBACK_ARCHIVE_URL}"
+                mode="fallback"
+                checksum="${WCHISP_FALLBACK_CHECKSUM}"
+                log_message "WARN" "Utilisation de l'archive de secours pour ${raw_arch} (${asset})."
+            else
+                wchisp_architecture_not_supported "${raw_arch}" || true
+                return 1
+            fi
+            ;;
+        *)
+            if [[ -n "${WCHISP_FALLBACK_ARCHIVE_URL}" ]]; then
+                asset="${WCHISP_FALLBACK_ARCHIVE_NAME:-${WCHISP_FALLBACK_ARCHIVE_URL##*/}}"
+                asset="${asset%%\?*}"
+                url="${WCHISP_FALLBACK_ARCHIVE_URL}"
+                mode="fallback"
+                checksum="${WCHISP_FALLBACK_CHECKSUM}"
+                log_message "WARN" "Architecture ${raw_arch} non prise en charge officiellement; utilisation de l'archive de secours (${asset})."
+            else
+                wchisp_architecture_not_supported "${raw_arch}" || true
+                return 1
+            fi
+            ;;
+    esac
+
+    if [[ -z "${asset}" ]]; then
+        error_msg "Impossible de déterminer le nom de l'archive wchisp pour ${raw_arch}."
+        printf "Définissez WCHISP_FALLBACK_ARCHIVE_URL avec une URL complète vers une archive wchisp valide.\n" >&2
+        return 1
+    fi
+
+    printf '%s|%s|%s|%s|%s|%s\n' "${raw_arch}" "${normalized_arch}" "${asset}" "${url}" "${mode}" "${checksum}"
 }
 
 function format_duration_seconds() {
@@ -532,10 +642,18 @@ lookup_wchisp_checksum() {
 verify_wchisp_archive() {
     local asset="$1"
     local archive_path="$2"
+    local expected="${3:-__auto__}"
 
-    local expected
-    if ! expected=$(lookup_wchisp_checksum "${asset}"); then
-        return 1
+    if [[ "${expected}" == "__auto__" ]]; then
+        if ! expected=$(lookup_wchisp_checksum "${asset}"); then
+            return 1
+        fi
+    fi
+
+    if [[ -z "${expected}" ]]; then
+        log_message "WARN" "Somme de contrôle inconnue pour ${asset}; vérification ignorée."
+        echo "AVERTISSEMENT : aucune somme de contrôle n'est disponible pour ${asset}. Vérifiez manuellement l'origine de l'archive ou fournissez WCHISP_FALLBACK_CHECKSUM." >&2
+        return 0
     fi
 
     local actual
@@ -579,24 +697,25 @@ ensure_wchisp() {
         exit 1
     fi
 
-    local arch asset url
-    arch="$(uname -m)"
+    local resolution
+    if ! resolution=$(resolve_wchisp_download); then
+        exit 1
+    fi
 
-    case "${arch}" in
-        x86_64|amd64)
-            asset="wchisp-${WCHISP_RELEASE}-linux-x64.tar.gz"
-            ;;
-        aarch64|arm64)
-            asset="wchisp-${WCHISP_RELEASE}-linux-aarch64.tar.gz"
-            ;;
-        *)
-            log_message "ERROR" "Aucun binaire wchisp pré-compilé disponible pour ${arch}."
-            echo "Aucun binaire wchisp pré-compilé n'est disponible pour l'architecture ${arch}. Installez l'outil manuellement et re-lancez."
+    local arch_raw arch asset url checksum_mode checksum_value expected_checksum
+    IFS='|' read -r arch_raw arch asset url checksum_mode checksum_value <<< "${resolution}"
+
+    if [[ "${checksum_mode}" == "official" ]]; then
+        if ! expected_checksum=$(lookup_wchisp_checksum "${asset}"); then
             exit 1
-            ;;
-    esac
+        fi
+    else
+        expected_checksum="${checksum_value}"
+        if [[ -z "${expected_checksum}" ]]; then
+            log_message "WARN" "Aucune somme de contrôle fournie pour l'archive de secours ${asset}."
+        fi
+    fi
 
-    url="${WCHISP_BASE_URL}/${WCHISP_RELEASE}/${asset}"
     mkdir -p "${WCHISP_CACHE_DIR}"
     local archive_path="${WCHISP_CACHE_DIR}/${asset}"
 
@@ -618,7 +737,7 @@ ensure_wchisp() {
         exit 1
     fi
 
-    if ! verify_wchisp_archive "${asset}" "${archive_path}"; then
+    if ! verify_wchisp_archive "${asset}" "${archive_path}" "${expected_checksum}"; then
         exit 1
     fi
 
@@ -642,7 +761,7 @@ ensure_wchisp() {
     fi
 
     WCHISP_COMMAND="${candidate}"
-    log_message "INFO" "wchisp disponible localement via ${WCHISP_COMMAND}."
+    log_message "INFO" "wchisp disponible localement via ${WCHISP_COMMAND} (architecture détectée : ${arch_raw} -> ${arch})."
     echo "wchisp installé automatiquement dans ${install_dir}."
 }
 
