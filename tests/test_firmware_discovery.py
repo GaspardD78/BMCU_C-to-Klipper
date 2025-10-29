@@ -46,6 +46,7 @@ def test_default_scan_targets_primary_paths(firmware_cleanup):
     script = textwrap.dedent(
         f"""
         source "{SCRIPT_PATH}"
+        flash_automation_initialize
         trap - ERR
         trap - EXIT
         set +e
@@ -75,6 +76,7 @@ def test_deep_scan_includes_repository_root(firmware_cleanup):
     script = textwrap.dedent(
         f"""
         source "{SCRIPT_PATH}"
+        flash_automation_initialize
         trap - ERR
         trap - EXIT
         set +e
@@ -107,6 +109,7 @@ def test_cli_exclude_path_removes_directory(firmware_cleanup):
     script = textwrap.dedent(
         f"""
         source "{SCRIPT_PATH}"
+        flash_automation_initialize
         trap - ERR
         trap - EXIT
         set +e

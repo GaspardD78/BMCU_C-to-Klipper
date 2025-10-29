@@ -12,7 +12,16 @@ FLASH_ROOT="${REPO_ROOT}/flash_automation"
 FLASH_SCRIPT="${FLASH_ROOT}/flash_automation.sh"
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "${TMP_DIR}"' EXIT
+LOG_DIR="${FLASH_ROOT}/logs"
+
+cleanup() {
+    rm -rf "${TMP_DIR}"
+    rm -rf "${LOG_DIR}"
+}
+
+trap cleanup EXIT
+
+rm -rf "${LOG_DIR}"
 
 FIRMWARE_FILE="${TMP_DIR}/klipper.bin"
 printf 'dummy firmware' > "${FIRMWARE_FILE}"

@@ -7,7 +7,14 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FLASH_SCRIPT="${REPO_ROOT}/flash_automation/flash_automation.sh"
 LOG_ROOT="${REPO_ROOT}/flash_automation/logs"
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "${TMP_DIR}"; rm -rf "${LOG_ROOT}"/flash_*' EXIT
+cleanup() {
+    rm -rf "${TMP_DIR}"
+    rm -rf "${LOG_ROOT}"
+}
+
+trap cleanup EXIT
+
+rm -rf "${LOG_ROOT}"
 
 make_common_stubs() {
     local dir="$1"
@@ -68,7 +75,7 @@ sha_output=$(env PATH="${fake_bin_sha}:/bin" \
     FLASH_AUTOMATION_OS_OVERRIDE=Darwin \
     HOME="${TMP_DIR}/home-sha" \
     XDG_CACHE_HOME="${TMP_DIR}/cache-sha" \
-    bash -c 'set -euo pipefail; source "'"${FLASH_SCRIPT}"'" >/dev/null; portable_sha256 "'"${firmware_sample}"'"')
+    bash -c 'set -euo pipefail; source "'"${FLASH_SCRIPT}"'" >/dev/null; flash_automation_initialize; portable_sha256 "'"${firmware_sample}"'"')
 assert_equals "FAKEHASH" "${sha_output}" "portable_sha256 devrait utiliser shasum sur macOS"
 
 # 2. portable_stat doit s'appuyer sur gstat lorsque disponible sur macOS.
@@ -95,7 +102,7 @@ stat_output=$(env PATH="${fake_bin_gstat}:/bin" \
     FLASH_AUTOMATION_OS_OVERRIDE=Darwin \
     HOME="${TMP_DIR}/home-gstat" \
     XDG_CACHE_HOME="${TMP_DIR}/cache-gstat" \
-    bash -c 'set -euo pipefail; source "'"${FLASH_SCRIPT}"'" >/dev/null; portable_stat "--printf=%s" "'"${file_gstat}"'"')
+    bash -c 'set -euo pipefail; source "'"${FLASH_SCRIPT}"'" >/dev/null; flash_automation_initialize; portable_stat "--printf=%s" "'"${file_gstat}"'"')
 assert_equals "${expected_size}" "${stat_output}" "portable_stat devrait utiliser gstat sur macOS"
 
 # 3. portable_stat doit basculer sur stat BSD lorsque gstat est absent.
@@ -123,7 +130,7 @@ bsd_output=$(env PATH="${fake_bin_stat}:/bin" \
     FLASH_AUTOMATION_OS_OVERRIDE=Darwin \
     HOME="${TMP_DIR}/home-stat" \
     XDG_CACHE_HOME="${TMP_DIR}/cache-stat" \
-    bash -c 'set -euo pipefail; source "'"${FLASH_SCRIPT}"'" >/dev/null; portable_stat "--printf=%s" "'"${file_stat}"'"')
+    bash -c 'set -euo pipefail; source "'"${FLASH_SCRIPT}"'" >/dev/null; flash_automation_initialize; portable_stat "--printf=%s" "'"${file_stat}"'"')
 assert_equals "${expected_stat}" "${bsd_output}" "portable_stat devrait supporter stat BSD"
 
 # 4. portable_dfu_util doit utiliser DFU_UTIL_BIN lorsque fourni.
@@ -141,7 +148,7 @@ dfu_output=$(env PATH="${fake_bin_dfu}:/bin" \
     DFU_UTIL_BIN="${fake_bin_dfu}/custom-dfu" \
     HOME="${TMP_DIR}/home-dfu" \
     XDG_CACHE_HOME="${TMP_DIR}/cache-dfu" \
-    bash -c 'set -euo pipefail; source "'"${FLASH_SCRIPT}"'" >/dev/null; portable_dfu_util foo bar')
+    bash -c 'set -euo pipefail; source "'"${FLASH_SCRIPT}"'" >/dev/null; flash_automation_initialize; portable_dfu_util foo bar')
 assert_equals "dfu-stub foo bar" "${dfu_output}" "portable_dfu_util devrait respecter DFU_UTIL_BIN"
 
 # 5. ensure_portable_sha256_available doit suggérer Homebrew sur macOS lorsqu'aucun outil n'est présent.
@@ -154,7 +161,7 @@ err_output=$(env PATH="${fake_bin_err}:/bin" \
     FLASH_AUTOMATION_SHA256_SKIP="sha256sum,gsha256sum,shasum" \
     HOME="${TMP_DIR}/home-err" \
     XDG_CACHE_HOME="${TMP_DIR}/cache-err" \
-    bash -c 'set -euo pipefail; source "'"${FLASH_SCRIPT}"'" >/dev/null; ensure_portable_sha256_available' 2>&1)
+    bash -c 'set -euo pipefail; source "'"${FLASH_SCRIPT}"'" >/dev/null; flash_automation_initialize; ensure_portable_sha256_available' 2>&1)
 err_status=$?
 set -e
 if [[ ${err_status} -eq 0 ]]; then
