@@ -167,30 +167,25 @@ python3 install_wchisp.py
 - Le firmware apparaît dans `.cache/klipper/out/klipper.bin`.
 - Conservez le résumé `sha256sum .cache/klipper/out/klipper.bin` pour noter la version flashée.
 
-### 4. Valider le script de flash en avance
+### 4. Lancer le flash en mode guidé
+
+La méthode la plus sûre est d'utiliser l'assistant intégré à `bmcu_tool.py`.
 
 ```bash
-python3 -m compileall flash.py
+# Si vous n'êtes pas déjà dans l'environnement virtuel
+cd flash_automation
+source .venv/bin/activate
+
+# Lancer l'outil
+python3 bmcu_tool.py
 ```
 
-- Si la commande réussit, un dossier `__pycache__` est créé et aucun message d'erreur n'apparaît.
-- Si une erreur de syntaxe est détectée, **rien n'est flashé** : corrigez (ou reclonez le dépôt) avant de continuer.
-
-### 5. Lancer le flash en mode guidé
-
-```bash
-python3 flash.py
-```
-
-L'assistant vous demandera :
-
-1. Le port série (généralement `/dev/ttyACM0`).
-2. Une confirmation avant de modifier quoi que ce soit.
-3. Le suivi en direct des étapes (effacement, écriture, vérification).
+- Dans le menu, sélectionnez l'option pour **Flasher le firmware**.
+- L'assistant vous guidera pour choisir le port série et confirmera avant de lancer le processus.
 
 > 💡 Connectez le BMCU-C directement au PC, sans rallonge douteuse. Pas de mise en veille pendant le flash.
 
-### 6. Contrôles de fin de procédure
+### 5. Contrôles de fin de procédure
 
 - Vérifiez le message `Flash complete` dans le terminal.
 - Débranchez/rebranchez le BMCU-C si le port série n'apparaît plus.
@@ -225,8 +220,8 @@ La documentation complète d'intégration est disponible dans [`addon/docs/setup
 | `python3` ou `git` introuvable | Reprenez la section [Logiciels et paquets système](#-ce-quil-vous-faut). |
 | `Permission denied` sur le port série | `sudo usermod -aG dialout "$USER"` puis reconnectez-vous ou utilisez `newgrp dialout`. |
 | `riscv32-unknown-elf-gcc: command not found` | Installez la toolchain (voir ci-dessus) ou exportez `CROSS_PREFIX` vers votre installation. |
-| `python3 -m compileall flash.py` renvoie une erreur | Le fichier est corrompu : supprimez et reclonez `flash.py`, ou comparez avec la version du dépôt. Aucun flash n'a eu lieu tant que cette étape échoue. |
-| Le flash échoue au milieu | Consultez `logs/` et appliquez la [procédure de retour arrière](flash_automation/docs/rollback_procedure.md) avant de recommencer. |
+| `bmcu_tool.py` affiche une erreur au lancement | Assurez-vous d'avoir activé l'environnement virtuel (`source .venv/bin/activate`) et que les dépendances sont installées (`pip install -r requirements.txt`). Si l'erreur persiste, le fichier est peut-être corrompu : reclonez le dépôt. |
+| Le flash échoue au milieu | Consultez les logs générés par l'outil et appliquez la [procédure de retour arrière](flash_automation/docs/rollback_procedure.md) avant de recommencer. |
 | Le port série disparaît après flash | Débranchez/branchez le câble, testez un autre port, vérifiez l'alimentation et relancez `screen`. |
 
 > 📚 Détails supplémentaires :

@@ -192,7 +192,7 @@ def extract_binary(archive_path: Path, workdir: Path) -> Path:
                         "L'archive wchisp contient un membre avec un chemin potentiellement dangereux: "
                         f"{member.name!r}."
                     )
-            tar.extractall(path=workdir, members=members)
+            tar.extractall(path=workdir, members=members, filter='data')
     except (OSError, tarfile.TarError) as err:
         raise RuntimeError("Impossible d'extraire l'archive wchisp.") from err
 
