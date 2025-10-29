@@ -131,3 +131,99 @@ def test_cli_exclude_path_removes_directory(firmware_cleanup):
     assert str(excluded_fw) not in candidates
     assert str(default_fw) not in candidates
     assert str(control_fw) in candidates
+
+
+def test_deep_scan_respects_extended_excludes(firmware_cleanup):
+    root_fw = FLASH_ROOT / "scan-root.bin"
+    excluded_fw = FLASH_ROOT / "archive" / "skip-me.bin"
+    _touch(root_fw, firmware_cleanup)
+    _touch(excluded_fw, firmware_cleanup)
+
+    script = textwrap.dedent(
+        f"""
+        source "{SCRIPT_PATH}"
+        flash_automation_initialize
+        trap - ERR
+        trap - EXIT
+        set +e
+        set +u
+        parse_cli_arguments --deep-scan
+        apply_configuration_defaults
+        collect_firmware_candidates candidates
+        for item in "${{candidates[@]}}"; do
+            echo "candidate=$item"
+        done
+        exit 0
+        """
+    )
+
+    result = _run_bash(script)
+    assert result.returncode == 0, result.stderr
+    candidates = set(_parse_candidates(result.stdout))
+
+    assert str(root_fw) in candidates
+    assert str(excluded_fw) not in candidates
+
+
+def test_scan_extensions_filters_candidates(firmware_cleanup):
+    bin_fw = FLASH_ROOT / ".cache" / "firmware" / "scan-target.bin"
+    uf2_fw = FLASH_ROOT / ".cache" / "firmware" / "scan-target.uf2"
+    _touch(bin_fw, firmware_cleanup)
+    _touch(uf2_fw, firmware_cleanup)
+
+    script = textwrap.dedent(
+        f"""
+        source "{SCRIPT_PATH}"
+        flash_automation_initialize
+        trap - ERR
+        trap - EXIT
+        set +e
+        set +u
+        parse_cli_arguments --scan-extensions uf2
+        apply_configuration_defaults
+        collect_firmware_candidates candidates
+        for item in "${{candidates[@]}}"; do
+            echo "candidate=$item"
+        done
+        exit 0
+        """
+    )
+
+    result = _run_bash(script)
+    assert result.returncode == 0, result.stderr
+    candidates = set(_parse_candidates(result.stdout))
+
+    assert str(uf2_fw) in candidates
+    assert str(bin_fw) not in candidates
+
+
+def test_exclude_extension_filters_candidates(firmware_cleanup):
+    bin_fw = FLASH_ROOT / ".cache" / "klipper" / "out" / "scan-keep.bin"
+    uf2_fw = FLASH_ROOT / ".cache" / "klipper" / "out" / "scan-skip.uf2"
+    _touch(bin_fw, firmware_cleanup)
+    _touch(uf2_fw, firmware_cleanup)
+
+    script = textwrap.dedent(
+        f"""
+        source "{SCRIPT_PATH}"
+        flash_automation_initialize
+        trap - ERR
+        trap - EXIT
+        set +e
+        set +u
+        parse_cli_arguments --exclude-extension uf2
+        apply_configuration_defaults
+        collect_firmware_candidates candidates
+        for item in "${{candidates[@]}}"; do
+            echo "candidate=$item"
+        done
+        exit 0
+        """
+    )
+
+    result = _run_bash(script)
+    assert result.returncode == 0, result.stderr
+    candidates = set(_parse_candidates(result.stdout))
+
+    assert str(bin_fw) in candidates
+    assert str(uf2_fw) not in candidates
