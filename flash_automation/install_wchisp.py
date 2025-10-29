@@ -11,6 +11,7 @@ placé dans ``~/.local/bin``.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
 import shutil
@@ -22,27 +23,86 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+
+SUPPORTED_SUFFIXES = {
+    "x86_64": "linux-x64",
+    "aarch64": "linux-aarch64",
+}
+
+ARCH_ALIASES = {
+    "amd64": "x86_64",
+    "arm64": "aarch64",
+    "armv7": "armv7l",
+    "armv7l": "armv7l",
+    "armv8l": "armv7l",
+    "armhf": "armv7l",
+    "armv6": "armv6l",
+    "armv6l": "armv6l",
+    "armel": "armv6l",
+    "i386": "i686",
+    "i486": "i686",
+    "i586": "i686",
+    "i686": "i686",
+}
+
+MANUAL_DOC_PATH = Path(__file__).resolve().parent / "docs" / "wchisp_manual_install.md"
+
 DEFAULT_RELEASE = "v0.3.0"
 DEFAULT_BASE_URL = "https://github.com/ch32-rs/wchisp/releases/download"
 
 
-def detect_archive_suffix() -> str:
-    """Retourne le suffixe d'archive à télécharger pour l'architecture locale."""
+def resolve_machine() -> str:
+    """Retourne l'architecture machine en tenant compte d'un override éventuel."""
 
-    system = platform.system().lower()
-    if system != "linux":
+    override = os.environ.get("WCHISP_ARCH_OVERRIDE")
+    if override:
+        return override.lower()
+    return platform.machine().lower()
+
+
+def normalize_machine(machine: str) -> str:
+    """Normalise les noms d'architecture connus."""
+
+    return ARCH_ALIASES.get(machine, machine)
+
+
+def ensure_linux_platform() -> None:
+    if platform.system().lower() != "linux":
         raise RuntimeError(
             "Seules les plates-formes Linux sont prises en charge pour l'installation automatique."
         )
 
-    machine = platform.machine().lower()
-    if machine in {"x86_64", "amd64"}:
-        return "linux-x64"
-    if machine in {"aarch64", "arm64"}:
-        return "linux-aarch64"
 
+def compute_download_plan(release: str, base_url: str) -> tuple[str, str, str, str | None]:
+    """Calcule l'URL de téléchargement et les métadonnées associées."""
+
+    ensure_linux_platform()
+
+    raw_machine = resolve_machine()
+    machine = normalize_machine(raw_machine)
+
+    suffix = SUPPORTED_SUFFIXES.get(machine)
+    if suffix:
+        asset = f"wchisp-{release}-{suffix}.tar.gz"
+        url = f"{base_url}/{release}/{asset}"
+        return url, asset, raw_machine, None
+
+    fallback_url = os.environ.get("WCHISP_FALLBACK_ARCHIVE_URL")
+    if fallback_url:
+        asset = os.environ.get("WCHISP_FALLBACK_ARCHIVE_NAME") or fallback_url.rstrip("/").split("/")[-1]
+        asset = asset.split("?")[0]
+        if not asset:
+            raise RuntimeError(
+                "Impossible de déterminer le nom de fichier de l'archive fournie via WCHISP_FALLBACK_ARCHIVE_URL."
+            )
+        checksum = os.environ.get("WCHISP_FALLBACK_CHECKSUM")
+        return fallback_url, asset, raw_machine, checksum
+
+    manual_doc = os.environ.get("WCHISP_MANUAL_DOC", str(MANUAL_DOC_PATH))
     raise RuntimeError(
-        f"Aucun binaire pré-compilé n'est disponible pour l'architecture '{machine}'."
+        "Aucun binaire pré-compilé n'est disponible pour l'architecture "
+        f"'{raw_machine}'. Fournissez WCHISP_FALLBACK_ARCHIVE_URL (et optionnellement WCHISP_FALLBACK_CHECKSUM) "
+        f"ou suivez les instructions de '{manual_doc}' pour compiler wchisp, puis exportez WCHISP_BIN."
     )
 
 
@@ -65,6 +125,28 @@ def download_archive(url: str, destination: Path) -> None:
             shutil.copyfileobj(response, target)
     except urllib.error.URLError as err:
         raise RuntimeError(f"Échec du téléchargement de wchisp ({err}).") from err
+
+
+def verify_checksum(path: Path, expected: str | None) -> None:
+    """Vérifie la somme de contrôle SHA-256 si ``expected`` est fournie."""
+
+    if not expected:
+        print(
+            "WARNING: aucune somme de contrôle n'a été fournie pour l'archive wchisp. Vérifiez la provenance du fichier.",
+            file=sys.stderr,
+        )
+        return
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+
+    actual = digest.hexdigest()
+    if actual.lower() != expected.lower():
+        raise RuntimeError(
+            "La somme de contrôle SHA-256 de l'archive wchisp ne correspond pas à la valeur attendue."
+        )
 
 
 def extract_binary(archive_path: Path, workdir: Path) -> Path:
@@ -104,18 +186,24 @@ def main() -> int:
     base_url = os.environ.get("WCHISP_BASE_URL", DEFAULT_BASE_URL)
 
     try:
-        suffix = detect_archive_suffix()
+        url, asset, machine, checksum = compute_download_plan(release, base_url)
     except RuntimeError as err:
         print(f"ERROR: {err}", file=sys.stderr)
         return 1
 
-    url = f"{base_url}/{release}/wchisp-{release}-{suffix}.tar.gz"
     print(f"Téléchargement de wchisp ({url})…")
+    print(f"Archive wchisp sélectionnée : {asset} (machine détectée : {machine})")
 
     with tempfile.TemporaryDirectory() as tmp_str:
         tmpdir = Path(tmp_str)
         archive_path = tmpdir / "wchisp.tar.gz"
         download_archive(url, archive_path)
+
+        try:
+            verify_checksum(archive_path, checksum)
+        except RuntimeError as err:
+            print(f"ERROR: {err}", file=sys.stderr)
+            return 1
 
         extract_dir = tmpdir / "extract"
         extract_dir.mkdir(parents=True, exist_ok=True)
@@ -132,7 +220,7 @@ def main() -> int:
             print(f"ERROR: {err}", file=sys.stderr)
             return 1
 
-    print(f"wchisp installé dans {installed_path}")
+    print(f"wchisp installé dans {installed_path} (machine détectée : {machine})")
     print("Assurez-vous que ce dossier figure dans votre PATH avant de lancer le flash.")
     return 0
 

@@ -13,6 +13,9 @@ flash (manuel ou distant).
     releases GitHub officielles (`.cache/tools/wchisp/`) lorsque l'outil est
     absent du système et que `WCHISP_AUTO_INSTALL` vaut `true` (comportement
     par défaut).
+- Les architectures non prises en charge officiellement (ex. `armv7l`, `i686`)
+  doivent suivre [la procédure de compilation manuelle](./docs/wchisp_manual_install.md)
+  ou fournir une archive personnalisée via les variables `WCHISP_FALLBACK_*`.
 - Outils additionnels pour l'automatisation distante : `ipmitool`, `sshpass`,
   `scp`, `ping`.
 
@@ -85,6 +88,10 @@ python3 flash.py
 | `WCHISP_AUTO_INSTALL` | Autoriser le téléchargement automatique de `wchisp` | `true` |
 | `WCHISP_RELEASE` | Tag GitHub utilisé pour récupérer `wchisp` | `v0.3.0` |
 | `WCHISP_BASE_URL` | Base des URL de téléchargement `wchisp` | `https://github.com/ch32-rs/wchisp/releases/download` |
+| `WCHISP_ARCH_OVERRIDE` | Forcer l'architecture détectée (tests/simulations) | `uname -m` |
+| `WCHISP_FALLBACK_ARCHIVE_URL` | Archive alternative à utiliser pour les architectures non supportées | *(vide)* |
+| `WCHISP_FALLBACK_ARCHIVE_NAME` | Nom de fichier à utiliser si l'URL de secours contient des paramètres | dérivé de l'URL |
+| `WCHISP_FALLBACK_CHECKSUM` | Somme SHA-256 de l'archive de secours (fortement recommandé) | *(vide)* |
 
 Les journaux et rapports d'échec sont écrits dans `~/BMCU_C_to_Klipper_logs/`
 avec horodatage (chemin personnalisable via `BMCU_LOG_ROOT`).
@@ -108,6 +115,7 @@ avec horodatage (chemin personnalisable via `BMCU_LOG_ROOT`).
 - [Retour à l'état initial après échec](./docs/rollback_procedure.md)
 - [Configuration Klipper de référence](./klipper.config)
 - [Correctifs appliqués automatiquement](./klipper_overrides)
+- [Compilation manuelle de `wchisp`](./docs/wchisp_manual_install.md)
 
 ## 🧪 Tests recommandés
 
