@@ -116,6 +116,7 @@ readonly TOOLS_ROOT="${CACHE_ROOT}/tools"
 source "${FLASH_ROOT}/lib/ui.sh"
 source "${FLASH_ROOT}/lib/permissions_cache.sh"
 source "${FLASH_ROOT}/lib/wchisp.sh"
+source "${FLASH_ROOT}/lib/firmware.sh"
 
 ALLOW_UNVERIFIED_WCHISP=""
 readonly DFU_ALT_SETTING="${DFU_ALT_SETTING:-0}"
@@ -175,6 +176,10 @@ SERVICES_STOPPED="false"
 SERVICES_RESTORED="false"
 DRY_RUN_PLACEHOLDER_CREATED="false"
 DRY_RUN_PLACEHOLDER_PATH=""
+DRY_RUN_STREAM_WRITER_PID=""
+DRY_RUN_ARTIFACT_MODE="file"
+FIRMWARE_METADATA_AVAILABLE="true"
+DRY_RUN_SD_MOUNT_DIR=""
 
 readonly HOST_UNAME="$(uname -s 2>/dev/null || echo unknown)"
 readonly HOST_OS="${FLASH_AUTOMATION_OS_OVERRIDE:-${HOST_UNAME}}"
@@ -435,6 +440,7 @@ Variables d'environnement associées :
   FLASH_AUTOMATION_METHOD            Définit la méthode par défaut (wchisp|serial|sdcard|dfu|auto).
   FLASH_AUTOMATION_AUTO_CONFIRM      "true"/"1" pour activer le mode non interactif.
   FLASH_AUTOMATION_DRY_RUN           Active le mode simulation sans flash réel.
+  FLASH_AUTOMATION_DRY_RUN_STREAM    Choisit l'artefact dry-run (file/fifo) lorsque aucun firmware n'est détecté.
   FLASH_AUTOMATION_SERIAL_PORT       Port série forcé (équivalent --serial-port).
   FLASH_AUTOMATION_SDCARD_PATH       Point de montage forcé pour la méthode sdcard.
   FLASH_AUTOMATION_FLASH_USB_SCRIPT  Chemin personnalisé vers flash_usb.py.
@@ -825,6 +831,28 @@ apply_configuration_defaults() {
         fi
     fi
 
+    DRY_RUN_ARTIFACT_MODE="file"
+    if [[ -n "${FLASH_AUTOMATION_DRY_RUN_STREAM:-}" ]]; then
+        local requested_mode
+        requested_mode="${FLASH_AUTOMATION_DRY_RUN_STREAM,,}"
+        requested_mode="${requested_mode// /}"
+        case "${requested_mode}" in
+            fifo|stream|pipe)
+                DRY_RUN_ARTIFACT_MODE="fifo"
+                ;;
+            file|artefact|artifact|placeholder|none)
+                DRY_RUN_ARTIFACT_MODE="file"
+                ;;
+            "")
+                :
+                ;;
+            *)
+                warn "Valeur FLASH_AUTOMATION_DRY_RUN_STREAM inconnue (${FLASH_AUTOMATION_DRY_RUN_STREAM}). Utilisation d'un artefact factice."
+                DRY_RUN_ARTIFACT_MODE="file"
+                ;;
+        esac
+    fi
+
     if [[ "${CLI_BOOTSTRAP_REQUESTED}" == "true" ]]; then
         BOOTSTRAP_MODE="true"
         BOOTSTRAP_SOURCE="option CLI (--bootstrap)"
@@ -973,6 +1001,12 @@ function on_exit() {
         restart_klipper_services || true
     fi
 
+    if [[ -n "${DRY_RUN_STREAM_WRITER_PID}" ]]; then
+        kill "${DRY_RUN_STREAM_WRITER_PID}" 2>/dev/null || true
+        wait "${DRY_RUN_STREAM_WRITER_PID}" 2>/dev/null || true
+        DRY_RUN_STREAM_WRITER_PID=""
+    fi
+
     if [[ "${DRY_RUN_PLACEHOLDER_CREATED}" == "true" && -n "${DRY_RUN_PLACEHOLDER_PATH}" ]]; then
         rm -f "${DRY_RUN_PLACEHOLDER_PATH}" 2>/dev/null || true
         local placeholder_dir
@@ -980,6 +1014,11 @@ function on_exit() {
         rmdir "${placeholder_dir}" 2>/dev/null || true
         DRY_RUN_PLACEHOLDER_CREATED="false"
         DRY_RUN_PLACEHOLDER_PATH=""
+    fi
+
+    if [[ -n "${DRY_RUN_SD_MOUNT_DIR}" ]]; then
+        rm -rf "${DRY_RUN_SD_MOUNT_DIR}" 2>/dev/null || true
+        DRY_RUN_SD_MOUNT_DIR=""
     fi
 
     return "${exit_code}"
@@ -1725,103 +1764,6 @@ function format_path_for_display() {
     fi
 }
 
-run_find_firmware_files() {
-    local search_dir="$1"
-    local max_depth="${2:-}"
-    local respect_excludes="${3:-true}"
-
-    local -a find_cmd=(find "${search_dir}")
-    if [[ -n "${max_depth}" ]]; then
-        find_cmd+=(-maxdepth "${max_depth}")
-    fi
-
-    if [[ "${respect_excludes}" == "true" && ${#FIRMWARE_SCAN_EXCLUDES[@]} -gt 0 ]]; then
-        find_cmd+=(\()
-        local first_pattern=true
-        for exclude in "${FIRMWARE_SCAN_EXCLUDES[@]}"; do
-            local sanitized="${exclude%/}"
-            [[ -n "${sanitized}" ]] || continue
-            for pattern in "${sanitized}" "${sanitized}/*"; do
-                if [[ "${first_pattern}" == "true" ]]; then
-                    first_pattern=false
-                else
-                    find_cmd+=(-o)
-                fi
-                find_cmd+=(-path "${pattern}")
-            done
-        done
-        find_cmd+=(\))
-        find_cmd+=(-prune)
-        find_cmd+=(-o)
-    fi
-
-    find_cmd+=(-type)
-    find_cmd+=(f)
-
-    local -a effective_include_exts=()
-    if [[ ${#FIRMWARE_SCAN_EXTENSIONS[@]} -gt 0 ]]; then
-        effective_include_exts=("${FIRMWARE_SCAN_EXTENSIONS[@]}")
-    else
-        effective_include_exts=("${DEFAULT_FIRMWARE_SCAN_EXTENSIONS[@]}")
-    fi
-
-    local -a effective_exclude_exts=()
-    if [[ ${#FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]} -gt 0 ]]; then
-        effective_exclude_exts=("${FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]}")
-    else
-        effective_exclude_exts=("${DEFAULT_FIRMWARE_EXCLUDE_EXTENSIONS[@]}")
-    fi
-
-    declare -A exclude_lookup=()
-    local ext
-    for ext in "${effective_exclude_exts[@]}"; do
-        [[ -n "${ext}" ]] || continue
-        exclude_lookup["${ext}"]=1
-    done
-
-    local -a filtered_include_exts=()
-    for ext in "${effective_include_exts[@]}"; do
-        [[ -n "${ext}" ]] || continue
-        if [[ -n "${exclude_lookup["${ext}"]:-}" ]]; then
-            continue
-        fi
-        filtered_include_exts+=("${ext}")
-    done
-    effective_include_exts=("${filtered_include_exts[@]}")
-
-    if [[ ${#effective_include_exts[@]} -eq 0 ]]; then
-        return 0
-    fi
-
-    declare -A include_lookup=()
-    for ext in "${effective_include_exts[@]}"; do
-        include_lookup["${ext}"]=1
-    done
-
-    for ext in "${effective_exclude_exts[@]}"; do
-        [[ -n "${include_lookup["${ext}"]:-}" ]] && continue
-        if [[ -n "${ext}" ]]; then
-            find_cmd+=(!)
-            find_cmd+=(-name "*.${ext}")
-        fi
-    done
-
-    find_cmd+=(\()
-    local first_include=true
-    for ext in "${effective_include_exts[@]}"; do
-        [[ -n "${ext}" ]] || continue
-        if [[ "${first_include}" == "true" ]]; then
-            first_include=false
-        else
-            find_cmd+=(-o)
-        fi
-        find_cmd+=(-name "*.${ext}")
-    done
-    find_cmd+=(\))
-    find_cmd+=(-print0)
-
-    "${find_cmd[@]}"
-}
 
 verify_common_dependencies() {
     ensure_portable_stat_available
@@ -1974,15 +1916,33 @@ finalize_method_selection() {
             fi
             ;;
         sdcard)
-            success "Méthode sélectionnée : ${human}."
             if [[ -z "${SDCARD_MOUNTPOINT}" ]]; then
-                prompt_sdcard_mountpoint
-            else
-                if [[ -n "${SDCARD_SELECTION_SOURCE}" ]]; then
-                    success "Point de montage imposé (${SDCARD_SELECTION_SOURCE}) : ${SDCARD_MOUNTPOINT}."
+                if [[ "${AUTO_CONFIRM_MODE}" == "true" ]]; then
+                    if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+                        mkdir -p "${CACHE_ROOT}" 2>/dev/null || true
+                        local simulated_sd
+                        simulated_sd="$(mktemp -d "${CACHE_ROOT}/sdcard_dry_run_XXXXXX")"
+                        SDCARD_MOUNTPOINT="${simulated_sd}"
+                        DRY_RUN_SD_MOUNT_DIR="${simulated_sd}"
+                        SDCARD_SELECTION_SOURCE="mode --dry-run (répertoire simulé)"
+                        warn "Mode auto-confirm : aucun --sdcard-path fourni. Utilisation d'un répertoire temporaire (${SDCARD_MOUNTPOINT})."
+                    else
+                        warn "Mode auto-confirm : aucun --sdcard-path fourni. Bascule automatique vers wchisp."
+                        SELECTED_METHOD="wchisp"
+                        finalize_method_selection
+                        return
+                    fi
                 else
-                    success "Point de montage imposé : ${SDCARD_MOUNTPOINT}."
+                    prompt_sdcard_mountpoint
+                    SDCARD_SELECTION_SOURCE="sélection interactive"
                 fi
+            fi
+
+            success "Méthode sélectionnée : ${human}."
+            if [[ -n "${SDCARD_SELECTION_SOURCE}" ]]; then
+                success "Point de montage imposé (${SDCARD_SELECTION_SOURCE}) : ${SDCARD_MOUNTPOINT}."
+            else
+                success "Point de montage imposé : ${SDCARD_MOUNTPOINT}."
             fi
             ;;
         dfu)
@@ -2066,326 +2026,6 @@ function perform_bootstrap_if_requested() {
     fi
 
     success "build.sh exécuté avec succès."
-}
-
-function collect_firmware_candidates() {
-    local -n firmware_candidates_ref=$1
-    firmware_candidates_ref=()
-    FIRMWARE_CANDIDATE_MTIMES=()
-    FIRMWARE_CANDIDATE_TIMESTAMPS=()
-
-    declare -A seen_paths=()
-    local -a decorated=()
-
-    add_candidate() {
-        local path="$1"
-        [[ -f "${path}" ]] || return
-        if [[ -n "${seen_paths["${path}"]:-}" ]]; then
-            return
-        fi
-        seen_paths["${path}"]=1
-        local raw_mtime
-        raw_mtime=$(get_file_mtime_epoch "${path}" 2>/dev/null) || raw_mtime=""
-        local mtime="${raw_mtime:-0}"
-        FIRMWARE_CANDIDATE_MTIMES["${path}"]="${mtime}"
-        if [[ -n "${raw_mtime}" ]]; then
-            FIRMWARE_CANDIDATE_TIMESTAMPS["${path}"]="$(format_epoch_for_display "${mtime}")"
-        else
-            FIRMWARE_CANDIDATE_TIMESTAMPS["${path}"]=""
-        fi
-        decorated+=("${mtime}"$'\t'"${path}")
-    }
-
-    if [[ -n "${FIRMWARE_DISPLAY_PATH}" ]]; then
-        local resolved_hint
-        resolved_hint="$(resolve_path_relative_to_flash_root "${FIRMWARE_DISPLAY_PATH}")"
-        if [[ -d "${resolved_hint}" ]]; then
-            while IFS= read -r -d '' file; do
-                add_candidate "${file}"
-            done < <(run_find_firmware_files "${resolved_hint}" 3 false 2>/dev/null)
-        else
-            add_candidate "${resolved_hint}"
-        fi
-    fi
-
-    if [[ -n "${PRESELECTED_FIRMWARE_FILE}" ]]; then
-        add_candidate "${PRESELECTED_FIRMWARE_FILE}"
-    fi
-
-    for rel_path in "${DEFAULT_FIRMWARE_RELATIVE_PATHS[@]}"; do
-        local default_dir="${FLASH_ROOT}/${rel_path}"
-        [[ -d "${default_dir}" ]] || continue
-        while IFS= read -r -d '' file; do
-            add_candidate "${file}"
-        done < <(run_find_firmware_files "${default_dir}" 2 true 2>/dev/null)
-    done
-
-    if [[ "${DEEP_SCAN_ENABLED}" == "true" ]]; then
-        local -a extra_search=("${FLASH_ROOT}")
-        for dir in "${extra_search[@]}"; do
-            [[ -d "${dir}" ]] || continue
-            while IFS= read -r -d '' file; do
-                add_candidate "${file}"
-            done < <(run_find_firmware_files "${dir}" 4 true 2>/dev/null)
-        done
-    fi
-
-    if [[ ${#decorated[@]} -gt 0 ]]; then
-        mapfile -t decorated < <(printf '%s\n' "${decorated[@]}" | sort -t $'\t' -k1,1nr -k2,2)
-        for entry in "${decorated[@]}"; do
-            firmware_candidates_ref+=("${entry#*$'\t'}")
-        done
-    fi
-
-    unset -f add_candidate 2>/dev/null || true
-}
-
-function use_dry_run_placeholder_firmware() {
-    local placeholder_dir="${FLASH_ROOT}/.cache/firmware"
-    local placeholder_file="${placeholder_dir}/klipper.bin"
-
-    mkdir -p "${placeholder_dir}"
-    if [[ ! -f "${placeholder_file}" ]]; then
-        : > "${placeholder_file}"
-        DRY_RUN_PLACEHOLDER_CREATED="true"
-    else
-        DRY_RUN_PLACEHOLDER_CREATED="false"
-    fi
-
-    DRY_RUN_PLACEHOLDER_PATH="${placeholder_file}"
-    FIRMWARE_FILE="${placeholder_file}"
-    FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${FIRMWARE_FILE}")"
-    FIRMWARE_FORMAT="${FIRMWARE_FILE##*.}"
-    FIRMWARE_SELECTION_SOURCE="mode --dry-run (artefact simulé)"
-    info "Mode --dry-run : aucun firmware détecté, utilisation d'un artefact simulé (${FIRMWARE_DISPLAY_PATH})."
-}
-
-function prompt_firmware_selection() {
-    local -n candidates_ref=$1
-    local choice=""
-    local default_choice=""
-    local default_display=""
-
-    if (( ${#candidates_ref[@]} > 0 )); then
-        default_choice="${candidates_ref[0]}"
-        default_display="$(format_path_for_display "${default_choice}")"
-    fi
-
-    if [[ ${#DEFAULT_FIRMWARE_RELATIVE_PATHS[@]} -gt 0 ]]; then
-        local joined_paths
-        joined_paths="${DEFAULT_FIRMWARE_RELATIVE_PATHS[*]}"
-        echo "Chemins valides (relatifs au dépôt) : ${joined_paths}"
-    fi
-    echo "Saisissez le numéro correspondant, un chemin absolu ou relatif, ou 'q' pour quitter rapidement."
-
-    while true; do
-        echo
-        echo "Sélectionnez le firmware à utiliser :"
-        local index=1
-        for file in "${candidates_ref[@]}"; do
-            local display
-            display="$(format_path_for_display "${file}")"
-            local extension="${file##*.}"
-            local timestamp
-            timestamp="$(get_candidate_timestamp_display "${file}")"
-            if [[ -n "${timestamp}" ]]; then
-                printf "  [%d] %s (%s, modifié le %s)\n" "${index}" "${display}" "${extension}" "${timestamp}";
-            else
-                printf "  [%d] %s (%s)\n" "${index}" "${display}" "${extension}";
-            fi
-            ((index++))
-        done
-        printf "  [%d] Saisir un chemin personnalisé\n" "${index}"
-        printf "  [q] Quitter et annuler la procédure\n"
-
-        local prompt_hint=""
-        if [[ -n "${default_display}" ]]; then
-            prompt_hint=" (Entrée = ${default_display})"
-        fi
-
-        read -rp "Votre choix${prompt_hint} ('q' pour quitter) : " answer
-
-        if [[ -z "${answer}" ]]; then
-            if [[ -n "${default_choice}" ]]; then
-                choice="${default_choice}"
-                break
-            fi
-            warn "Veuillez sélectionner une option ou fournir un chemin valide."
-            continue
-        fi
-
-        if [[ "${answer,,}" == "q" ]]; then
-            info "Arrêt demandé par l'utilisateur lors de la sélection du firmware."
-            exit 0
-        fi
-
-        if [[ "${answer}" =~ ^[0-9]+$ ]]; then
-            local numeric=$((answer))
-            if (( numeric >= 1 && numeric <= ${#candidates_ref[@]} )); then
-                choice="${candidates_ref[$((numeric-1))]}"
-                break
-            elif (( numeric == index )); then
-                read -rp "Chemin complet du firmware (relatif à ${FLASH_ROOT} accepté) : " custom_path
-                local resolved="$(resolve_path_relative_to_flash_root "${custom_path}")"
-                if [[ -f "${resolved}" ]]; then
-                    choice="${resolved}"
-                    break
-                fi
-                error_msg "Le fichier spécifié est introuvable (${custom_path})."
-            fi
-        else
-            local resolved="$(resolve_path_relative_to_flash_root "${answer}")"
-            if [[ -f "${resolved}" ]]; then
-                choice="${resolved}"
-                break
-            fi
-            error_msg "Sélection invalide : ${answer}"
-        fi
-    done
-
-    FIRMWARE_FILE="${choice}"
-    FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${FIRMWARE_FILE}")"
-    FIRMWARE_FORMAT="${FIRMWARE_FILE##*.}"
-}
-
-function prepare_firmware() {
-    CURRENT_STEP="Étape 1: Sélection du firmware"
-    render_box "${CURRENT_STEP}"
-    local -a include_ext_display=()
-    if [[ ${#FIRMWARE_SCAN_EXTENSIONS[@]} -gt 0 ]]; then
-        include_ext_display=("${FIRMWARE_SCAN_EXTENSIONS[@]}")
-    else
-        include_ext_display=("${DEFAULT_FIRMWARE_SCAN_EXTENSIONS[@]}")
-    fi
-    local extension_display
-    extension_display="$(format_extensions_for_display "${include_ext_display[@]}")"
-    if [[ -z "${extension_display}" ]]; then
-        extension_display="$(format_extensions_for_display "${DEFAULT_FIRMWARE_SCAN_EXTENSIONS[@]}")"
-    fi
-    info "Recherche des artefacts firmware (${extension_display})."
-
-    local search_roots_display=""
-    for rel_path in "${DEFAULT_FIRMWARE_RELATIVE_PATHS[@]}"; do
-        if [[ -n "${search_roots_display}" ]]; then
-            search_roots_display+=", "
-        fi
-        search_roots_display+="${rel_path}"
-    done
-    info "Répertoires analysés par défaut : ${search_roots_display}"
-
-    if [[ "${DEEP_SCAN_ENABLED}" == "true" ]]; then
-        local exclude_display=""
-        if [[ ${#FIRMWARE_SCAN_EXCLUDES[@]} -gt 0 ]]; then
-            for exclude in "${FIRMWARE_SCAN_EXCLUDES[@]}"; do
-                local formatted
-                formatted="$(format_path_for_display "${exclude}")"
-                if [[ -n "${exclude_display}" ]]; then
-                    exclude_display+=", "
-                fi
-                exclude_display+="${formatted}"
-            done
-        fi
-        info "Mode --deep-scan actif : recherche étendue dans ${FLASH_ROOT}."
-        if [[ -n "${exclude_display}" ]]; then
-            info "Chemins ignorés : ${exclude_display}"
-        fi
-        local -a exclude_ext_display=()
-        if [[ ${#FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]} -gt 0 ]]; then
-            exclude_ext_display=("${FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]}")
-        else
-            exclude_ext_display=("${DEFAULT_FIRMWARE_EXCLUDE_EXTENSIONS[@]}")
-        fi
-        local exclude_ext_string
-        exclude_ext_string="$(format_extensions_for_display "${exclude_ext_display[@]}")"
-        if [[ -n "${exclude_ext_string}" ]]; then
-            info "Extensions ignorées : ${exclude_ext_string}"
-        fi
-    else
-        info "Utilisez --deep-scan pour élargir la recherche à l'ensemble du dépôt."
-    fi
-
-    local -a candidates=()
-    if [[ -n "${PRESELECTED_FIRMWARE_FILE}" ]]; then
-        if [[ -n "${FIRMWARE_SELECTION_SOURCE}" ]]; then
-            info "Firmware imposé par ${FIRMWARE_SELECTION_SOURCE}."
-        fi
-
-        if [[ "${FIRMWARE_SELECTION_SOURCE}" == "option CLI (--firmware)" || "${AUTO_CONFIRM_MODE}" == "true" ]]; then
-            FIRMWARE_FILE="${PRESELECTED_FIRMWARE_FILE}"
-            FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${FIRMWARE_FILE}")"
-            FIRMWARE_FORMAT="${FIRMWARE_FILE##*.}"
-        else
-            candidates+=("${PRESELECTED_FIRMWARE_FILE}")
-        fi
-    fi
-
-    if [[ -z "${FIRMWARE_FILE}" ]]; then
-        local -a discovered
-        collect_firmware_candidates discovered
-
-        if [[ -n "${FIRMWARE_PATTERN}" && ${#discovered[@]} -gt 0 ]]; then
-            local -a filtered=()
-            for file in "${discovered[@]}"; do
-                local basename
-                basename="$(basename "${file}")"
-                if [[ "${basename}" == ${FIRMWARE_PATTERN} ]]; then
-                    filtered+=("${file}")
-                fi
-            done
-            if [[ ${#filtered[@]} -gt 0 ]]; then
-                info "Motif --firmware-pattern appliqué (${FIRMWARE_PATTERN})."
-                discovered=("${filtered[@]}")
-            else
-                warn "Aucun firmware ne correspond au motif '${FIRMWARE_PATTERN}'. Sélection sur la base du plus récent."
-            fi
-        fi
-
-        if [[ ${#candidates[@]} -gt 0 ]]; then
-            candidates+=("${discovered[@]}")
-            dedupe_array_in_place candidates
-        else
-            candidates=("${discovered[@]}")
-        fi
-
-        if [[ ${#candidates[@]} -eq 0 ]]; then
-            if [[ "${DRY_RUN_MODE}" == "true" ]]; then
-                use_dry_run_placeholder_firmware
-            else
-                local message="Aucun firmware compatible détecté (recherché dans ${search_roots_display})."
-                if [[ "${DEEP_SCAN_ENABLED}" != "true" ]]; then
-                    message+=" Utilisez --deep-scan pour élargir la recherche."
-                fi
-                error_msg "${message} Lancer './build.sh' ou fournir KLIPPER_FIRMWARE_PATH."
-                exit 1
-            fi
-        fi
-
-        if [[ -z "${FIRMWARE_FILE}" ]]; then
-            if [[ "${AUTO_CONFIRM_MODE}" == "true" ]]; then
-                FIRMWARE_FILE="${candidates[0]}"
-                FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${FIRMWARE_FILE}")"
-                FIRMWARE_FORMAT="${FIRMWARE_FILE##*.}"
-                if [[ ${#candidates[@]} -le 1 ]]; then
-                    info "Mode auto-confirm : sélection automatique du firmware ${FIRMWARE_DISPLAY_PATH}."
-                else
-                    if [[ -n "${FIRMWARE_PATTERN}" ]]; then
-                        info "Mode auto-confirm : plusieurs correspondances au motif '${FIRMWARE_PATTERN}', utilisation du firmware le plus récent (${FIRMWARE_DISPLAY_PATH})."
-                    else
-                        info "Mode auto-confirm : plusieurs firmwares détectés, utilisation du plus récent (${FIRMWARE_DISPLAY_PATH})."
-                    fi
-                fi
-            else
-                prompt_firmware_selection candidates
-            fi
-        fi
-    fi
-
-    FIRMWARE_SIZE=$(portable_stat "--printf=%s" "${FIRMWARE_FILE}")
-    FIRMWARE_SHA=$(portable_sha256 "${FIRMWARE_FILE}")
-
-    success "Firmware sélectionné : ${FIRMWARE_DISPLAY_PATH} (${FIRMWARE_FORMAT})"
-    info "Taille : ${FIRMWARE_SIZE} octets"
-    info "SHA256 : ${FIRMWARE_SHA}"
 }
 
 function select_flash_method() {
@@ -2882,10 +2522,16 @@ function post_flash() {
 Résumé :
   - Firmware : ${FIRMWARE_DISPLAY_PATH}
   - Format   : ${FIRMWARE_FORMAT}
-  - Taille   : ${FIRMWARE_SIZE} octets
-  - SHA256   : ${FIRMWARE_SHA}
   - Méthode  : ${SELECTED_METHOD}
 EOF
+
+    if [[ "${FIRMWARE_METADATA_AVAILABLE}" == "false" ]]; then
+        echo "  - Taille   : N/A (flux simulé)"
+        echo "  - SHA256   : N/A (flux simulé)"
+    else
+        echo "  - Taille   : ${FIRMWARE_SIZE} octets"
+        echo "  - SHA256   : ${FIRMWARE_SHA}"
+    fi
 
     if [[ "${SELECTED_METHOD}" == "serial" ]]; then
         echo "  - Port     : ${SELECTED_DEVICE}"
