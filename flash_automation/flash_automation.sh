@@ -446,7 +446,38 @@ function check_command() {
 
 function check_group_membership() {
     local group="$1"
-    if id -nG "${USER}" 2>/dev/null | tr ' ' '\n' | grep -qx "${group}"; then
+    local username=""
+    local candidate=""
+
+    if command_exists id; then
+        if candidate=$(id -un 2>/dev/null) && [[ -n "${candidate}" ]]; then
+            username="${candidate}"
+        fi
+    fi
+
+    if [[ -z "${username}" ]] && command_exists logname; then
+        if candidate=$(logname 2>/dev/null) && [[ -n "${candidate}" ]]; then
+            username="${candidate}"
+        fi
+    fi
+
+    if [[ -z "${username}" ]] && command_exists whoami; then
+        if candidate=$(whoami 2>/dev/null) && [[ -n "${candidate}" ]]; then
+            username="${candidate}"
+        fi
+    fi
+
+    if [[ -z "${username}" ]]; then
+        warn "Impossible de déterminer l'utilisateur courant ; vérification du groupe '${group}' ignorée."
+        return 1
+    fi
+
+    if ! command_exists id; then
+        warn "La commande 'id' est indisponible : impossible de vérifier l'appartenance au groupe '${group}'."
+        return 1
+    fi
+
+    if id -nG "${username}" 2>/dev/null | tr ' ' '\n' | grep -qx "${group}"; then
         success "Utilisateur membre du groupe '${group}'."
         return 0
     else
