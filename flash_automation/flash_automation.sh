@@ -1683,8 +1683,24 @@ finalize_method_selection() {
             ;;
         serial)
             success "Méthode sélectionnée : ${human}."
+            if [[ -n "${SELECTED_DEVICE}" && ! -e "${SELECTED_DEVICE}" ]]; then
+                local source_hint=""
+                if [[ -n "${SERIAL_SELECTION_SOURCE}" ]]; then
+                    source_hint=" (${SERIAL_SELECTION_SOURCE})"
+                fi
+
+                if [[ "${AUTO_CONFIRM_MODE}" == "true" ]]; then
+                    error_msg "Port série imposé${source_hint} introuvable : ${SELECTED_DEVICE}. Mode auto-confirm : arrêt immédiat."
+                    exit 1
+                fi
+
+                warn "Port série imposé${source_hint} introuvable : ${SELECTED_DEVICE}. Nouvelle détection proposée."
+                SELECTED_DEVICE=""
+            fi
+
             if [[ -z "${SELECTED_DEVICE}" ]]; then
                 prompt_serial_device
+                SERIAL_SELECTION_SOURCE="sélection interactive"
             else
                 if [[ -n "${SERIAL_SELECTION_SOURCE}" ]]; then
                     success "Port série imposé (${SERIAL_SELECTION_SOURCE}) : ${SELECTED_DEVICE}."
