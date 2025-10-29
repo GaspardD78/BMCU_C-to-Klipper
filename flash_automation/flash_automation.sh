@@ -636,20 +636,56 @@ function command_exists() {
     fi
 }
 
+function command_install_hint() {
+    local cmd="$1"
+
+    case "${cmd}" in
+        sha256sum|stat|find)
+            printf "Installez le paquet fournissant '%s' (ex: sudo apt install coreutils)." "${cmd}"
+            ;;
+        make)
+            printf "Installez les outils de compilation (ex: sudo apt install build-essential)."
+            ;;
+        python3)
+            printf "Installez 'python3' via votre gestionnaire de paquets (ex: sudo apt install python3)."
+            ;;
+        curl)
+            printf "Installez 'curl' via votre gestionnaire de paquets (ex: sudo apt install curl)."
+            ;;
+        tar)
+            printf "Installez 'tar' via votre gestionnaire de paquets (ex: sudo apt install tar)."
+            ;;
+        *)
+            printf "Installez '%s' via votre gestionnaire de paquets (ex: sudo apt install %s)." "${cmd}" "${cmd}"
+            ;;
+    esac
+}
+
 function check_command() {
     local cmd="$1"
     local mandatory="$2"
+    local hint=""
 
     if command_exists "${cmd}"; then
         success "${cmd} disponible."
         return 0
     fi
 
+    hint="$(command_install_hint "${cmd}")"
+
     if [[ "${mandatory}" == "true" ]]; then
-        error_msg "La dépendance obligatoire '${cmd}' est introuvable."
+        local message="La dépendance obligatoire '${cmd}' est introuvable."
+        if [[ -n "${hint}" ]]; then
+            message+=" ${hint}"
+        fi
+        error_msg "${message}"
         exit 1
     else
-        warn "La dépendance optionnelle '${cmd}' est absente. Certaines fonctionnalités peuvent être limitées."
+        local message="La dépendance optionnelle '${cmd}' est absente. Certaines fonctionnalités peuvent être limitées."
+        if [[ -n "${hint}" ]]; then
+            message+=" ${hint}"
+        fi
+        warn "${message}"
         return 1
     fi
 }
@@ -967,6 +1003,8 @@ function verify_environment() {
     render_box "${CURRENT_STEP}"
     info "Vérification des dépendances et des permissions."
 
+    check_command "curl" true
+    check_command "tar" true
     check_command "sha256sum" true
     check_command "stat" true
     check_command "find" true
