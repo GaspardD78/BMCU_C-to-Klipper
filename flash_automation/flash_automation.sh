@@ -159,6 +159,21 @@ declare -a ACTIVE_KLIPPER_SERVICES=()
 SERVICES_STOPPED="false"
 SERVICES_RESTORED="false"
 
+readonly HOST_UNAME="$(uname -s 2>/dev/null || echo unknown)"
+readonly HOST_OS="${FLASH_AUTOMATION_OS_OVERRIDE:-${HOST_UNAME}}"
+
+STAT_COMMAND=""
+STAT_COMMAND_FLAVOR=""
+SHA256_COMMAND=""
+SHA256_COMMAND_FLAVOR=""
+DFU_UTIL_COMMAND="${DFU_UTIL_BIN:-}"
+
+if [[ -n "${FLASH_AUTOMATION_SHA256_SKIP:-}" ]]; then
+    IFS=',' read -r -a SHA256_SKIP_DEFAULT <<< "${FLASH_AUTOMATION_SHA256_SKIP}"
+else
+    SHA256_SKIP_DEFAULT=()
+fi
+
 mkdir -p "${LOG_DIR}"
 touch "${LOG_FILE}"
 
@@ -1128,26 +1143,303 @@ function command_exists() {
 function command_install_hint() {
     local cmd="$1"
 
+    local os_hint="${HOST_OS}"
+
     case "${cmd}" in
-        sha256sum|stat|find)
-            printf "Installez le paquet fournissant '%s' (ex: sudo apt install coreutils)." "${cmd}"
+        sha256sum|gsha256sum|stat|gstat)
+            if [[ "${os_hint}" == "Darwin" ]]; then
+                printf "Installez coreutils via Homebrew : brew install coreutils."
+            else
+                printf "Installez le paquet fournissant '%s' (ex: sudo apt install coreutils)." "${cmd}"
+            fi
+            ;;
+        find)
+            if [[ "${os_hint}" == "Darwin" ]]; then
+                printf "Installez GNU findutils via Homebrew : brew install findutils."
+            else
+                printf "Installez le paquet fournissant 'find' (ex: sudo apt install findutils)."
+            fi
+            ;;
+        dfu-util|dfu-util-static)
+            if [[ "${os_hint}" == "Darwin" ]]; then
+                printf "Installez dfu-util via Homebrew : brew install dfu-util."
+            else
+                printf "Installez dfu-util (ex: sudo apt install dfu-util)."
+            fi
             ;;
         make)
             printf "Installez les outils de compilation (ex: sudo apt install build-essential)."
             ;;
         python3)
-            printf "Installez 'python3' via votre gestionnaire de paquets (ex: sudo apt install python3)."
+            if [[ "${os_hint}" == "Darwin" ]]; then
+                printf "Installez Python 3 via Homebrew : brew install python@3."
+            else
+                printf "Installez 'python3' via votre gestionnaire de paquets (ex: sudo apt install python3)."
+            fi
             ;;
         curl)
-            printf "Installez 'curl' via votre gestionnaire de paquets (ex: sudo apt install curl)."
+            if [[ "${os_hint}" == "Darwin" ]]; then
+                printf "Installez curl via Homebrew : brew install curl."
+            else
+                printf "Installez 'curl' via votre gestionnaire de paquets (ex: sudo apt install curl)."
+            fi
             ;;
         tar)
-            printf "Installez 'tar' via votre gestionnaire de paquets (ex: sudo apt install tar)."
+            if [[ "${os_hint}" == "Darwin" ]]; then
+                printf "Installez GNU tar via Homebrew : brew install gnu-tar."
+            else
+                printf "Installez 'tar' via votre gestionnaire de paquets (ex: sudo apt install tar)."
+            fi
+            ;;
+        shasum)
+            if [[ "${os_hint}" == "Darwin" ]]; then
+                printf "Installez les outils Perl (inclus via Xcode Command Line Tools ou Homebrew)."
+            else
+                printf "Installez le paquet fournissant 'shasum' (ex: sudo apt install perl)."
+            fi
             ;;
         *)
-            printf "Installez '%s' via votre gestionnaire de paquets (ex: sudo apt install %s)." "${cmd}" "${cmd}"
+            if [[ "${os_hint}" == "Darwin" ]]; then
+                printf "Installez '%s' via Homebrew : brew install %s." "${cmd}" "${cmd}"
+            else
+                printf "Installez '%s' via votre gestionnaire de paquets (ex: sudo apt install %s)." "${cmd}" "${cmd}"
+            fi
             ;;
     esac
+}
+
+function missing_command_error() {
+    local cmd="$1"
+    local message="La dépendance obligatoire '${cmd}' est introuvable."
+    local hint
+    hint="$(command_install_hint "${cmd}")"
+    if [[ -n "${hint}" ]]; then
+        message+=" ${hint}"
+    fi
+    error_msg "${message}"
+}
+
+resolve_stat_command() {
+    if [[ -n "${STAT_COMMAND}" ]] && command_exists "${STAT_COMMAND}"; then
+        return 0
+    fi
+
+    if [[ "${HOST_OS}" == "Darwin" ]]; then
+        if command_exists gstat; then
+            STAT_COMMAND="gstat"
+            STAT_COMMAND_FLAVOR="gnu"
+            return 0
+        fi
+        if command_exists stat; then
+            STAT_COMMAND="stat"
+            STAT_COMMAND_FLAVOR="bsd"
+            return 0
+        fi
+    else
+        if command_exists stat; then
+            STAT_COMMAND="stat"
+            STAT_COMMAND_FLAVOR="gnu"
+            return 0
+        fi
+    fi
+
+    STAT_COMMAND=""
+    STAT_COMMAND_FLAVOR=""
+    return 1
+}
+
+ensure_portable_stat_available() {
+    if resolve_stat_command; then
+        if [[ "${STAT_COMMAND_FLAVOR}" == "bsd" ]]; then
+            success "stat disponible (mode BSD)."
+        else
+            success "${STAT_COMMAND} disponible."
+        fi
+        return 0
+    fi
+
+    missing_command_error "stat"
+    exit 1
+}
+
+portable_stat() {
+    local format="$1"
+    shift || true
+    local target="$1"
+
+    if ! resolve_stat_command; then
+        missing_command_error "stat"
+        return 1
+    fi
+
+    local output=""
+    case "${STAT_COMMAND_FLAVOR}" in
+        bsd)
+            if [[ "${format}" == "--printf=%s" ]]; then
+                output=$(stat -f "%z" "${target}") || return 1
+            else
+                output=$(stat "${format}" "${target}") || return 1
+            fi
+            ;;
+        *)
+            output=$("${STAT_COMMAND}" "${format}" "${target}") || return 1
+            ;;
+    esac
+
+    printf '%s\n' "${output}"
+}
+
+resolve_sha256_command() {
+    local -a skip_candidates=("$@")
+    if [[ ${#SHA256_SKIP_DEFAULT[@]} -gt 0 ]]; then
+        skip_candidates+=("${SHA256_SKIP_DEFAULT[@]}")
+    fi
+
+    if [[ -n "${SHA256_COMMAND}" ]]; then
+        local skip_current="false"
+        for skipped in "${skip_candidates[@]}"; do
+            if [[ "${skipped}" == "${SHA256_COMMAND}" ]]; then
+                skip_current="true"
+                break
+            fi
+        done
+        if [[ "${skip_current}" == "false" ]] && command_exists "${SHA256_COMMAND}"; then
+            return 0
+        fi
+        SHA256_COMMAND=""
+        SHA256_COMMAND_FLAVOR=""
+    fi
+
+    local candidate
+    for candidate in sha256sum gsha256sum; do
+        local should_skip="false"
+        for skipped in "${skip_candidates[@]}"; do
+            if [[ "${skipped}" == "${candidate}" ]]; then
+                should_skip="true"
+                break
+            fi
+        done
+        if [[ "${should_skip}" == "true" ]]; then
+            continue
+        fi
+        if command_exists "${candidate}"; then
+            SHA256_COMMAND="${candidate}"
+            SHA256_COMMAND_FLAVOR="gnu"
+            return 0
+        fi
+    done
+
+    local darwin_skip="false"
+    for skipped in "${skip_candidates[@]}"; do
+        if [[ "${skipped}" == "shasum" ]]; then
+            darwin_skip="true"
+            break
+        fi
+    done
+
+    if [[ "${HOST_OS}" == "Darwin" && "${darwin_skip}" == "false" ]] && command_exists shasum; then
+        SHA256_COMMAND="shasum"
+        SHA256_COMMAND_FLAVOR="bsd"
+        return 0
+    fi
+
+    SHA256_COMMAND=""
+    SHA256_COMMAND_FLAVOR=""
+    return 1
+}
+
+ensure_portable_sha256_available() {
+    if resolve_sha256_command; then
+        if [[ "${SHA256_COMMAND_FLAVOR}" == "bsd" ]]; then
+            success "shasum disponible (fallback macOS)."
+        else
+            success "${SHA256_COMMAND} disponible."
+        fi
+        return 0
+    fi
+
+    missing_command_error "sha256sum"
+    exit 1
+}
+
+portable_sha256() {
+    local file="$1"
+    local -a tried=()
+
+    while true; do
+        if ! resolve_sha256_command "${tried[@]}"; then
+            missing_command_error "sha256sum"
+            return 1
+        fi
+
+        local output=""
+        local status=0
+        case "${SHA256_COMMAND_FLAVOR}" in
+            bsd)
+                output=$("${SHA256_COMMAND}" -a 256 "${file}" 2>/dev/null) || status=$?
+                ;;
+            *)
+                output=$("${SHA256_COMMAND}" "${file}" 2>/dev/null) || status=$?
+                ;;
+        esac
+
+        if [[ ${status} -eq 0 && -n "${output}" ]]; then
+            output="${output%% *}"
+            printf '%s\n' "${output}"
+            return 0
+        fi
+
+        tried+=("${SHA256_COMMAND}")
+        SHA256_COMMAND=""
+        SHA256_COMMAND_FLAVOR=""
+    done
+}
+
+resolve_dfu_util_command() {
+    if [[ -n "${DFU_UTIL_COMMAND}" ]] && command_exists "${DFU_UTIL_COMMAND}"; then
+        return 0
+    fi
+
+    if [[ -n "${DFU_UTIL_BIN:-}" ]] && command_exists "${DFU_UTIL_BIN}"; then
+        DFU_UTIL_COMMAND="${DFU_UTIL_BIN}"
+        return 0
+    fi
+
+    for candidate in dfu-util dfu-util-static; do
+        if command_exists "${candidate}"; then
+            DFU_UTIL_COMMAND="${candidate}"
+            return 0
+        fi
+    done
+
+    DFU_UTIL_COMMAND=""
+    return 1
+}
+
+ensure_dfu_util_available() {
+    if resolve_dfu_util_command; then
+        success "dfu-util disponible (${DFU_UTIL_COMMAND})."
+        return 0
+    fi
+
+    missing_command_error "dfu-util"
+    exit 1
+}
+
+portable_dfu_util() {
+    if ! resolve_dfu_util_command; then
+        return 127
+    fi
+
+    "${DFU_UTIL_COMMAND}" "$@"
+}
+
+dfu_command_display() {
+    if [[ -n "${DFU_UTIL_COMMAND}" ]]; then
+        printf '%s\n' "${DFU_UTIL_COMMAND}"
+    else
+        printf '%s\n' "dfu-util"
+    fi
 }
 
 function check_command() {
@@ -1298,7 +1590,7 @@ verify_wchisp_archive() {
     fi
 
     local actual
-    if ! actual=$(sha256sum "${archive_path}" 2>/dev/null | awk '{print $1}'); then
+    if ! actual=$(portable_sha256 "${archive_path}" 2>/dev/null); then
         error_msg "Impossible de calculer l'empreinte SHA-256 de ${archive_path}."
         printf "Vérifiez les permissions de lecture sur l'archive avant de relancer.\n" >&2
         return 1
@@ -1377,11 +1669,7 @@ ensure_wchisp() {
         log_message "INFO" "Archive wchisp déjà présente (${archive_path})."
     fi
 
-    if ! command_exists sha256sum; then
-        error_msg "sha256sum est requis pour vérifier l'intégrité de l'archive wchisp."
-        echo "Installez coreutils ou fournissez sha256sum dans votre PATH avant de relancer." >&2
-        exit 1
-    fi
+    ensure_portable_sha256_available
 
     if ! verify_wchisp_archive "${asset}" "${archive_path}" "${expected_checksum}"; then
         exit 1
@@ -1437,14 +1725,14 @@ function detect_dfu_devices() {
     local -n dfu_devices_ref=$1
     dfu_devices_ref=()
 
-    if ! command_exists dfu-util; then
+    if ! resolve_dfu_util_command; then
         return
     fi
 
     while IFS= read -r line; do
         [[ -z "${line}" ]] && continue
         dfu_devices_ref+=("${line}")
-    done < <(dfu-util -l 2>/dev/null | awk -F':' '/Found DFU:/{gsub(/^\s+|\s+$/, "", $2); print $2}' )
+    done < <("${DFU_UTIL_COMMAND}" -l 2>/dev/null | awk -F':' '/Found DFU:/{gsub(/^\s+|\s+$/, "", $2); print $2}' )
 }
 
 function display_available_devices() {
@@ -1469,7 +1757,11 @@ function display_available_devices() {
     fi
 
     if [[ ${#dfu_devices[@]} -gt 0 ]]; then
-        info "Périphériques DFU détectés (dfu-util) :"
+        if [[ -n "${DFU_UTIL_COMMAND}" ]]; then
+            info "Périphériques DFU détectés (${DFU_UTIL_COMMAND}) :"
+        else
+            info "Périphériques DFU détectés (dfu-util) :"
+        fi
         local index=1
         for dev in "${dfu_devices[@]}"; do
             printf "    [%d] %s\n" "${index}" "${dev}"
@@ -1492,7 +1784,7 @@ flash_method_to_human() {
             printf '%s\n' "copie sur carte SD / stockage"
             ;;
         dfu)
-            printf '%s\n' "flash DFU via dfu-util"
+            printf '%s\n' "flash DFU via $(dfu_command_display)"
             ;;
         *)
             printf '%s\n' "méthode inconnue"
@@ -1518,7 +1810,7 @@ auto_detect_flash_method() {
     local -a dfu_devices=()
     detect_dfu_devices dfu_devices
     if [[ ${#dfu_devices[@]} -gt 0 ]]; then
-        AUTO_METHOD_REASON="Mode DFU détecté via dfu-util (${dfu_devices[0]})."
+        AUTO_METHOD_REASON="Mode DFU détecté via $(dfu_command_display) (${dfu_devices[0]})."
         printf '%s\n' "dfu"
         return
     fi
@@ -1642,9 +1934,9 @@ run_find_firmware_files() {
 }
 
 verify_common_dependencies() {
-    check_command "stat" true
+    ensure_portable_stat_available
     check_command "find" true
-    check_command "sha256sum" true
+    ensure_portable_sha256_available
     check_command "python3" false
 }
 
@@ -1680,7 +1972,7 @@ verify_method_dependencies() {
             check_command "make" false
             ;;
         dfu)
-            check_command "dfu-util" true
+            ensure_dfu_util_available
             ;;
         sdcard)
             :
@@ -1949,8 +2241,8 @@ function prepare_firmware() {
         fi
     fi
 
-    FIRMWARE_SIZE=$(stat --printf="%s" "${FIRMWARE_FILE}")
-    FIRMWARE_SHA=$(sha256sum "${FIRMWARE_FILE}" | awk '{print $1}')
+    FIRMWARE_SIZE=$(portable_stat "--printf=%s" "${FIRMWARE_FILE}")
+    FIRMWARE_SHA=$(portable_sha256 "${FIRMWARE_FILE}")
 
     success "Firmware sélectionné : ${FIRMWARE_DISPLAY_PATH} (${FIRMWARE_FORMAT})"
     info "Taille : ${FIRMWARE_SIZE} octets"
@@ -1995,7 +2287,7 @@ function select_flash_method() {
         "Flash direct via wchisp (mode bootloader USB)"
         "Flash série via flash_usb.py (port /dev/tty*)"
         "Copie du firmware sur carte SD / stockage"
-        "Flash DFU via dfu-util"
+        "Flash DFU via $(dfu_command_display)"
     )
 
     local prompt_hint=""
@@ -2171,7 +2463,9 @@ INSTRUCTIONS
             ;;
         dfu)
             info "Basculez la carte en mode DFU (BOOT0 maintenu puis RESET)."
-            info "Assurez-vous que dfu-util détecte la cible (dfu-util -l)."
+            local dfu_label
+            dfu_label="$(dfu_command_display)"
+            info "Assurez-vous que ${dfu_label} détecte la cible (${dfu_label} -l)."
             display_available_devices
             ;;
     esac
@@ -2231,13 +2525,16 @@ function flash_with_wchisp() {
 }
 
 function flash_with_dfu() {
+    local dfu_label
+    dfu_label="$(dfu_command_display)"
+
     if [[ "${DRY_RUN_MODE}" == "true" ]]; then
-        info "[DRY-RUN] dfu-util flasherait ${FIRMWARE_DISPLAY_PATH} (alt=${DFU_ALT_SETTING:-0})."
+        info "[DRY-RUN] ${dfu_label} flasherait ${FIRMWARE_DISPLAY_PATH} (alt=${DFU_ALT_SETTING:-0})."
         return
     fi
 
-    if ! command_exists dfu-util; then
-        error_msg "dfu-util est requis pour la méthode DFU."
+    if ! resolve_dfu_util_command; then
+        missing_command_error "dfu-util"
         exit 1
     fi
 
@@ -2246,9 +2543,10 @@ function flash_with_dfu() {
         alt=0
     fi
 
-    info "Flash DFU via dfu-util (alt=${alt})."
+    dfu_label="$(dfu_command_display)"
+    info "Flash DFU via ${dfu_label} (alt=${alt})."
 
-    local cmd=(dfu-util -a "${alt}" -D "${FIRMWARE_FILE}")
+    local cmd=("${DFU_UTIL_COMMAND}" -a "${alt}" -D "${FIRMWARE_FILE}")
 
     if [[ -n "${DFU_SERIAL_NUMBER}" ]]; then
         cmd+=(-S "${DFU_SERIAL_NUMBER}")
@@ -2262,7 +2560,7 @@ function flash_with_dfu() {
 
     log_message "DEBUG" "Commande exécutée: ${cmd[*]}"
     "${cmd[@]}" 2>&1 | tee -a "${LOG_FILE}"
-    success "dfu-util a terminé sans erreur."
+    success "${dfu_label} a terminé sans erreur."
 }
 
 function flash_with_serial() {
@@ -2349,7 +2647,14 @@ EOF
     elif [[ "${SELECTED_METHOD}" == "sdcard" ]]; then
         echo "  - Cible    : ${SDCARD_MOUNTPOINT}"
     elif [[ "${SELECTED_METHOD}" == "dfu" ]]; then
-        echo "  - dfu-util : alt=${DFU_ALT_SETTING}"${DFU_SERIAL_NUMBER:+", serial=${DFU_SERIAL_NUMBER}"}
+        local dfu_label
+        dfu_label="$(dfu_command_display)"
+        local alt_summary="${DFU_ALT_SETTING:-0}"
+        printf '  - %s : alt=%s' "${dfu_label}" "${alt_summary}"
+        if [[ -n "${DFU_SERIAL_NUMBER}" ]]; then
+            printf ', serial=%s' "${DFU_SERIAL_NUMBER}"
+        fi
+        printf '\n'
     fi
 
     echo
