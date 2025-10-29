@@ -37,6 +37,38 @@ python3 install_wchisp.py
 python3 flash.py
 ```
 
+## 🧱 Architecture des scripts
+
+Depuis 2025, la logique de `flash_automation.sh` est découpée en modules Bash
+sourceables situés dans `flash_automation/lib/` :
+
+- `lib/ui.sh` gère l'affichage, la coloration des messages et la journalisation
+  résiliente (création automatique du fichier de log).
+- `lib/permissions_cache.sh` centralise la mise en cache des vérifications de
+  permissions (backend Bash ou Python suivant la disponibilité).
+- `lib/wchisp.sh` regroupe la détection des artefacts wchisp, la vérification
+  des sommes de contrôle et l'exécution du flash.
+
+Le script principal se contente désormais d'orchestrer ces blocs via une
+fonction `main` et reste sourceable depuis les tests. Des tests unitaires
+ciblés (`flash_automation/tests/test_shell_modules.py`) vérifient les points
+sensibles de chaque module.
+
+### 🧪 Tests ciblés des modules Shell
+
+- `pytest flash_automation/tests/test_shell_modules.py` : vérifie la palette
+  d'affichage, la journalisation et les conversions de durée fournies par
+  `lib/ui.sh`.
+- `pytest -k permissions_cache_bash_backend` : couvre la logique de cache des
+  permissions et son backend Bash (`lib/permissions_cache.sh`).
+- `pytest -k wchisp_resolution_fallback` : s'assure que `lib/wchisp.sh`
+  sélectionne correctement une archive de repli lorsque l'architecture locale
+  n'est pas supportée par les binaires officiels.
+
+> 💡 Ces modules étant pensés pour être `source`ables, les tests définissent
+> une fonction `normalize_boolean` minimale avant d'inclure les bibliothèques
+> afin de simuler le comportement du script principal.
+
 - `build.sh` synchronise Klipper depuis `$KLIPPER_REPO_URL` (défaut : dépôt
   officiel) et applique les correctifs présents dans `klipper_overrides/` avant
   de lancer la compilation. Le dépôt local (`.cache/klipper`) est conservé :

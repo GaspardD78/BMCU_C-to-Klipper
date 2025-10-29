@@ -73,27 +73,12 @@ FIRMWARE_FORMAT=""
 PRESELECTED_FIRMWARE_FILE=""
 FIRMWARE_SELECTION_SOURCE=""
 readonly TOOLS_ROOT="${CACHE_ROOT}/tools"
-readonly WCHISP_CACHE_DIR="${TOOLS_ROOT}/wchisp"
-readonly WCHISP_RELEASE="${WCHISP_RELEASE:-v0.3.0}"
-readonly WCHISP_AUTO_INSTALL="${WCHISP_AUTO_INSTALL:-true}"
-readonly WCHISP_BASE_URL="${WCHISP_BASE_URL:-https://github.com/ch32-rs/wchisp/releases/download}"
-readonly WCHISP_CHECKSUM_FILE="${FLASH_ROOT}/wchisp_sha256sums.txt"
-readonly WCHISP_ARCH_OVERRIDE="${WCHISP_ARCH_OVERRIDE:-}"
-readonly WCHISP_FALLBACK_ARCHIVE_URL="${WCHISP_FALLBACK_ARCHIVE_URL:-}"
-readonly WCHISP_FALLBACK_CHECKSUM="${WCHISP_FALLBACK_CHECKSUM:-}"
-readonly WCHISP_FALLBACK_ARCHIVE_NAME="${WCHISP_FALLBACK_ARCHIVE_NAME:-}"
-readonly WCHISP_MANUAL_DOC="${FLASH_ROOT}/docs/wchisp_manual_install.md"
 
-WCHISP_ARCHIVE_CHECKSUM_OVERRIDE_DEFAULT="${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE:-}"
-ALLOW_UNVERIFIED_WCHISP_DEFAULT="${ALLOW_UNVERIFIED_WCHISP:-false}"
-WCHISP_ARCHIVE_CHECKSUM_OVERRIDE=""
+source "${FLASH_ROOT}/lib/ui.sh"
+source "${FLASH_ROOT}/lib/permissions_cache.sh"
+source "${FLASH_ROOT}/lib/wchisp.sh"
+
 ALLOW_UNVERIFIED_WCHISP=""
-
-WCHISP_COMMAND="${WCHISP_BIN:-wchisp}"
-readonly WCHISP_TRANSPORT="${WCHISP_TRANSPORT:-usb}"
-readonly WCHISP_USB_INDEX="${WCHISP_USB_INDEX:-}"
-readonly WCHISP_SERIAL_PORT="${WCHISP_SERIAL_PORT:-}"
-readonly WCHISP_SERIAL_BAUDRATE="${WCHISP_SERIAL_BAUDRATE:-}"
 readonly DFU_ALT_SETTING="${DFU_ALT_SETTING:-0}"
 readonly DFU_SERIAL_NUMBER="${DFU_SERIAL_NUMBER:-}"
 readonly DFU_EXTRA_ARGS="${DFU_EXTRA_ARGS:-}"
@@ -110,17 +95,6 @@ CLI_NO_COLOR_REQUESTED="false"
 CLI_QUIET_REQUESTED="false"
 QUIET_MODE="false"
 
-DEFAULT_CACHE_HOME="${XDG_CACHE_HOME:-${HOME}/.cache}"
-PERMISSIONS_CACHE_FILE="${BMCU_PERMISSION_CACHE_FILE:-${DEFAULT_CACHE_HOME}/bmcu_permissions.json}"
-PERMISSIONS_CACHE_TTL_RAW="${BMCU_PERMISSION_CACHE_TTL:-3600}"
-# Permet de forcer un backend spécifique pour la gestion du cache de permissions.
-# Utilisé principalement pour les tests automatisés afin de simuler l'absence de python3.
-PERMISSIONS_CACHE_BACKEND_OVERRIDE="${BMCU_PERMISSION_CACHE_BACKEND:-}"
-if [[ "${PERMISSIONS_CACHE_TTL_RAW}" =~ ^[0-9]+$ ]]; then
-    PERMISSIONS_CACHE_TTL="${PERMISSIONS_CACHE_TTL_RAW}"
-else
-    PERMISSIONS_CACHE_TTL=0
-fi
 PERMISSIONS_CACHE_MESSAGE=""
 
 COLOR_RESET=""
@@ -193,38 +167,6 @@ normalize_boolean() {
             printf '%s\n' "false"
             ;;
     esac
-}
-
-configure_color_palette() {
-    local enable_colors="false"
-
-    if [[ "${CLI_NO_COLOR_REQUESTED}" == "true" ]]; then
-        enable_colors="false"
-    else
-        local env_no_color
-        env_no_color="$(normalize_boolean "${FLASH_AUTOMATION_NO_COLOR:-false}")"
-        if [[ "${env_no_color}" != "true" && -t 1 ]]; then
-            enable_colors="true"
-        fi
-    fi
-
-    if [[ "${enable_colors}" == "true" ]]; then
-        COLOR_RESET="\033[0m"
-        COLOR_INFO="\033[38;5;39m"
-        COLOR_WARN="\033[38;5;214m"
-        COLOR_ERROR="\033[38;5;203m"
-        COLOR_SUCCESS="\033[38;5;40m"
-        COLOR_SECTION="\033[1;97m"
-        COLOR_BORDER="\033[38;5;60m"
-    else
-        COLOR_RESET=""
-        COLOR_INFO=""
-        COLOR_WARN=""
-        COLOR_ERROR=""
-        COLOR_SUCCESS=""
-        COLOR_SECTION=""
-        COLOR_BORDER=""
-    fi
 }
 
 dedupe_array_in_place() {
@@ -610,470 +552,11 @@ apply_configuration_defaults() {
     configure_color_palette
 }
 
-function log_message() {
-    local level="$1"
-    local message="$2"
-    local timestamp
-    timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-    echo "[$timestamp] [$level] - $message" >> "${LOG_FILE}"
-}
 
-detect_wchisp_machine() {
-    if [[ -n "${WCHISP_ARCH_OVERRIDE}" ]]; then
-        printf '%s\n' "${WCHISP_ARCH_OVERRIDE}"
-        return
-    fi
 
-    uname -m
-}
 
-normalize_wchisp_machine() {
-    local raw="$1"
 
-    case "${raw}" in
-        amd64)
-            printf '%s\n' "x86_64"
-            ;;
-        arm64)
-            printf '%s\n' "aarch64"
-            ;;
-        armv8l|armv7|armv7l|armhf)
-            printf '%s\n' "armv7l"
-            ;;
-        armv6|armv6l|armel)
-            printf '%s\n' "armv6l"
-            ;;
-        i386|i486|i586|i686)
-            printf '%s\n' "i686"
-            ;;
-        *)
-            printf '%s\n' "${raw}"
-            ;;
-    esac
-}
 
-wchisp_architecture_not_supported() {
-    local arch="$1"
-
-    log_message "ERROR" "Aucun binaire wchisp pré-compilé disponible pour ${arch}."
-    cat <<EOF >&2
-Aucun binaire wchisp pré-compilé n'est disponible pour l'architecture '${arch}'.
-Vous pouvez :
-  1. Compiler wchisp depuis les sources (voir ${WCHISP_MANUAL_DOC}).
-  2. Fournir une archive compatible via WCHISP_FALLBACK_ARCHIVE_URL et, si possible, WCHISP_FALLBACK_CHECKSUM
-     (ajoutez WCHISP_FALLBACK_ARCHIVE_NAME si l'URL comporte des paramètres).
-  3. Exporter WCHISP_BIN vers un binaire wchisp déjà installé sur votre système.
-
-Pour simuler une architecture différente (tests ou CI), exportez WCHISP_ARCH_OVERRIDE.
-EOF
-    return 1
-}
-
-resolve_wchisp_download() {
-    local raw_arch normalized_arch asset url mode checksum
-
-    raw_arch="$(detect_wchisp_machine)"
-    normalized_arch="$(normalize_wchisp_machine "${raw_arch}")"
-    mode="official"
-    checksum=""
-
-    case "${normalized_arch}" in
-        x86_64)
-            asset="wchisp-${WCHISP_RELEASE}-linux-x64.tar.gz"
-            url="${WCHISP_BASE_URL}/${WCHISP_RELEASE}/${asset}"
-            ;;
-        aarch64)
-            asset="wchisp-${WCHISP_RELEASE}-linux-aarch64.tar.gz"
-            url="${WCHISP_BASE_URL}/${WCHISP_RELEASE}/${asset}"
-            ;;
-        armv7l|armv6l|i686)
-            if [[ -n "${WCHISP_FALLBACK_ARCHIVE_URL}" ]]; then
-                asset="${WCHISP_FALLBACK_ARCHIVE_NAME:-${WCHISP_FALLBACK_ARCHIVE_URL##*/}}"
-                asset="${asset%%\?*}"
-                url="${WCHISP_FALLBACK_ARCHIVE_URL}"
-                mode="fallback"
-                checksum="${WCHISP_FALLBACK_CHECKSUM}"
-                log_message "WARN" "Utilisation de l'archive de secours pour ${raw_arch} (${asset})."
-            else
-                wchisp_architecture_not_supported "${raw_arch}" || true
-                return 1
-            fi
-            ;;
-        *)
-            if [[ -n "${WCHISP_FALLBACK_ARCHIVE_URL}" ]]; then
-                asset="${WCHISP_FALLBACK_ARCHIVE_NAME:-${WCHISP_FALLBACK_ARCHIVE_URL##*/}}"
-                asset="${asset%%\?*}"
-                url="${WCHISP_FALLBACK_ARCHIVE_URL}"
-                mode="fallback"
-                checksum="${WCHISP_FALLBACK_CHECKSUM}"
-                log_message "WARN" "Architecture ${raw_arch} non prise en charge officiellement; utilisation de l'archive de secours (${asset})."
-            else
-                wchisp_architecture_not_supported "${raw_arch}" || true
-                return 1
-            fi
-            ;;
-    esac
-
-    if [[ -z "${asset}" ]]; then
-        error_msg "Impossible de déterminer le nom de l'archive wchisp pour ${raw_arch}."
-        printf "Définissez WCHISP_FALLBACK_ARCHIVE_URL avec une URL complète vers une archive wchisp valide.\n" >&2
-        return 1
-    fi
-
-    printf '%s|%s|%s|%s|%s|%s\n' "${raw_arch}" "${normalized_arch}" "${asset}" "${url}" "${mode}" "${checksum}"
-}
-
-function format_duration_seconds() {
-    local total_seconds="$1"
-    if ! [[ "${total_seconds}" =~ ^[0-9]+$ ]]; then
-        printf '%s' "0s"
-        return
-    fi
-
-    local hours=$(( total_seconds / 3600 ))
-    local minutes=$(( (total_seconds % 3600) / 60 ))
-    local seconds=$(( total_seconds % 60 ))
-    local -a parts=()
-
-    if (( hours > 0 )); then
-        parts+=("${hours}h")
-    fi
-    if (( minutes > 0 )); then
-        parts+=("${minutes}m")
-    fi
-    if (( seconds > 0 )) || (( ${#parts[@]} == 0 )); then
-        parts+=("${seconds}s")
-    fi
-
-    local IFS=' '
-    printf '%s' "${parts[*]}"
-}
-
-function permissions_cache_enabled() {
-    [[ "${PERMISSIONS_CACHE_TTL}" -gt 0 ]] && [[ -n "${PERMISSIONS_CACHE_FILE}" ]]
-}
-
-# Lorsque python3 est absent (ou explicitement désactivé via BMCU_PERMISSION_CACHE_BACKEND=bash),
-# le cache de permissions est lu/écrit au format TSV à l'aide des fonctions Bash ci-dessous.
-# Ce mode dégradé conserve uniquement les informations essentielles : statut, timestamp, TTL, origine et message.
-permissions_cache_use_python() {
-    case "${PERMISSIONS_CACHE_BACKEND_OVERRIDE}" in
-        python)
-            return 0
-            ;;
-        bash)
-            return 1
-            ;;
-    esac
-
-    if command -v python3 >/dev/null 2>&1; then
-        return 0
-    fi
-    return 1
-}
-
-permissions_cache_epoch_seconds() {
-    local now
-    if now=$(date -u +%s 2>/dev/null); then
-        printf '%s\n' "${now}"
-    elif now=$(date +%s 2>/dev/null); then
-        printf '%s\n' "${now}"
-    else
-        return 1
-    fi
-}
-
-permissions_cache_sanitize_field() {
-    local value="$1"
-    value="${value//$'\n'/ }"
-    value="${value//$'\r'/ }"
-    value="${value//$'\t'/ }"
-    printf '%s' "${value}"
-}
-
-permissions_cache_read_bash() {
-    local path="${PERMISSIONS_CACHE_FILE}"
-    local status checked_epoch stored_ttl origin extra
-
-    if [[ ! -s "${path}" ]]; then
-        return 1
-    fi
-
-    IFS=$'\t' read -r status checked_epoch stored_ttl origin extra < "${path}" || return 1
-
-    if [[ "${status}" != "ok" ]]; then
-        return 1
-    fi
-
-    if [[ -z "${checked_epoch}" ]] || [[ ! "${checked_epoch}" =~ ^[0-9]+$ ]]; then
-        return 1
-    fi
-
-    local ttl="${PERMISSIONS_CACHE_TTL}"
-    if [[ -n "${stored_ttl}" ]] && [[ "${stored_ttl}" =~ ^[0-9]+$ ]]; then
-        ttl="${stored_ttl}"
-    fi
-
-    if [[ "${ttl}" -le 0 ]]; then
-        return 1
-    fi
-
-    local now
-    if ! now="$(permissions_cache_epoch_seconds)"; then
-        return 1
-    fi
-
-    local age=$(( now - checked_epoch ))
-    if (( age < 0 )); then
-        age=0
-    fi
-
-    if (( age >= ttl )); then
-        return 1
-    fi
-
-    local remaining=$(( ttl - age ))
-    local origin_note=""
-    if [[ -n "${origin}" ]]; then
-        origin_note=" — source ${origin}"
-    fi
-
-    if [[ -n "${extra}" ]]; then
-        origin_note+=" — ${extra}"
-    fi
-
-    PERMISSIONS_CACHE_MESSAGE="cache valide (vérifié il y a $(format_duration_seconds "${age}"); expiration dans $(format_duration_seconds "${remaining}"))${origin_note}"
-    return 0
-}
-
-permissions_cache_write_bash() {
-    local status="$1"
-    local message="$2"
-    local origin_override="${3:-}"
-    local ttl="${PERMISSIONS_CACHE_TTL}"
-    local origin="${origin_override:-${PERMISSIONS_ORIGIN:-flash_automation.sh}}"
-
-    if [[ "${ttl}" -le 0 ]]; then
-        return 0
-    fi
-
-    local now
-    if ! now="$(permissions_cache_epoch_seconds)"; then
-        return 1
-    fi
-
-    local sanitized_message
-    sanitized_message="$(permissions_cache_sanitize_field "${message}")"
-    origin="$(permissions_cache_sanitize_field "${origin}")"
-
-    local cache_dir
-    cache_dir="$(dirname "${PERMISSIONS_CACHE_FILE}")"
-    if [[ -n "${cache_dir}" ]] && [[ "${cache_dir}" != "." ]]; then
-        mkdir -p "${cache_dir}" || return 1
-    fi
-
-    if ! printf '%s\t%s\t%s\t%s\t%s\n' "${status}" "${now}" "${ttl}" "${origin}" "${sanitized_message}" > "${PERMISSIONS_CACHE_FILE}"; then
-        return 1
-    fi
-}
-
-function should_skip_permission_checks() {
-    PERMISSIONS_CACHE_MESSAGE=""
-    if ! permissions_cache_enabled; then
-        return 1
-    fi
-    if [[ ! -f "${PERMISSIONS_CACHE_FILE}" ]]; then
-        return 1
-    fi
-
-    if ! permissions_cache_use_python; then
-        if permissions_cache_read_bash; then
-            return 0
-        fi
-        return 1
-    fi
-
-    local output
-    if ! output=$(PERMISSIONS_CACHE_FILE="${PERMISSIONS_CACHE_FILE}" PERMISSIONS_CACHE_TTL="${PERMISSIONS_CACHE_TTL}" python3 - <<'PY'
-import json
-import os
-import sys
-from datetime import datetime, timezone
-
-path = os.environ["PERMISSIONS_CACHE_FILE"]
-try:
-    ttl = int(os.environ["PERMISSIONS_CACHE_TTL"])
-except (KeyError, ValueError):
-    sys.exit(1)
-
-if ttl <= 0:
-    sys.exit(1)
-
-try:
-    with open(path, "r", encoding="utf-8") as handle:
-        data = json.load(handle)
-except Exception:
-    sys.exit(1)
-
-if data.get("status") != "ok":
-    sys.exit(1)
-
-checked_raw = data.get("checked_at")
-if not isinstance(checked_raw, str):
-    sys.exit(1)
-
-try:
-    checked = datetime.fromisoformat(checked_raw)
-except ValueError:
-    sys.exit(1)
-
-if checked.tzinfo is None:
-    checked = checked.replace(tzinfo=timezone.utc)
-
-now = datetime.now(timezone.utc)
-age = (now - checked).total_seconds()
-if age < 0:
-    age = 0
-
-if age >= ttl:
-    sys.exit(1)
-
-remaining = ttl - age
-
-def format_duration(value: float) -> str:
-    total = max(int(round(value)), 0)
-    hours, remainder = divmod(total, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    parts = []
-    if hours:
-        parts.append(f"{hours}h")
-    if minutes:
-        parts.append(f"{minutes}m")
-    if seconds or not parts:
-        parts.append(f"{seconds}s")
-    return " ".join(parts)
-
-print(
-    f"cache valide (vérifié il y a {format_duration(age)}; "
-    f"expiration dans {format_duration(remaining)})"
-)
-PY
-    ); then
-        return 1
-    fi
-    PERMISSIONS_CACHE_MESSAGE="${output}"
-    return 0
-}
-
-function update_permissions_cache() {
-    local status="$1"
-    local message="$2"
-
-    if ! permissions_cache_enabled; then
-        return
-    fi
-
-    if ! permissions_cache_use_python; then
-        if ! permissions_cache_write_bash "${status}" "${message}" "flash_automation.verify_environment"; then
-            warn "Impossible de mettre à jour le cache de permissions (${PERMISSIONS_CACHE_FILE})."
-            return 1
-        fi
-        return 0
-    fi
-
-    if ! PERMISSIONS_STATUS="${status}" \
-        PERMISSIONS_MESSAGE="${message}" \
-        PERMISSIONS_ORIGIN="flash_automation.verify_environment" \
-        PERMISSIONS_CACHE_FILE="${PERMISSIONS_CACHE_FILE}" \
-        PERMISSIONS_CACHE_TTL="${PERMISSIONS_CACHE_TTL}" python3 - <<'PY'
-import json
-import os
-import sys
-from datetime import datetime, timezone
-
-path = os.environ["PERMISSIONS_CACHE_FILE"]
-try:
-    ttl = int(os.environ["PERMISSIONS_CACHE_TTL"])
-except (KeyError, ValueError):
-    sys.exit(0)
-
-if ttl <= 0:
-    sys.exit(0)
-
-payload = {
-    "status": os.environ.get("PERMISSIONS_STATUS", "ok"),
-    "checked_at": datetime.now(timezone.utc).isoformat(),
-    "origin": os.environ.get("PERMISSIONS_ORIGIN", "flash_automation.sh"),
-    "ttl_seconds": ttl,
-}
-
-message = os.environ.get("PERMISSIONS_MESSAGE", "")
-if message:
-    payload["message"] = message
-
-cache_dir = os.path.dirname(path) or "."
-try:
-    os.makedirs(cache_dir, exist_ok=True)
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, path)
-except Exception:
-    sys.exit(1)
-else:
-    sys.exit(0)
-PY
-    then
-        warn "Impossible de mettre à jour le cache de permissions (${PERMISSIONS_CACHE_FILE})."
-        return 1
-    fi
-    return 0
-}
-
-function invalidate_permissions_cache() {
-    if permissions_cache_enabled && [[ -f "${PERMISSIONS_CACHE_FILE}" ]]; then
-        rm -f "${PERMISSIONS_CACHE_FILE}" || true
-    fi
-}
-
-function render_box() {
-    local title="$1"
-    local border="========================================"
-    if [[ "${QUIET_MODE}" == "true" ]]; then
-        return
-    fi
-    printf "%b%s%b\n" "${COLOR_BORDER}" "${border}" "${COLOR_RESET}"
-    printf "%b%s%b\n" "${COLOR_SECTION}" "${title}" "${COLOR_RESET}"
-    printf "%b%s%b\n" "${COLOR_BORDER}" "${border}" "${COLOR_RESET}"
-}
-
-function info() {
-    local message="$1"
-    log_message "INFO" "${message}"
-    if [[ "${QUIET_MODE}" != "true" ]]; then
-        printf "%b[INFO]%b %s\n" "${COLOR_INFO}" "${COLOR_RESET}" "${message}"
-    fi
-}
-
-function warn() {
-    local message="$1"
-    log_message "WARN" "${message}"
-    printf "%b[WARN]%b %s\n" "${COLOR_WARN}" "${COLOR_RESET}" "${message}"
-}
-
-function error_msg() {
-    local message="$1"
-    log_message "ERROR" "${message}"
-    printf "%b[ERROR]%b %s\n" "${COLOR_ERROR}" "${COLOR_RESET}" "${message}" >&2
-}
-
-function success() {
-    local message="$1"
-    log_message "INFO" "${message}"
-    if [[ "${QUIET_MODE}" != "true" ]]; then
-        printf "%b[OK]%b %s\n" "${COLOR_SUCCESS}" "${COLOR_RESET}" "${message}"
-    fi
-}
 
 function handle_error() {
     local exit_code=$?
@@ -1591,176 +1074,8 @@ function check_device_write_access() {
     return 1
 }
 
-lookup_wchisp_checksum() {
-    local asset="$1"
 
-    if [[ ! -f "${WCHISP_CHECKSUM_FILE}" ]]; then
-        error_msg "Fichier de sommes de contrôle wchisp introuvable (${WCHISP_CHECKSUM_FILE})."
-        printf "Assurez-vous que le dépôt contient les sommes SHA-256 de wchisp avant de poursuivre.\n" >&2
-        return 1
-    fi
 
-    local checksum
-    checksum=$(awk -v target="${asset}" '
-        /^[[:space:]]*#/ {next}
-        NF >= 2 && $NF == target {print $1; exit}
-    ' "${WCHISP_CHECKSUM_FILE}")
-
-    if [[ -z "${checksum}" ]]; then
-        error_msg "Somme de contrôle attendue introuvable pour ${asset}."
-        printf "Mettez à jour %s avec l'empreinte SHA-256 officielle correspondant à cette archive.\n" "${WCHISP_CHECKSUM_FILE}" >&2
-        return 1
-    fi
-
-    printf '%s\n' "${checksum}"
-}
-
-verify_wchisp_archive() {
-    local asset="$1"
-    local archive_path="$2"
-    local expected="${3:-__auto__}"
-    local degraded="${ALLOW_UNVERIFIED_WCHISP}"
-
-    if [[ "${degraded}" == "true" ]]; then
-        warn "Mode dégradé actif : la vérification SHA-256 de ${asset} sera tolérée en cas d'échec."
-        log_message "WARN" "Mode dégradé actif pour ${asset} : les écarts de checksum seront ignorés."
-    fi
-
-    if [[ "${expected}" == "__auto__" ]]; then
-        if ! expected=$(lookup_wchisp_checksum "${asset}"); then
-            if [[ "${degraded}" == "true" ]]; then
-                warn "Impossible de récupérer la somme de contrôle officielle pour ${asset}. Le mode dégradé permet de continuer."
-                log_message "WARN" "Checksum officiel introuvable pour ${asset}, poursuite en mode dégradé."
-                return 0
-            fi
-            return 1
-        fi
-    fi
-
-    if [[ -n "${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE}" ]]; then
-        if [[ "${expected}" != "${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE}" ]]; then
-            warn "Somme de contrôle wchisp remplacée par la valeur fournie par l'utilisateur."
-            log_message "WARN" "Checksum de ${asset} remplacé par l'override utilisateur."
-        fi
-        expected="${WCHISP_ARCHIVE_CHECKSUM_OVERRIDE}"
-    fi
-
-    if [[ -z "${expected}" ]]; then
-        log_message "WARN" "Somme de contrôle inconnue pour ${asset}; vérification ignorée."
-        echo "AVERTISSEMENT : aucune somme de contrôle n'est disponible pour ${asset}. Vérifiez manuellement l'origine de l'archive ou fournissez WCHISP_FALLBACK_CHECKSUM." >&2
-        return 0
-    fi
-
-    local actual
-    if ! actual=$(portable_sha256 "${archive_path}" 2>/dev/null); then
-        error_msg "Impossible de calculer l'empreinte SHA-256 de ${archive_path}."
-        printf "Vérifiez les permissions de lecture sur l'archive avant de relancer.\n" >&2
-        return 1
-    fi
-
-    if [[ "${actual}" != "${expected}" ]]; then
-        if [[ "${degraded}" == "true" ]]; then
-            warn "Empreinte SHA-256 inattendue pour ${asset} (${actual}). L'archive est conservée car le mode dégradé est actif."
-            log_message "WARN" "Checksum inattendu pour ${asset} (attendu=${expected}; obtenu=${actual}) mais conservation de l'archive (mode dégradé)."
-            return 0
-        fi
-        rm -f "${archive_path}" || true
-        error_msg "La vérification d'intégrité de l'archive ${asset} a échoué."
-        printf "Empreinte attendue : %s\nEmpreinte calculée : %s\n" "${expected}" "${actual}" >&2
-        printf "L'archive téléchargée a été supprimée. Relancez le script après avoir vérifié votre connexion ou la source du fichier.\n" >&2
-        return 1
-    fi
-
-    log_message "INFO" "Somme de contrôle SHA-256 validée pour ${asset}."
-}
-
-ensure_wchisp() {
-    if command_exists "${WCHISP_COMMAND}"; then
-        return
-    fi
-
-    if [[ "${WCHISP_AUTO_INSTALL}" != "true" ]]; then
-        log_message "ERROR" "wchisp est introuvable et l'installation automatique est désactivée."
-        error_msg "La dépendance 'wchisp' est introuvable."
-        error_msg "Exportez WCHISP_BIN ou activez WCHISP_AUTO_INSTALL=true pour autoriser le téléchargement automatique."
-        exit 1
-    fi
-
-    if ! command_exists curl; then
-        log_message "ERROR" "Impossible d'installer wchisp automatiquement: curl est absent."
-        error_msg "curl est requis pour installer automatiquement wchisp. Installez curl ou wchisp manuellement."
-        exit 1
-    fi
-
-    if ! command_exists tar; then
-        log_message "ERROR" "Impossible d'installer wchisp automatiquement: tar est absent."
-        error_msg "tar est requis pour installer automatiquement wchisp. Installez tar ou wchisp manuellement."
-        exit 1
-    fi
-
-    local resolution
-    if ! resolution=$(resolve_wchisp_download); then
-        exit 1
-    fi
-
-    local arch_raw arch asset url checksum_mode checksum_value expected_checksum
-    IFS='|' read -r arch_raw arch asset url checksum_mode checksum_value <<< "${resolution}"
-
-    if [[ "${checksum_mode}" == "official" ]]; then
-        if ! expected_checksum=$(lookup_wchisp_checksum "${asset}"); then
-            exit 1
-        fi
-    else
-        expected_checksum="${checksum_value}"
-        if [[ -z "${expected_checksum}" ]]; then
-            log_message "WARN" "Aucune somme de contrôle fournie pour l'archive de secours ${asset}."
-        fi
-    fi
-
-    mkdir -p "${WCHISP_CACHE_DIR}"
-    local archive_path="${WCHISP_CACHE_DIR}/${asset}"
-
-    if [[ ! -f "${archive_path}" ]]; then
-        log_message "INFO" "Téléchargement de wchisp (${url})."
-        if ! curl --fail --location --progress-bar "${url}" -o "${archive_path}"; then
-            rm -f "${archive_path}"
-            log_message "ERROR" "Échec du téléchargement de wchisp depuis ${url}."
-            error_msg "Échec du téléchargement de wchisp (${url}). Installez wchisp manuellement."
-            exit 1
-        fi
-    else
-        log_message "INFO" "Archive wchisp déjà présente (${archive_path})."
-    fi
-
-    ensure_portable_sha256_available
-
-    if ! verify_wchisp_archive "${asset}" "${archive_path}" "${expected_checksum}"; then
-        exit 1
-    fi
-
-    local install_dir="${WCHISP_CACHE_DIR}/${WCHISP_RELEASE}-${arch}"
-    rm -rf "${install_dir}"
-    mkdir -p "${install_dir}"
-
-    log_message "INFO" "Extraction de wchisp dans ${install_dir}."
-    if ! tar -xf "${archive_path}" --strip-components=1 -C "${install_dir}"; then
-        rm -rf "${install_dir}"
-        log_message "ERROR" "Échec de l'extraction de wchisp depuis ${archive_path}."
-        error_msg "Impossible d'extraire wchisp. Vérifiez l'archive ou installez l'outil manuellement."
-        exit 1
-    fi
-
-    local candidate="${install_dir}/wchisp"
-    if [[ ! -x "${candidate}" ]]; then
-        log_message "ERROR" "Le binaire wchisp est introuvable après extraction (${candidate})."
-        error_msg "Le binaire wchisp est manquant après extraction. Installez l'outil manuellement."
-        exit 1
-    fi
-
-    WCHISP_COMMAND="${candidate}"
-    log_message "INFO" "wchisp disponible localement via ${WCHISP_COMMAND} (architecture détectée : ${arch_raw} -> ${arch})."
-    success "wchisp installé automatiquement dans ${install_dir}."
-}
 
 function detect_serial_devices() {
     local -n serial_devices_ref=$1
@@ -2303,16 +1618,30 @@ function prepare_firmware() {
         info "Utilisez --deep-scan pour élargir la recherche à l'ensemble du dépôt."
     fi
 
+    local -a candidates=()
     if [[ -n "${PRESELECTED_FIRMWARE_FILE}" ]]; then
         if [[ -n "${FIRMWARE_SELECTION_SOURCE}" ]]; then
             info "Firmware imposé par ${FIRMWARE_SELECTION_SOURCE}."
         fi
-        FIRMWARE_FILE="${PRESELECTED_FIRMWARE_FILE}"
-        FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${FIRMWARE_FILE}")"
-        FIRMWARE_FORMAT="${FIRMWARE_FILE##*.}"
-    else
-        local -a candidates
-        collect_firmware_candidates candidates
+
+        if [[ "${FIRMWARE_SELECTION_SOURCE}" == "option CLI (--firmware)" || "${AUTO_CONFIRM_MODE}" == "true" ]]; then
+            FIRMWARE_FILE="${PRESELECTED_FIRMWARE_FILE}"
+            FIRMWARE_DISPLAY_PATH="$(format_path_for_display "${FIRMWARE_FILE}")"
+            FIRMWARE_FORMAT="${FIRMWARE_FILE##*.}"
+        else
+            candidates+=("${PRESELECTED_FIRMWARE_FILE}")
+        fi
+    fi
+
+    if [[ -z "${FIRMWARE_FILE}" ]]; then
+        local -a discovered
+        collect_firmware_candidates discovered
+        if [[ ${#candidates[@]} -gt 0 ]]; then
+            candidates+=("${discovered[@]}")
+            dedupe_array_in_place candidates
+        else
+            candidates=("${discovered[@]}")
+        fi
 
         if [[ ${#candidates[@]} -eq 0 ]]; then
             local message="Aucun firmware compatible détecté (recherché dans ${search_roots_display})."
@@ -2645,58 +1974,6 @@ INSTRUCTIONS
     esac
 }
 
-function flash_with_wchisp() {
-    if [[ "${DRY_RUN_MODE}" == "true" ]]; then
-        info "[DRY-RUN] wchisp flasherait ${FIRMWARE_DISPLAY_PATH}."
-        return
-    fi
-
-    ensure_wchisp
-
-    local transport="${WCHISP_TRANSPORT,,}"
-    if [[ -z "${transport}" ]]; then
-        transport="usb"
-    fi
-
-    info "Début du flash via ${WCHISP_COMMAND} (transport ${transport})."
-
-    local cmd=("${WCHISP_COMMAND}")
-
-    case "${transport}" in
-        usb)
-            cmd+=("--usb")
-            if [[ -n "${WCHISP_USB_INDEX}" ]]; then
-                if [[ "${WCHISP_USB_INDEX}" =~ ^[0-9]+$ ]]; then
-                    cmd+=("--device" "${WCHISP_USB_INDEX}")
-                else
-                    warn "Valeur WCHISP_USB_INDEX invalide (${WCHISP_USB_INDEX}). Utilisation de la détection automatique."
-                fi
-            fi
-            ;;
-        serial)
-            cmd+=("--serial")
-            if [[ -n "${WCHISP_SERIAL_PORT}" ]]; then
-                cmd+=("--port" "${WCHISP_SERIAL_PORT}")
-            else
-                error_msg "WCHISP_SERIAL_PORT doit être défini pour utiliser le transport série de wchisp."
-                exit 1
-            fi
-            if [[ -n "${WCHISP_SERIAL_BAUDRATE}" ]]; then
-                cmd+=("--baudrate" "${WCHISP_SERIAL_BAUDRATE}")
-            fi
-            ;;
-        *)
-            warn "Transport WCHISP_TRANSPORT=${WCHISP_TRANSPORT} non reconnu. Retour au mode USB."
-            cmd+=("--usb")
-            ;;
-    esac
-
-    cmd+=(flash "${FIRMWARE_FILE}")
-
-    log_message "DEBUG" "Commande exécutée: ${cmd[*]}"
-    "${cmd[@]}" 2>&1 | tee -a "${LOG_FILE}"
-    success "wchisp a terminé le flash sans erreur."
-}
 
 function flash_with_dfu() {
     local dfu_label
