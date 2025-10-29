@@ -123,6 +123,28 @@ def populate_common_commands(bin_dir: Path):
         add_symlink(bin_dir, name)
 
 
+def test_cli_help_omits_banner(tmp_path):
+    env = os.environ.copy()
+    env.setdefault("LC_ALL", "C.UTF-8")
+    env.setdefault("LANG", "C.UTF-8")
+    env["HOME"] = str(tmp_path / "home")
+    env["XDG_CACHE_HOME"] = str(tmp_path / "xdg-cache")
+
+    result = subprocess.run(
+        [str(SCRIPT_PATH), "--help"],
+        cwd=str(FLASH_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode == 0
+    assert BANNER_TEXT not in result.stdout
+    assert result.stdout.startswith("Usage: flash_automation.sh")
+    assert result.stderr == ""
+
+
 PROMPT_OVERRIDE = textwrap.dedent(
     """
     prompt_firmware_selection() {
@@ -383,13 +405,7 @@ def test_ensure_wchisp_respects_quiet_mode(tmp_path):
     result = run_flash_script('flash_automation_initialize\nQUIET_MODE="true"\nensure_wchisp', env=env)
 
     assert result.returncode == 0
-    stdout = result.stdout
-    if stdout.startswith(BANNER_TEXT):
-        stdout = stdout[len(BANNER_TEXT) :]
-        if stdout.startswith("\n"):
-            stdout = stdout[1:]
-
-    assert stdout == ""
+    assert result.stdout == ""
     assert result.stderr == ""
 
 
