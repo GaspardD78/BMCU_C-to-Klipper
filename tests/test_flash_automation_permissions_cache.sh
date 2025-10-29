@@ -8,7 +8,16 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FLASH_SCRIPT="${REPO_ROOT}/flash_automation/flash_automation.sh"
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "${TMP_DIR}"' EXIT
+LOG_DIR="${REPO_ROOT}/flash_automation/logs"
+
+cleanup() {
+    rm -rf "${TMP_DIR}"
+    rm -rf "${LOG_DIR}"
+}
+
+trap cleanup EXIT
+
+rm -rf "${LOG_DIR}"
 
 export XDG_CACHE_HOME="${TMP_DIR}/xdg-cache"
 export BMCU_PERMISSION_CACHE_FILE="${TMP_DIR}/bmcu_permissions.tsv"
@@ -23,7 +32,7 @@ run_flash_script() {
         BMCU_PERMISSION_CACHE_BACKEND="${BMCU_PERMISSION_CACHE_BACKEND}" \
         FLASH_SNIPPET="${snippet}" \
         XDG_CACHE_HOME="${XDG_CACHE_HOME}" \
-        bash -c 'set -euo pipefail; source "${FLASH_SCRIPT}"; eval "${FLASH_SNIPPET}"'
+        bash -c 'set -euo pipefail; source "${FLASH_SCRIPT}"; flash_automation_initialize; eval "${FLASH_SNIPPET}"'
 }
 
 # 1. Sans cache pré-existant, should_skip_permission_checks doit échouer.

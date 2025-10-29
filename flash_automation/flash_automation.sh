@@ -165,11 +165,20 @@ DFU_UTIL_COMMAND="${DFU_UTIL_BIN:-}"
 if [[ -n "${FLASH_AUTOMATION_SHA256_SKIP:-}" ]]; then
     IFS=',' read -r -a SHA256_SKIP_DEFAULT <<< "${FLASH_AUTOMATION_SHA256_SKIP}"
 else
-    SHA256_SKIP_DEFAULT=()
+SHA256_SKIP_DEFAULT=()
 fi
 
-mkdir -p "${LOG_DIR}"
-touch "${LOG_FILE}"
+LOG_INITIALIZED="false"
+
+flash_automation_initialize() {
+    if [[ "${LOG_INITIALIZED}" == "true" ]]; then
+        return
+    fi
+
+    mkdir -p "${LOG_DIR}"
+    touch "${LOG_FILE}"
+    LOG_INITIALIZED="true"
+}
 
 normalize_boolean() {
     local raw_value="${1:-}"
@@ -2854,6 +2863,7 @@ function main() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     parse_cli_arguments "$@"
     apply_configuration_defaults
+    flash_automation_initialize
     main
 else
     apply_configuration_defaults

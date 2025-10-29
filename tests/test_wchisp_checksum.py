@@ -65,6 +65,7 @@ def test_verification_failure_removes_archive_without_degraded_mode(archive_path
         f"""
         export ALLOW_UNVERIFIED_WCHISP=false
         source "{SCRIPT_PATH}"
+        flash_automation_initialize
         trap - ERR
         trap - EXIT
         set +e
@@ -91,6 +92,7 @@ def test_degraded_mode_keeps_archive_and_warns(archive_path):
         f"""
         export ALLOW_UNVERIFIED_WCHISP=true
         source "{SCRIPT_PATH}"
+        flash_automation_initialize
         trap - ERR
         trap - EXIT
         set +e
@@ -121,6 +123,7 @@ def test_checksum_override_allows_custom_value(archive_path):
         export WCHISP_ARCHIVE_CHECKSUM_OVERRIDE="{actual}"
         export ALLOW_UNVERIFIED_WCHISP=false
         source "{SCRIPT_PATH}"
+        flash_automation_initialize
         trap - ERR
         trap - EXIT
         set +e

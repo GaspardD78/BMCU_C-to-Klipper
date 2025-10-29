@@ -17,7 +17,16 @@ FLASH_ROOT="${REPO_ROOT}/flash_automation"
 FLASH_SCRIPT="${FLASH_ROOT}/flash_automation.sh"
 
 WORK_DIR="$(mktemp -d)"
-trap 'rm -rf "${WORK_DIR}"' EXIT
+LOG_DIR="${FLASH_ROOT}/logs"
+
+cleanup() {
+    rm -rf "${WORK_DIR}"
+    rm -rf "${LOG_DIR}"
+}
+
+trap cleanup EXIT
+
+rm -rf "${LOG_DIR}"
 
 FIRMWARE_DIR="${WORK_DIR}/firmware"
 SDCARD_MOUNT="${WORK_DIR}/sdcard"
