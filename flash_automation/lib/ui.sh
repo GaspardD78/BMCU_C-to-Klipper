@@ -96,6 +96,14 @@ info() {
     fi
 }
 
+note() {
+    local message="$1"
+    log_message "INFO" "${message}"
+    if [[ "${QUIET_MODE}" != "true" ]]; then
+        printf "%b[NOTE]%b %s\n" "${COLOR_INFO}" "${COLOR_RESET}" "${message}"
+    fi
+}
+
 warn() {
     local message="$1"
     log_message "WARN" "${message}"
@@ -114,4 +122,130 @@ success() {
     if [[ "${QUIET_MODE}" != "true" ]]; then
         printf "%b[OK]%b %s\n" "${COLOR_SUCCESS}" "${COLOR_RESET}" "${message}"
     fi
+}
+
+declare -a CHECK_COMMAND_TRACKED_COMMANDS=()
+declare -a CHECK_COMMAND_TRACKED_REQUIRED=()
+declare -a CHECK_COMMAND_TRACKED_STATUS=()
+declare -A CHECK_COMMAND_TRACKED_INDEX=()
+
+reset_check_command_results() {
+    CHECK_COMMAND_TRACKED_COMMANDS=()
+    CHECK_COMMAND_TRACKED_REQUIRED=()
+    CHECK_COMMAND_TRACKED_STATUS=()
+    CHECK_COMMAND_TRACKED_INDEX=()
+}
+
+_check_command_status_severity() {
+    local status="$1"
+    local required="$2"
+    if [[ "${status}" == "success" ]]; then
+        printf '%s' "0"
+    elif [[ "${required}" == "true" ]]; then
+        printf '%s' "2"
+    else
+        printf '%s' "1"
+    fi
+}
+
+register_check_command_result() {
+    local command="$1"
+    local required="$2"
+    local status="$3"
+
+    local index="${CHECK_COMMAND_TRACKED_INDEX["${command}"]-}"
+    if [[ -n "${index}" ]]; then
+        local current_status="${CHECK_COMMAND_TRACKED_STATUS[${index}]}"
+        local current_required="${CHECK_COMMAND_TRACKED_REQUIRED[${index}]}"
+        local new_severity
+        local current_severity
+        new_severity=$(_check_command_status_severity "${status}" "${required}")
+        current_severity=$(_check_command_status_severity "${current_status}" "${current_required}")
+        if (( new_severity > current_severity )); then
+            CHECK_COMMAND_TRACKED_STATUS[${index}]="${status}"
+            CHECK_COMMAND_TRACKED_REQUIRED[${index}]="${required}"
+        fi
+        return
+    fi
+
+    index=${#CHECK_COMMAND_TRACKED_COMMANDS[@]}
+    CHECK_COMMAND_TRACKED_INDEX["${command}"]=${index}
+    CHECK_COMMAND_TRACKED_COMMANDS+=("${command}")
+    CHECK_COMMAND_TRACKED_REQUIRED+=("${required}")
+    CHECK_COMMAND_TRACKED_STATUS+=("${status}")
+}
+
+display_check_command_summary() {
+    if (( ${#CHECK_COMMAND_TRACKED_COMMANDS[@]} == 0 )); then
+        return
+    fi
+    if [[ "${QUIET_MODE}" == "true" ]]; then
+        return
+    fi
+
+    local header_command="Commande"
+    local header_status="Statut"
+    local width_command=${#header_command}
+    local width_status=${#header_status}
+    local -a labels=()
+    local -a symbols=()
+    local -a colors=()
+
+    local i
+    for i in "${!CHECK_COMMAND_TRACKED_COMMANDS[@]}"; do
+        local command="${CHECK_COMMAND_TRACKED_COMMANDS[$i]}"
+        local required="${CHECK_COMMAND_TRACKED_REQUIRED[$i]}"
+        local status="${CHECK_COMMAND_TRACKED_STATUS[$i]}"
+        local label=""
+        local symbol=""
+        local color="${COLOR_INFO}"
+
+        if [[ "${status}" == "success" ]]; then
+            label="Disponible"
+            symbol="✔"
+            color="${COLOR_SUCCESS}"
+        else
+            symbol="✖"
+            if [[ "${required}" == "true" ]]; then
+                label="Manquante (obligatoire)"
+                color="${COLOR_ERROR}"
+            else
+                label="Absente (optionnelle)"
+                color="${COLOR_WARN}"
+            fi
+        fi
+
+        labels+=("${label}")
+        symbols+=("${symbol}")
+        colors+=("${color}")
+
+        local command_len=${#command}
+        local label_len=${#label}
+        if (( command_len > width_command )); then
+            width_command=${command_len}
+        fi
+        if (( label_len > width_status )); then
+            width_status=${label_len}
+        fi
+    done
+
+    local border_command=$(( width_command + 2 ))
+    local border_status=$(( width_status + 2 ))
+    local border_line
+    border_line="+$(printf '%*s' "${border_command}" '' | tr ' ' '-')+$(printf '%*s' "${border_status}" '' | tr ' ' '-')+"
+
+    printf "%s\n" "Résumé des dépendances :"
+    printf "%b%s%b\n" "${COLOR_BORDER}" "${border_line}" "${COLOR_RESET}"
+    printf "| %-*s | %-*s |\n" "${width_command}" "${header_command}" "${width_status}" "${header_status}"
+    printf "%b%s%b\n" "${COLOR_BORDER}" "${border_line}" "${COLOR_RESET}"
+
+    for i in "${!CHECK_COMMAND_TRACKED_COMMANDS[@]}"; do
+        local command="${CHECK_COMMAND_TRACKED_COMMANDS[$i]}"
+        local label="${labels[$i]}"
+        local symbol="${symbols[$i]}"
+        local color="${colors[$i]}"
+        printf "| %b%s%b %-*s | %-*s |\n" "${color}" "${symbol}" "${COLOR_RESET}" "${width_command}" "${command}" "${width_status}" "${label}"
+    done
+
+    printf "%b%s%b\n" "${COLOR_BORDER}" "${border_line}" "${COLOR_RESET}"
 }
