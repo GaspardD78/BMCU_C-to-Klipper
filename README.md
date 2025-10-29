@@ -301,25 +301,60 @@ La documentation complète d'intégration est disponible dans [`addon/docs/setup
 - `automation_cli.py` : menu interactif façon KIAUH qui regroupe build, flash et journalisation.
 - Toolchains personnalisées : exportez `KLIPPER_SRC_DIR` ou `KLIPPER_FIRMWARE_PATH` pour réutiliser des artefacts existants.
 
-### `flash_automation.sh` : choisir la bonne méthode
+### `flash_automation.sh` : l'outil tout-en-un
 
-Le script [`flash_automation/flash_automation.sh`](flash_automation/flash_automation.sh) détecte automatiquement la méthode de flash la plus pertinente, mais vous pouvez la forcer avec `--method <wchisp|serial|sdcard|dfu|auto>` ou via la variable d'environnement `FLASH_AUTOMATION_METHOD`. Cette détection est désormais effectuée **avant** les vérifications d'environnement afin de ne contrôler que les outils nécessaires au scénario choisi.
+Le script [`flash_automation.sh`](flash_automation/flash_automation.sh) est l'outil le plus puissant de ce dépôt. Il combine la compilation, la détection des périphériques et le flashage en une seule commande, avec des options avancées pour l'automatisation.
 
-> ℹ️ Depuis la version courante, `flash_automation.sh` ne propose `wchisp` automatiquement que si un périphérique USB WCH (VID `1a86` par défaut) est détecté. En cas d'échec du flash via `wchisp`, le script tente automatiquement un basculement vers DFU puis vers le flash série si des périphériques correspondants sont détectés, en journalisant la décision dans `logs/`.
+#### Fonctionnalités clés
+
+- **`--bootstrap`** : Lance le script `./build.sh` pour compiler le firmware Klipper avant toute autre action. Idéal pour un démarrage de zéro.
+- **`--auto-confirm`** : Active le mode non interactif. Le script sélectionne automatiquement le firmware le plus récent et le premier périphérique compatible trouvé. Parfait pour les scripts ou si vous êtes sûr de votre configuration.
+- **`--dry-run`** : Simule toutes les étapes (compilation, sélection, flash) sans modifier le matériel. Utilisez-le pour vérifier votre configuration en toute sécurité.
+- **Rapport final détaillé** : À la fin de chaque exécution, un résumé complet s'affiche, incluant le chemin du firmware, sa taille, son checksum SHA256, la méthode de flash utilisée et la durée totale.
+
+#### Exemples d'utilisation
+
+- **Flash interactif classique :**
+  ```bash
+  cd flash_automation/
+  ./flash_automation.sh
+  ```
+
+- **Compiler et flasher en une seule commande (interactif) :**
+  ```bash
+  cd flash_automation/
+  ./flash_automation.sh --bootstrap
+  ```
+
+- **Automatiser complètement le flashage (non interactif) :**
+  ```bash
+  cd flash_automation/
+  # Le script compile, choisit le firmware récent et le premier port série
+  ./flash_automation.sh --bootstrap --auto-confirm
+  ```
+
+- **Vérifier la configuration sans risque :**
+  ```bash
+  cd flash_automation/
+  ./flash_automation.sh --bootstrap --dry-run
+  ```
+  *(Le rapport final indiquera `Mode: Simulation (dry-run)`)*.
+
+#### Dépendances par méthode de flash
+
+Le script choisit la meilleure méthode de flash en fonction des outils et périphériques détectés. Voici les dépendances pour chaque scénario :
 
 | Scénario | Dépendances clés | Notes |
 | --- | --- | --- |
-| `wchisp` (auto-install) | `curl`, `tar`, `sha256sum` | Requises uniquement si `WCHISP_BIN` est absent et que `WCHISP_AUTO_INSTALL=true` (cas par défaut). |
-| `wchisp` (local) | `wchisp` disponible dans le `PATH` ou via `WCHISP_BIN` | Aucun téléchargement si l'outil est déjà installé. |
-| `serial` (`flash_usb.py`) | `python3`, Klipper compilé (`.cache/klipper/scripts/flash_usb.py`) | Option idéale lorsque le bootloader USB n'est pas accessible. |
-| `dfu` | `dfu-util` (+ `DFU_ALT_SETTING`, `DFU_SERIAL_NUMBER`, `DFU_EXTRA_ARGS` optionnels) | Pour les cartes exposant un mode DFU classique. |
-| `sdcard` | `cp`, `sync` (outils de base) | Copie directe du firmware sur un stockage amovible. |
+| `wchisp` (auto-install) | `curl`, `tar`, `sha256sum` | Méthode par défaut si un bootloader WCH est détecté. Les outils ne sont requis que si `wchisp` n'est pas déjà installé. |
+| `wchisp` (local) | `wchisp` dans le `PATH` | Aucun téléchargement si l'outil est déjà présent. |
+| `serial` | `python3`, Klipper compilé | Requis pour `flash_usb.py`. Le script bascule sur cette méthode si un port série est trouvé mais pas de bootloader WCH/DFU. |
+| `dfu` | `dfu-util` | Utilisé si un périphérique en mode DFU est détecté. |
+| `sdcard` | `cp`, `sync` (outils de base) | Copie directe du firmware. Souvent une méthode de dernier recours. |
 
-Astuce : laissez `--method auto` (valeur par défaut) pour bénéficier de la détection guidée ; le script indiquera la raison du choix proposé (ex. périphérique DFU détecté, wchisp présent, etc.).
+> Astuce : laissez `--method auto` (valeur par défaut) pour bénéficier de la détection guidée. Le script indiquera la raison du choix proposé (ex. "périphérique DFU détecté").
 
-> ℹ️ **python3 manquant ?** `flash_automation.sh` bascule automatiquement sur un cache de permissions minimaliste en Bash.
-> Les informations sont stockées dans un fichier TSV (`bmcu_permissions.tsv`) qui conserve le statut, l'horodatage et un message de diagnostic.
-> Lorsque Python redevient disponible, le cache JSON historique continue d'être pris en charge.
+> ℹ️ **Python manquant ?** Si `python3` est indisponible, le script utilise des alternatives en Bash pour certaines tâches et désactive les méthodes qui en dépendent (comme le flash série).
 
 Tous ces outils se trouvent dans le dossier [`flash_automation/`](flash_automation) et respectent les conventions décrites dans [AGENTS.md](AGENTS.md).
 
