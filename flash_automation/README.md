@@ -92,9 +92,19 @@ python3 flash.py
 | `WCHISP_FALLBACK_ARCHIVE_URL` | Archive alternative à utiliser pour les architectures non supportées | *(vide)* |
 | `WCHISP_FALLBACK_ARCHIVE_NAME` | Nom de fichier à utiliser si l'URL de secours contient des paramètres | dérivé de l'URL |
 | `WCHISP_FALLBACK_CHECKSUM` | Somme SHA-256 de l'archive de secours (fortement recommandé) | *(vide)* |
+| `WCHISP_ARCHIVE_CHECKSUM_OVERRIDE` | Somme SHA-256 personnalisée appliquée à l'archive wchisp téléchargée | *(vide)* |
+| `ALLOW_UNVERIFIED_WCHISP` | `true`/`1` pour autoriser le mode dégradé (archive conservée même si la vérification échoue) | `false` |
 
 Les journaux et rapports d'échec sont écrits dans `~/BMCU_C_to_Klipper_logs/`
 avec horodatage (chemin personnalisable via `BMCU_LOG_ROOT`).
+
+Le script shell accepte également quelques options CLI avancées :
+
+- `--wchisp-checksum <sha256>` (ou `--wchisp-checksum=<sha256>`) pour imposer
+  une empreinte spécifique lors de l'installation automatique.
+- `--allow-unsigned-wchisp` pour activer le mode dégradé qui laisse le binaire
+  en place malgré une vérification SHA-256 échouée ; un avertissement est
+  affiché et journalisé pour rappeler le risque encouru.
 
 ### 🔄 Flux de synchronisation
 
