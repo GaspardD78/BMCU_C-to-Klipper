@@ -87,6 +87,10 @@ python3 flash.py
 | `KLIPPER_SRC_DIR` | Répertoire Klipper à réutiliser (aucun clone/checkout automatique) | `flash_automation/.cache/klipper` |
 | `KLIPPER_FIRMWARE_PATH` | Firmware attendu par `flash_automation.sh` | `.cache/klipper/out/klipper.bin` |
 | `KLIPPER_FIRMWARE_SCAN_EXCLUDES` | Chemins exclus de la découverte automatique (séparés par `:`) | `logs:.cache/tools:tests` |
+| `FLASH_AUTOMATION_AUTO_CONFIRM` | Force le mode non interactif (`true`/`1`) | `false` |
+| `FLASH_AUTOMATION_DRY_RUN` | Active la simulation complète sans flash réel | `false` |
+| `FLASH_AUTOMATION_SERIAL_PORT` | Port série imposé pour `flash_usb.py` | *(vide)* |
+| `FLASH_AUTOMATION_SDCARD_PATH` | Point de montage forcé pour la copie SD | *(vide)* |
 | `CROSS_PREFIX` | Toolchain RISC-V installée manuellement | `riscv32-unknown-elf-` |
 | `TOOLCHAIN_RELEASE` | Tag de la toolchain RISC-V officielle à télécharger | `2025.10.18` |
 | `TOOLCHAIN_ARCHIVE_X86_64` | Nom d'archive utilisé pour `TOOLCHAIN_RELEASE` | `riscv32-elf-ubuntu-22.04-gcc.tar.xz` |
@@ -111,10 +115,20 @@ Le script shell accepte également quelques options CLI avancées :
 - `--allow-unsigned-wchisp` pour activer le mode dégradé qui laisse le binaire
   en place malgré une vérification SHA-256 échouée ; un avertissement est
   affiché et journalisé pour rappeler le risque encouru.
+- `--firmware /chemin/vers/mon.bin` pour sélectionner directement l'artefact à
+  flasher (prend le pas sur la découverte automatique).
+- `--serial-port /dev/ttyUSB0` ou `--sdcard-path /media/sd` pour fixer dès la
+  ligne de commande les périphériques cibles (équivalent aux variables
+  d'environnement associées).
 - `--deep-scan` pour étendre la recherche de firmwares à tout le dépôt (avec
   exclusions par défaut `logs/`, `tests/`, `.cache/tools/`).
 - `--exclude-path <chemin>` pour ajouter dynamiquement un répertoire à ignorer
   lors de la découverte automatique.
+- `--auto-confirm` (alias `--no-confirm`) pour valider automatiquement les
+  choix proposés (idéal pour l'exécution dans un script ou via SSH).
+- `--dry-run` pour simuler l'intégralité du parcours sans arrêter de service ni
+  écrire sur la cible : les commandes destructrices sont remplacées par des
+  messages `[DRY-RUN]` dans la sortie.
 
 ### 🔄 Flux de synchronisation
 
