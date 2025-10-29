@@ -63,6 +63,7 @@ readonly LOG_FILE="${LOG_DIR}/flash.log"
 readonly FAILURE_REPORT="${LOG_DIR}/FAILURE_REPORT.txt"
 readonly DEFAULT_FIRMWARE_RELATIVE_PATHS=(".cache/klipper/out" ".cache/firmware")
 readonly DEFAULT_FIRMWARE_RELATIVE_PATH="${DEFAULT_FIRMWARE_RELATIVE_PATHS[0]}"
+readonly DEFAULT_FLASH_USB_RELATIVE_PATH=".cache/klipper/scripts/flash_usb.py"
 readonly DEFAULT_FIRMWARE_EXCLUDE_RELATIVE_PATHS=("logs" "tests" ".cache/tools")
 readonly -a WCH_USB_VENDOR_IDS_DEFAULT=("1a86")
 DEEP_SCAN_ENABLED="false"
@@ -94,12 +95,16 @@ ENV_METHOD_OVERRIDE="${FLASH_AUTOMATION_METHOD:-}"
 CLI_FIRMWARE_OVERRIDE=""
 CLI_SERIAL_PORT_OVERRIDE=""
 CLI_SDCARD_PATH_OVERRIDE=""
+CLI_FLASH_USB_SCRIPT_OVERRIDE=""
 CLI_AUTO_CONFIRM_REQUESTED="false"
 CLI_DRY_RUN_REQUESTED="false"
 
 CLI_NO_COLOR_REQUESTED="false"
 CLI_QUIET_REQUESTED="false"
 QUIET_MODE="false"
+
+FLASH_USB_SCRIPT_PATH=""
+FLASH_USB_SCRIPT_SOURCE=""
 
 PERMISSIONS_CACHE_MESSAGE=""
 
@@ -324,6 +329,7 @@ Options:
   --firmware-pattern <motif>   Applique un motif (glob shell) pour filtrer les firmwares détectés.
   --method <mode>              Force la méthode (wchisp, serial, sdcard, dfu, auto).
   --serial-port <chemin>       Fixe le port série à utiliser pour flash_usb.py.
+  --flash-usb-script <chemin>  Spécifie le chemin vers le script flash_usb.py de Klipper.
   --sdcard-path <chemin>       Fixe le point de montage cible pour la copie sur carte SD.
   --deep-scan                  Étend la recherche de firmwares à l'ensemble du dépôt.
   --exclude-path <chemin>      Ajoute un chemin à exclure de la découverte automatique.
@@ -340,6 +346,7 @@ Variables d'environnement associées :
   FLASH_AUTOMATION_DRY_RUN           Active le mode simulation sans flash réel.
   FLASH_AUTOMATION_SERIAL_PORT       Port série forcé (équivalent --serial-port).
   FLASH_AUTOMATION_SDCARD_PATH       Point de montage forcé pour la méthode sdcard.
+  FLASH_AUTOMATION_FLASH_USB_SCRIPT  Chemin personnalisé vers flash_usb.py.
   FLASH_AUTOMATION_QUIET             "true"/"1" pour réduire les sorties console.
   FLASH_AUTOMATION_NO_COLOR          "true"/"1" pour forcer la sortie sans couleurs.
   FLASH_AUTOMATION_WCH_USB_IDS       Liste (séparée par ',') des VID USB WCH à considérer (par défaut : 1a86).
@@ -456,6 +463,25 @@ parse_cli_arguments() {
                 ;;
             --serial-port=*)
                 CLI_SERIAL_PORT_OVERRIDE="${1#*=}"
+                shift
+                ;;
+            --flash-usb-script)
+                if [[ $# -lt 2 ]]; then
+                    echo "L'option --flash-usb-script requiert un chemin." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                CLI_FLASH_USB_SCRIPT_OVERRIDE="$(resolve_path_relative_to_flash_root "$2")"
+                shift 2
+                ;;
+            --flash-usb-script=*)
+                local raw_flash_script="${1#*=}"
+                if [[ -z "${raw_flash_script}" ]]; then
+                    echo "L'option --flash-usb-script nécessite un chemin non vide." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                CLI_FLASH_USB_SCRIPT_OVERRIDE="$(resolve_path_relative_to_flash_root "${raw_flash_script}")"
                 shift
                 ;;
             --sdcard-path)
@@ -702,6 +728,17 @@ apply_configuration_defaults() {
 
     SDCARD_MOUNTPOINT="${sdcard_candidate}"
     SDCARD_SELECTION_SOURCE="${sdcard_source}"
+
+    if [[ -n "${CLI_FLASH_USB_SCRIPT_OVERRIDE}" ]]; then
+        FLASH_USB_SCRIPT_PATH="${CLI_FLASH_USB_SCRIPT_OVERRIDE}"
+        FLASH_USB_SCRIPT_SOURCE="option CLI (--flash-usb-script)"
+    elif [[ -n "${FLASH_AUTOMATION_FLASH_USB_SCRIPT:-}" ]]; then
+        FLASH_USB_SCRIPT_PATH="$(resolve_path_relative_to_flash_root "${FLASH_AUTOMATION_FLASH_USB_SCRIPT}")"
+        FLASH_USB_SCRIPT_SOURCE="variable d'environnement FLASH_AUTOMATION_FLASH_USB_SCRIPT"
+    else
+        FLASH_USB_SCRIPT_PATH="$(resolve_path_relative_to_flash_root "${DEFAULT_FLASH_USB_RELATIVE_PATH}")"
+        FLASH_USB_SCRIPT_SOURCE="chemin par défaut (${DEFAULT_FLASH_USB_RELATIVE_PATH})"
+    fi
 
     configure_color_palette
 }
@@ -1545,6 +1582,29 @@ verify_common_dependencies() {
     check_command "python3" false
 }
 
+get_flash_usb_script_path() {
+    if [[ -n "${FLASH_USB_SCRIPT_PATH}" ]]; then
+        printf '%s\n' "${FLASH_USB_SCRIPT_PATH}"
+    else
+        printf '%s\n' "$(resolve_path_relative_to_flash_root "${DEFAULT_FLASH_USB_RELATIVE_PATH}")"
+    fi
+}
+
+ensure_flash_usb_script_available() {
+    local script_path
+    script_path="$(get_flash_usb_script_path)"
+
+    if [[ -f "${script_path}" ]]; then
+        printf '%s\n' "${script_path}"
+        return 0
+    fi
+
+    local display
+    display="$(format_path_for_display "${script_path}")"
+    error_msg "Le script ${display} est introuvable. Lancez './build.sh' pour récupérer Klipper et recompiler le firmware."
+    return 1
+}
+
 verify_method_dependencies() {
     local method="$1"
     local context="$2"
@@ -1575,6 +1635,17 @@ verify_method_dependencies() {
         serial)
             check_command "python3" true
             check_command "make" false
+            local flash_script
+            if ! flash_script="$(ensure_flash_usb_script_available)"; then
+                exit 1
+            fi
+            local display_path
+            display_path="$(format_path_for_display "${flash_script}")"
+            if [[ -n "${FLASH_USB_SCRIPT_SOURCE}" ]]; then
+                success "flash_usb.py disponible (${display_path}, ${FLASH_USB_SCRIPT_SOURCE})."
+            else
+                success "flash_usb.py disponible (${display_path})."
+            fi
             ;;
         dfu)
             ensure_dfu_util_available
@@ -2343,13 +2414,18 @@ function flash_with_serial() {
         exit 1
     fi
 
-    local flash_script="${FLASH_ROOT}/.cache/klipper/scripts/flash_usb.py"
-    if [[ ! -f "${flash_script}" ]]; then
-        error_msg "Le script ${flash_script} est introuvable. Lancez './build.sh' pour récupérer Klipper et recompiler le firmware."
+    local flash_script
+    if ! flash_script="$(ensure_flash_usb_script_available)"; then
         exit 1
     fi
 
-    info "Flash USB via ${flash_script} sur ${SELECTED_DEVICE}."
+    local display_path
+    display_path="$(format_path_for_display "${flash_script}")"
+    if [[ -n "${FLASH_USB_SCRIPT_SOURCE}" ]]; then
+        info "Flash USB via ${display_path} (${FLASH_USB_SCRIPT_SOURCE}) sur ${SELECTED_DEVICE}."
+    else
+        info "Flash USB via ${display_path} sur ${SELECTED_DEVICE}."
+    fi
     local cmd=(python3 "${flash_script}" -d "${SELECTED_DEVICE}" -f "${FIRMWARE_FILE}")
     log_message "DEBUG" "Commande exécutée: ${cmd[*]}"
     "${cmd[@]}" 2>&1 | tee -a "${LOG_FILE}"
