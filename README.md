@@ -325,6 +325,27 @@ Tous ces outils se trouvent dans le dossier [`flash_automation/`](flash_automati
 
 ---
 
+## 🧪 Tests automatisés
+
+Les tests Python se lancent via `pytest` et les scripts Shell avec `tests/*.sh`. Le scénario
+[tests/test_flash_automation_interactive.sh](tests/test_flash_automation_interactive.sh) couvre l'assistant
+interactif de `flash_automation.sh`.
+
+### Dépendances système
+
+- [`expect`](https://core.tcl-lang.org/expect/index) (optionnelle mais recommandée) : permet de vérifier le texte des invites.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y expect
+```
+
+Sans `expect`, le test bascule automatiquement sur un pilote interactif Python basé sur `pty` et continue de
+vérifier la copie du firmware. Installez `expect` pour bénéficier des assertions complètes sur les invites et
+reproduire le comportement de la CI.
+
+---
+
 ## 🤝 Contribuer & licence
 
 - Suivez la convention [Conventional Commits](https://www.conventionalcommits.org/fr/v1.0.0/).
