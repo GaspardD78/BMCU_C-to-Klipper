@@ -160,6 +160,7 @@ DRY_RUN_MODE="false"
 DRY_RUN_SOURCE=""
 SERIAL_SELECTION_SOURCE=""
 SDCARD_SELECTION_SOURCE=""
+SERIAL_VALIDATION_DEFERRED_ONCE="false"
 declare -a ACTIVE_KLIPPER_SERVICES=()
 SERVICES_STOPPED="false"
 SERVICES_RESTORED="false"
@@ -1898,6 +1899,18 @@ finalize_method_selection() {
             ;;
         serial)
             success "Méthode sélectionnée : ${human}."
+            if [[ "${DRY_RUN_MODE}" == "true" && "${SERIAL_VALIDATION_DEFERRED_ONCE}" == "true" ]]; then
+                SERIAL_VALIDATION_DEFERRED_ONCE="false"
+                if [[ -n "${SELECTED_DEVICE}" ]]; then
+                    if [[ -n "${SERIAL_SELECTION_SOURCE}" ]]; then
+                        success "Port série imposé (${SERIAL_SELECTION_SOURCE}) : ${SELECTED_DEVICE}."
+                    else
+                        success "Port série imposé : ${SELECTED_DEVICE}."
+                    fi
+                fi
+                info "Mode --dry-run : validation du port série différée (fallback wchisp)."
+                return
+            fi
             if [[ -n "${SELECTED_DEVICE}" && ! -e "${SELECTED_DEVICE}" ]]; then
                 local source_hint=""
                 if [[ -n "${SERIAL_SELECTION_SOURCE}" ]]; then
@@ -2580,6 +2593,8 @@ function handle_wchisp_failure() {
 
     warn "Échec de wchisp (code ${status}). Recherche d'une méthode alternative."
 
+    SERIAL_VALIDATION_DEFERRED_ONCE="false"
+
     local -a dfu_devices=()
     detect_dfu_devices dfu_devices
     if [[ ${#dfu_devices[@]} -gt 0 ]]; then
@@ -2597,8 +2612,24 @@ function handle_wchisp_failure() {
     fi
 
     local -a serial_devices=()
-    detect_serial_devices serial_devices
-    if [[ ${#serial_devices[@]} -gt 0 ]]; then
+    local allow_serial_fallback="true"
+    if [[ "${DRY_RUN_MODE}" != "true" ]]; then
+        local flash_script_candidate
+        flash_script_candidate="$(get_flash_usb_script_path)"
+        if [[ ! -f "${flash_script_candidate}" ]]; then
+            local display_path
+            display_path="$(format_path_for_display "${flash_script_candidate}")"
+            warn "Impossible de basculer vers le flash série : script absent (${display_path})."
+            log_message "WARN" "Fallback série ignoré : flash_usb.py introuvable (${display_path})."
+            allow_serial_fallback="false"
+        fi
+    fi
+
+    if [[ "${allow_serial_fallback}" == "true" ]]; then
+        detect_serial_devices serial_devices
+    fi
+
+    if [[ "${allow_serial_fallback}" == "true" && ${#serial_devices[@]} -gt 0 ]]; then
         local serial_target="${serial_devices[0]}"
         info "Bascule automatique vers le flash série (${serial_target})."
         SELECTED_METHOD="serial"
@@ -2607,6 +2638,9 @@ function handle_wchisp_failure() {
         SERIAL_SELECTION_SOURCE="détection automatique (fallback wchisp)"
         SDCARD_SELECTION_SOURCE=""
         SDCARD_MOUNTPOINT=""
+        if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+            SERIAL_VALIDATION_DEFERRED_ONCE="true"
+        fi
         finalize_method_selection
         prepare_target
         return 0
