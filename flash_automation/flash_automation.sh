@@ -64,11 +64,37 @@ readonly FAILURE_REPORT="${LOG_DIR}/FAILURE_REPORT.txt"
 readonly DEFAULT_FIRMWARE_RELATIVE_PATHS=(".cache/klipper/out" ".cache/firmware")
 readonly DEFAULT_FIRMWARE_RELATIVE_PATH="${DEFAULT_FIRMWARE_RELATIVE_PATHS[0]}"
 readonly DEFAULT_FLASH_USB_RELATIVE_PATH=".cache/klipper/scripts/flash_usb.py"
-readonly DEFAULT_FIRMWARE_EXCLUDE_RELATIVE_PATHS=("logs" "tests" ".cache/tools")
+readonly DEFAULT_FIRMWARE_EXCLUDE_RELATIVE_PATHS=(
+    "logs"
+    "tests"
+    ".cache/tools"
+    "archive"
+    "assets"
+    "docs"
+    "ci"
+    "BMCU_C_to_Klipper_logs"
+    ".git"
+    ".github"
+    "node_modules"
+    ".venv"
+    "venv"
+    "__pycache__"
+    "build"
+    "dist"
+    "tmp"
+    "flash_automation/docs"
+    "flash_automation/tests"
+)
+readonly DEFAULT_FIRMWARE_SCAN_EXTENSIONS=(bin uf2 elf)
+readonly DEFAULT_FIRMWARE_EXCLUDE_EXTENSIONS=(zip gz bz2 xz zst img iso binpkg pkg tar tar.gz tar.bz2 tar.xz 7z rar dmg)
 readonly -a WCH_USB_VENDOR_IDS_DEFAULT=("1a86")
 DEEP_SCAN_ENABLED="false"
 declare -a FIRMWARE_SCAN_EXCLUDES=()
 declare -a CLI_FIRMWARE_SCAN_EXCLUDES=()
+declare -a FIRMWARE_SCAN_EXTENSIONS=()
+declare -a CLI_FIRMWARE_SCAN_EXTENSIONS=()
+declare -a FIRMWARE_SCAN_EXCLUDE_EXTENSIONS=()
+declare -a CLI_FIRMWARE_SCAN_EXCLUDE_EXTENSIONS=()
 declare -a WCH_USB_VENDOR_IDS=()
 FIRMWARE_DISPLAY_PATH="${KLIPPER_FIRMWARE_PATH:-}"
 FIRMWARE_FILE=""
@@ -197,6 +223,56 @@ dedupe_array_in_place() {
     done
 
     array_ref=("${unique[@]}")
+}
+
+normalize_extension_value() {
+    local value="${1:-}"
+    value="${value//[[:space:]]/}"
+    value="${value#.}"
+    value="${value,,}"
+    printf '%s\n' "${value}"
+}
+
+append_extensions_from_string() {
+    local -n target_ref=$1
+    local raw_list="${2:-}"
+    if [[ -z "${raw_list}" ]]; then
+        return
+    fi
+
+    local old_ifs="${IFS}"
+    IFS=",;:"
+    read -r -a parts <<< "${raw_list}"
+    IFS="${old_ifs}"
+
+    local part
+    for part in "${parts[@]}"; do
+        local normalized
+        normalized="$(normalize_extension_value "${part}")"
+        [[ -n "${normalized}" ]] || continue
+        target_ref+=("${normalized}")
+    done
+}
+
+format_extensions_for_display() {
+    if [[ $# -eq 0 ]]; then
+        printf '%s' ""
+        return
+    fi
+
+    local first="true"
+    local segment=""
+    local ext
+    for ext in "$@"; do
+        [[ -n "${ext}" ]] || continue
+        segment=".${ext}"
+        if [[ "${first}" == "true" ]]; then
+            printf '%s' "${segment}"
+            first="false"
+        else
+            printf ', %s' "${segment}"
+        fi
+    done
 }
 
 get_file_mtime_epoch() {
@@ -333,6 +409,8 @@ Options:
   --sdcard-path <chemin>       Fixe le point de montage cible pour la copie sur carte SD.
   --deep-scan                  Étend la recherche de firmwares à l'ensemble du dépôt.
   --exclude-path <chemin>      Ajoute un chemin à exclure de la découverte automatique.
+  --exclude-extension <ext>    Ignore une ou plusieurs extensions lors de la recherche (--exclude-extension bin,uf2).
+  --scan-extensions <exts>     Restreint la recherche aux extensions fournies (--scan-extensions bin,uf2).
   --auto-confirm               Accepte automatiquement les choix suggérés (mode non interactif).
   --no-confirm                 Alias de --auto-confirm.
   --dry-run                    Valide l'enchaînement des étapes sans appliquer les actions destructrices.
@@ -353,6 +431,8 @@ Variables d'environnement associées :
   WCHISP_ARCHIVE_CHECKSUM_OVERRIDE  Injecte une somme de contrôle SHA-256 personnalisée.
   ALLOW_UNVERIFIED_WCHISP           "true"/"1" pour autoriser le mode dégradé.
   KLIPPER_FIRMWARE_SCAN_EXCLUDES    Liste (séparée par ':') de chemins à ignorer durant la découverte.
+  KLIPPER_FIRMWARE_SCAN_EXTENSIONS  Liste (séparée par ',') d'extensions à rechercher (défaut : bin,uf2,elf).
+  KLIPPER_FIRMWARE_SCAN_EXCLUDE_EXTENSIONS  Liste (séparée par ',') d'extensions à ignorer.
   DFU_ALT_SETTING                   Sélectionne l'interface DFU (par défaut : 0).
   DFU_SERIAL_NUMBER                 Filtre dfu-util sur un numéro de série spécifique.
   DFU_EXTRA_ARGS                    Arguments supplémentaires passés à dfu-util.
@@ -542,6 +622,59 @@ parse_cli_arguments() {
                 CLI_FIRMWARE_SCAN_EXCLUDES+=("$(resolve_path_relative_to_flash_root "${raw_path}")")
                 shift
                 ;;
+            --exclude-extension)
+                if [[ $# -lt 2 ]]; then
+                    echo "L'option --exclude-extension requiert au moins une extension." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                local before_count=${#CLI_FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]}
+                append_extensions_from_string CLI_FIRMWARE_SCAN_EXCLUDE_EXTENSIONS "$2"
+                local after_count=${#CLI_FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]}
+                if (( after_count == before_count )); then
+                    echo "L'option --exclude-extension nécessite une extension valide." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --exclude-extension=*)
+                local raw_extension="${1#*=}"
+                local before_count=${#CLI_FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]}
+                append_extensions_from_string CLI_FIRMWARE_SCAN_EXCLUDE_EXTENSIONS "${raw_extension}"
+                local after_count=${#CLI_FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]}
+                if (( after_count == before_count )); then
+                    echo "L'option --exclude-extension nécessite une extension valide." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                shift
+                ;;
+            --scan-extensions)
+                if [[ $# -lt 2 ]]; then
+                    echo "L'option --scan-extensions requiert au moins une extension." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                CLI_FIRMWARE_SCAN_EXTENSIONS=()
+                append_extensions_from_string CLI_FIRMWARE_SCAN_EXTENSIONS "$2"
+                if [[ ${#CLI_FIRMWARE_SCAN_EXTENSIONS[@]} -eq 0 ]]; then
+                    echo "L'option --scan-extensions nécessite une extension valide." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --scan-extensions=*)
+                CLI_FIRMWARE_SCAN_EXTENSIONS=()
+                append_extensions_from_string CLI_FIRMWARE_SCAN_EXTENSIONS "${1#*=}"
+                if [[ ${#CLI_FIRMWARE_SCAN_EXTENSIONS[@]} -eq 0 ]]; then
+                    echo "L'option --scan-extensions nécessite une extension valide." >&2
+                    print_usage >&2
+                    exit 1
+                fi
+                shift
+                ;;
             -h|--help)
                 print_usage
                 exit 0
@@ -623,6 +756,30 @@ apply_configuration_defaults() {
 
     FIRMWARE_SCAN_EXCLUDES=("${excludes[@]}")
     dedupe_array_in_place FIRMWARE_SCAN_EXCLUDES
+
+    local -a exclude_extensions=("${DEFAULT_FIRMWARE_EXCLUDE_EXTENSIONS[@]}")
+    if [[ -n "${KLIPPER_FIRMWARE_SCAN_EXCLUDE_EXTENSIONS:-}" ]]; then
+        append_extensions_from_string exclude_extensions "${KLIPPER_FIRMWARE_SCAN_EXCLUDE_EXTENSIONS}"
+    fi
+    if [[ ${#CLI_FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]} -gt 0 ]]; then
+        exclude_extensions+=("${CLI_FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]}")
+    fi
+    FIRMWARE_SCAN_EXCLUDE_EXTENSIONS=("${exclude_extensions[@]}")
+    dedupe_array_in_place FIRMWARE_SCAN_EXCLUDE_EXTENSIONS
+
+    local -a include_extensions=()
+    if [[ ${#CLI_FIRMWARE_SCAN_EXTENSIONS[@]} -gt 0 ]]; then
+        include_extensions=("${CLI_FIRMWARE_SCAN_EXTENSIONS[@]}")
+    elif [[ -n "${KLIPPER_FIRMWARE_SCAN_EXTENSIONS:-}" ]]; then
+        append_extensions_from_string include_extensions "${KLIPPER_FIRMWARE_SCAN_EXTENSIONS}"
+    fi
+
+    if [[ ${#include_extensions[@]} -eq 0 ]]; then
+        include_extensions=("${DEFAULT_FIRMWARE_SCAN_EXTENSIONS[@]}")
+    fi
+
+    FIRMWARE_SCAN_EXTENSIONS=("${include_extensions[@]}")
+    dedupe_array_in_place FIRMWARE_SCAN_EXTENSIONS
 
     PRESELECTED_FIRMWARE_FILE=""
     FIRMWARE_SELECTION_SOURCE=""
@@ -1563,12 +1720,66 @@ run_find_firmware_files() {
 
     find_cmd+=(-type)
     find_cmd+=(f)
+
+    local -a effective_include_exts=()
+    if [[ ${#FIRMWARE_SCAN_EXTENSIONS[@]} -gt 0 ]]; then
+        effective_include_exts=("${FIRMWARE_SCAN_EXTENSIONS[@]}")
+    else
+        effective_include_exts=("${DEFAULT_FIRMWARE_SCAN_EXTENSIONS[@]}")
+    fi
+
+    local -a effective_exclude_exts=()
+    if [[ ${#FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]} -gt 0 ]]; then
+        effective_exclude_exts=("${FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]}")
+    else
+        effective_exclude_exts=("${DEFAULT_FIRMWARE_EXCLUDE_EXTENSIONS[@]}")
+    fi
+
+    declare -A exclude_lookup=()
+    local ext
+    for ext in "${effective_exclude_exts[@]}"; do
+        [[ -n "${ext}" ]] || continue
+        exclude_lookup["${ext}"]=1
+    done
+
+    local -a filtered_include_exts=()
+    for ext in "${effective_include_exts[@]}"; do
+        [[ -n "${ext}" ]] || continue
+        if [[ -n "${exclude_lookup["${ext}"]:-}" ]]; then
+            continue
+        fi
+        filtered_include_exts+=("${ext}")
+    done
+    effective_include_exts=("${filtered_include_exts[@]}")
+
+    if [[ ${#effective_include_exts[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    declare -A include_lookup=()
+    for ext in "${effective_include_exts[@]}"; do
+        include_lookup["${ext}"]=1
+    done
+
+    for ext in "${effective_exclude_exts[@]}"; do
+        [[ -n "${include_lookup["${ext}"]:-}" ]] && continue
+        if [[ -n "${ext}" ]]; then
+            find_cmd+=(!)
+            find_cmd+=(-name "*.${ext}")
+        fi
+    done
+
     find_cmd+=(\()
-    find_cmd+=(-name "*.bin")
-    find_cmd+=(-o)
-    find_cmd+=(-name "*.uf2")
-    find_cmd+=(-o)
-    find_cmd+=(-name "*.elf")
+    local first_include=true
+    for ext in "${effective_include_exts[@]}"; do
+        [[ -n "${ext}" ]] || continue
+        if [[ "${first_include}" == "true" ]]; then
+            first_include=false
+        else
+            find_cmd+=(-o)
+        fi
+        find_cmd+=(-name "*.${ext}")
+    done
     find_cmd+=(\))
     find_cmd+=(-print0)
 
@@ -1930,7 +2141,18 @@ function prompt_firmware_selection() {
 function prepare_firmware() {
     CURRENT_STEP="Étape 1: Sélection du firmware"
     render_box "${CURRENT_STEP}"
-    info "Recherche des artefacts firmware (.bin, .elf, .uf2)."
+    local -a include_ext_display=()
+    if [[ ${#FIRMWARE_SCAN_EXTENSIONS[@]} -gt 0 ]]; then
+        include_ext_display=("${FIRMWARE_SCAN_EXTENSIONS[@]}")
+    else
+        include_ext_display=("${DEFAULT_FIRMWARE_SCAN_EXTENSIONS[@]}")
+    fi
+    local extension_display
+    extension_display="$(format_extensions_for_display "${include_ext_display[@]}")"
+    if [[ -z "${extension_display}" ]]; then
+        extension_display="$(format_extensions_for_display "${DEFAULT_FIRMWARE_SCAN_EXTENSIONS[@]}")"
+    fi
+    info "Recherche des artefacts firmware (${extension_display})."
 
     local search_roots_display=""
     for rel_path in "${DEFAULT_FIRMWARE_RELATIVE_PATHS[@]}"; do
@@ -1956,6 +2178,17 @@ function prepare_firmware() {
         info "Mode --deep-scan actif : recherche étendue dans ${FLASH_ROOT}."
         if [[ -n "${exclude_display}" ]]; then
             info "Chemins ignorés : ${exclude_display}"
+        fi
+        local -a exclude_ext_display=()
+        if [[ ${#FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]} -gt 0 ]]; then
+            exclude_ext_display=("${FIRMWARE_SCAN_EXCLUDE_EXTENSIONS[@]}")
+        else
+            exclude_ext_display=("${DEFAULT_FIRMWARE_EXCLUDE_EXTENSIONS[@]}")
+        fi
+        local exclude_ext_string
+        exclude_ext_string="$(format_extensions_for_display "${exclude_ext_display[@]}")"
+        if [[ -n "${exclude_ext_string}" ]]; then
+            info "Extensions ignorées : ${exclude_ext_string}"
         fi
     else
         info "Utilisez --deep-scan pour élargir la recherche à l'ensemble du dépôt."
