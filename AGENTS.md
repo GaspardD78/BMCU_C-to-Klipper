@@ -17,6 +17,7 @@ Le projet est organisé comme suit :
   - `build.sh` : Script pour compiler le firmware (télécharge Klipper dans `.cache/`).
   - `flash.py` : Script interactif pour flasher le firmware.
   - `flash_automation.sh` : Script Shell pour automatiser le flashage en ligne de commande.
+  - `lib/*.sh` : Modules Bash sourceables (`ui`, `permissions_cache`, `wchisp`) utilisés par `flash_automation.sh` et testés individuellement.
   - `klipper.config` : Fichier de configuration Klipper pour le BMCU-C.
   - `flashBMCUtoKlipper_automation.py` : Automatisation avancée (CI, ateliers, etc.).
 - `assets/` : Ressources graphiques (logo SVG).
