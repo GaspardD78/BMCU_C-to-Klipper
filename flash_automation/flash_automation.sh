@@ -55,6 +55,7 @@ readonly WCHISP_CACHE_DIR="${TOOLS_ROOT}/wchisp"
 readonly WCHISP_RELEASE="${WCHISP_RELEASE:-v0.3.0}"
 readonly WCHISP_AUTO_INSTALL="${WCHISP_AUTO_INSTALL:-true}"
 readonly WCHISP_BASE_URL="${WCHISP_BASE_URL:-https://github.com/ch32-rs/wchisp/releases/download}"
+readonly WCHISP_CHECKSUM_FILE="${FLASH_ROOT}/wchisp_sha256sums.txt"
 WCHISP_COMMAND="${WCHISP_BIN:-wchisp}"
 readonly WCHISP_TRANSPORT="${WCHISP_TRANSPORT:-usb}"
 readonly WCHISP_USB_INDEX="${WCHISP_USB_INDEX:-}"
@@ -504,6 +505,57 @@ function check_device_write_access() {
     return 1
 }
 
+lookup_wchisp_checksum() {
+    local asset="$1"
+
+    if [[ ! -f "${WCHISP_CHECKSUM_FILE}" ]]; then
+        error_msg "Fichier de sommes de contrôle wchisp introuvable (${WCHISP_CHECKSUM_FILE})."
+        printf "Assurez-vous que le dépôt contient les sommes SHA-256 de wchisp avant de poursuivre.\n" >&2
+        return 1
+    fi
+
+    local checksum
+    checksum=$(awk -v target="${asset}" '
+        /^[[:space:]]*#/ {next}
+        NF >= 2 && $NF == target {print $1; exit}
+    ' "${WCHISP_CHECKSUM_FILE}")
+
+    if [[ -z "${checksum}" ]]; then
+        error_msg "Somme de contrôle attendue introuvable pour ${asset}."
+        printf "Mettez à jour %s avec l'empreinte SHA-256 officielle correspondant à cette archive.\n" "${WCHISP_CHECKSUM_FILE}" >&2
+        return 1
+    fi
+
+    printf '%s\n' "${checksum}"
+}
+
+verify_wchisp_archive() {
+    local asset="$1"
+    local archive_path="$2"
+
+    local expected
+    if ! expected=$(lookup_wchisp_checksum "${asset}"); then
+        return 1
+    fi
+
+    local actual
+    if ! actual=$(sha256sum "${archive_path}" 2>/dev/null | awk '{print $1}'); then
+        error_msg "Impossible de calculer l'empreinte SHA-256 de ${archive_path}."
+        printf "Vérifiez les permissions de lecture sur l'archive avant de relancer.\n" >&2
+        return 1
+    fi
+
+    if [[ "${actual}" != "${expected}" ]]; then
+        rm -f "${archive_path}" || true
+        error_msg "La vérification d'intégrité de l'archive ${asset} a échoué."
+        printf "Empreinte attendue : %s\nEmpreinte calculée : %s\n" "${expected}" "${actual}" >&2
+        printf "L'archive téléchargée a été supprimée. Relancez le script après avoir vérifié votre connexion ou la source du fichier.\n" >&2
+        return 1
+    fi
+
+    log_message "INFO" "Somme de contrôle SHA-256 validée pour ${asset}."
+}
+
 ensure_wchisp() {
     if command_exists "${WCHISP_COMMAND}"; then
         return
@@ -558,6 +610,16 @@ ensure_wchisp() {
         fi
     else
         log_message "INFO" "Archive wchisp déjà présente (${archive_path})."
+    fi
+
+    if ! command_exists sha256sum; then
+        error_msg "sha256sum est requis pour vérifier l'intégrité de l'archive wchisp."
+        echo "Installez coreutils ou fournissez sha256sum dans votre PATH avant de relancer." >&2
+        exit 1
+    fi
+
+    if ! verify_wchisp_archive "${asset}" "${archive_path}"; then
+        exit 1
     fi
 
     local install_dir="${WCHISP_CACHE_DIR}/${WCHISP_RELEASE}-${arch}"
