@@ -52,10 +52,16 @@ resolve_serial_port_path() {
     fi
 }
 
-if [[ -f "${LOGO_FILE}" ]]; then
-    cat "${LOGO_FILE}"
-    echo
-fi
+display_banner() {
+    if [[ "${QUIET_MODE}" == "true" ]]; then
+        return
+    fi
+
+    if [[ -f "${LOGO_FILE}" ]]; then
+        cat "${LOGO_FILE}"
+        echo
+    fi
+}
 
 readonly LOG_BASE_DIR="${FLASH_ROOT}/logs"
 readonly LOG_DIR="${LOG_BASE_DIR}/flash_$(date +%Y-%m-%d_%H-%M-%S)"
@@ -2836,6 +2842,7 @@ function main() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     parse_cli_arguments "$@"
     apply_configuration_defaults
+    display_banner
     flash_automation_initialize
     main
 else
