@@ -106,6 +106,10 @@ CLI_SDCARD_PATH_OVERRIDE=""
 CLI_AUTO_CONFIRM_REQUESTED="false"
 CLI_DRY_RUN_REQUESTED="false"
 
+CLI_NO_COLOR_REQUESTED="false"
+CLI_QUIET_REQUESTED="false"
+QUIET_MODE="false"
+
 DEFAULT_CACHE_HOME="${XDG_CACHE_HOME:-${HOME}/.cache}"
 PERMISSIONS_CACHE_FILE="${BMCU_PERMISSION_CACHE_FILE:-${DEFAULT_CACHE_HOME}/bmcu_permissions.json}"
 PERMISSIONS_CACHE_TTL_RAW="${BMCU_PERMISSION_CACHE_TTL:-3600}"
@@ -119,23 +123,13 @@ else
 fi
 PERMISSIONS_CACHE_MESSAGE=""
 
-if [[ -t 1 ]]; then
-    COLOR_RESET="\033[0m"
-    COLOR_INFO="\033[38;5;39m"
-    COLOR_WARN="\033[38;5;214m"
-    COLOR_ERROR="\033[38;5;203m"
-    COLOR_SUCCESS="\033[38;5;40m"
-    COLOR_SECTION="\033[1;97m"
-    COLOR_BORDER="\033[38;5;60m"
-else
-    COLOR_RESET=""
-    COLOR_INFO=""
-    COLOR_WARN=""
-    COLOR_ERROR=""
-    COLOR_SUCCESS=""
-    COLOR_SECTION=""
-    COLOR_BORDER=""
-fi
+COLOR_RESET=""
+COLOR_INFO=""
+COLOR_WARN=""
+COLOR_ERROR=""
+COLOR_SUCCESS=""
+COLOR_SECTION=""
+COLOR_BORDER=""
 
 CURRENT_STEP="Initialisation"
 FIRMWARE_SIZE=""
@@ -190,6 +184,38 @@ normalize_boolean() {
             printf '%s\n' "false"
             ;;
     esac
+}
+
+configure_color_palette() {
+    local enable_colors="false"
+
+    if [[ "${CLI_NO_COLOR_REQUESTED}" == "true" ]]; then
+        enable_colors="false"
+    else
+        local env_no_color
+        env_no_color="$(normalize_boolean "${FLASH_AUTOMATION_NO_COLOR:-false}")"
+        if [[ "${env_no_color}" != "true" && -t 1 ]]; then
+            enable_colors="true"
+        fi
+    fi
+
+    if [[ "${enable_colors}" == "true" ]]; then
+        COLOR_RESET="\033[0m"
+        COLOR_INFO="\033[38;5;39m"
+        COLOR_WARN="\033[38;5;214m"
+        COLOR_ERROR="\033[38;5;203m"
+        COLOR_SUCCESS="\033[38;5;40m"
+        COLOR_SECTION="\033[1;97m"
+        COLOR_BORDER="\033[38;5;60m"
+    else
+        COLOR_RESET=""
+        COLOR_INFO=""
+        COLOR_WARN=""
+        COLOR_ERROR=""
+        COLOR_SUCCESS=""
+        COLOR_SECTION=""
+        COLOR_BORDER=""
+    fi
 }
 
 dedupe_array_in_place() {
@@ -256,6 +282,8 @@ Options:
   --auto-confirm               Accepte automatiquement les choix suggérés (mode non interactif).
   --no-confirm                 Alias de --auto-confirm.
   --dry-run                    Valide l'enchaînement des étapes sans appliquer les actions destructrices.
+  --quiet                      Réduit les sorties console aux avertissements et erreurs.
+  --no-color                   Désactive les couleurs ANSI, même sur un terminal interactif.
   -h, --help                   Affiche cette aide et quitte.
 
 Variables d'environnement associées :
@@ -264,6 +292,8 @@ Variables d'environnement associées :
   FLASH_AUTOMATION_DRY_RUN           Active le mode simulation sans flash réel.
   FLASH_AUTOMATION_SERIAL_PORT       Port série forcé (équivalent --serial-port).
   FLASH_AUTOMATION_SDCARD_PATH       Point de montage forcé pour la méthode sdcard.
+  FLASH_AUTOMATION_QUIET             "true"/"1" pour réduire les sorties console.
+  FLASH_AUTOMATION_NO_COLOR          "true"/"1" pour forcer la sortie sans couleurs.
   WCHISP_ARCHIVE_CHECKSUM_OVERRIDE  Injecte une somme de contrôle SHA-256 personnalisée.
   ALLOW_UNVERIFIED_WCHISP           "true"/"1" pour autoriser le mode dégradé.
   KLIPPER_FIRMWARE_SCAN_EXCLUDES    Liste (séparée par ':') de chemins à ignorer durant la découverte.
@@ -381,6 +411,14 @@ parse_cli_arguments() {
                 CLI_DRY_RUN_REQUESTED="true"
                 shift
                 ;;
+            --quiet)
+                CLI_QUIET_REQUESTED="true"
+                shift
+                ;;
+            --no-color)
+                CLI_NO_COLOR_REQUESTED="true"
+                shift
+                ;;
             --deep-scan)
                 DEEP_SCAN_ENABLED="true"
                 shift
@@ -490,6 +528,12 @@ apply_configuration_defaults() {
         fi
     fi
 
+    if [[ "${CLI_QUIET_REQUESTED}" == "true" ]]; then
+        QUIET_MODE="true"
+    else
+        QUIET_MODE="$(normalize_boolean "${FLASH_AUTOMATION_QUIET:-false}")"
+    fi
+
     if [[ "${DRY_RUN_MODE}" == "true" ]]; then
         AUTO_CONFIRM_MODE="true"
         if [[ -z "${AUTO_CONFIRM_SOURCE}" ]]; then
@@ -553,6 +597,8 @@ apply_configuration_defaults() {
 
     SDCARD_MOUNTPOINT="${sdcard_candidate}"
     SDCARD_SELECTION_SOURCE="${sdcard_source}"
+
+    configure_color_palette
 }
 
 function log_message() {
@@ -984,6 +1030,9 @@ function invalidate_permissions_cache() {
 function render_box() {
     local title="$1"
     local border="========================================"
+    if [[ "${QUIET_MODE}" == "true" ]]; then
+        return
+    fi
     printf "%b%s%b\n" "${COLOR_BORDER}" "${border}" "${COLOR_RESET}"
     printf "%b%s%b\n" "${COLOR_SECTION}" "${title}" "${COLOR_RESET}"
     printf "%b%s%b\n" "${COLOR_BORDER}" "${border}" "${COLOR_RESET}"
@@ -992,7 +1041,9 @@ function render_box() {
 function info() {
     local message="$1"
     log_message "INFO" "${message}"
-    printf "%b[INFO]%b %s\n" "${COLOR_INFO}" "${COLOR_RESET}" "${message}"
+    if [[ "${QUIET_MODE}" != "true" ]]; then
+        printf "%b[INFO]%b %s\n" "${COLOR_INFO}" "${COLOR_RESET}" "${message}"
+    fi
 }
 
 function warn() {
@@ -1010,7 +1061,9 @@ function error_msg() {
 function success() {
     local message="$1"
     log_message "INFO" "${message}"
-    printf "%b[OK]%b %s\n" "${COLOR_SUCCESS}" "${COLOR_RESET}" "${message}"
+    if [[ "${QUIET_MODE}" != "true" ]]; then
+        printf "%b[OK]%b %s\n" "${COLOR_SUCCESS}" "${COLOR_RESET}" "${message}"
+    fi
 }
 
 function handle_error() {
@@ -2127,6 +2180,20 @@ function collect_firmware_candidates() {
 function prompt_firmware_selection() {
     local -n candidates_ref=$1
     local choice=""
+    local default_choice=""
+    local default_display=""
+
+    if (( ${#candidates_ref[@]} > 0 )); then
+        default_choice="${candidates_ref[0]}"
+        default_display="$(format_path_for_display "${default_choice}")"
+    fi
+
+    if [[ ${#DEFAULT_FIRMWARE_RELATIVE_PATHS[@]} -gt 0 ]]; then
+        local joined_paths
+        joined_paths="${DEFAULT_FIRMWARE_RELATIVE_PATHS[*]}"
+        echo "Chemins valides (relatifs au dépôt) : ${joined_paths}"
+    fi
+    echo "Saisissez le numéro correspondant, un chemin absolu ou relatif, ou 'q' pour quitter rapidement."
 
     while true; do
         echo
@@ -2140,8 +2207,28 @@ function prompt_firmware_selection() {
             ((index++))
         done
         printf "  [%d] Saisir un chemin personnalisé\n" "${index}"
+        printf "  [q] Quitter et annuler la procédure\n"
 
-        read -rp "Votre choix : " answer
+        local prompt_hint=""
+        if [[ -n "${default_display}" ]]; then
+            prompt_hint=" (Entrée = ${default_display})"
+        fi
+
+        read -rp "Votre choix${prompt_hint} ('q' pour quitter) : " answer
+
+        if [[ -z "${answer}" ]]; then
+            if [[ -n "${default_choice}" ]]; then
+                choice="${default_choice}"
+                break
+            fi
+            warn "Veuillez sélectionner une option ou fournir un chemin valide."
+            continue
+        fi
+
+        if [[ "${answer,,}" == "q" ]]; then
+            info "Arrêt demandé par l'utilisateur lors de la sélection du firmware."
+            exit 0
+        fi
 
         if [[ "${answer}" =~ ^[0-9]+$ ]]; then
             local numeric=$((answer))
@@ -2149,7 +2236,7 @@ function prompt_firmware_selection() {
                 choice="${candidates_ref[$((numeric-1))]}"
                 break
             elif (( numeric == index )); then
-                read -rp "Chemin complet du firmware : " custom_path
+                read -rp "Chemin complet du firmware (relatif à ${FLASH_ROOT} accepté) : " custom_path
                 local resolved="$(resolve_path_relative_to_flash_root "${custom_path}")"
                 if [[ -f "${resolved}" ]]; then
                     choice="${resolved}"
@@ -2297,21 +2384,33 @@ function select_flash_method() {
         prompt_hint=" (Entrée = ${human_hint})"
     fi
 
+    echo "Saisissez le numéro correspondant ou 'q' pour quitter rapidement."
+
     while true; do
         local index=1
         for option in "${options[@]}"; do
             printf "  [%d] %s\n" "${index}" "${option}"
             ((index++))
         done
+        printf "  [q] Quitter et annuler la procédure\n"
 
-        read -rp "Méthode choisie${prompt_hint} : " answer
+        read -rp "Méthode choisie${prompt_hint} ('q' pour quitter) : " answer
 
-        if [[ -z "${answer}" && -n "${suggestion}" ]]; then
-            SELECTED_DEVICE=""
-            SDCARD_MOUNTPOINT=""
-            SELECTED_METHOD="${suggestion}"
-            finalize_method_selection
-            break
+        if [[ -z "${answer}" ]]; then
+            if [[ -n "${suggestion}" ]]; then
+                SELECTED_DEVICE=""
+                SDCARD_MOUNTPOINT=""
+                SELECTED_METHOD="${suggestion}"
+                finalize_method_selection
+                break
+            fi
+            warn "Veuillez sélectionner une option ou saisir 'q' pour quitter."
+            continue
+        fi
+
+        if [[ "${answer,,}" == "q" ]]; then
+            info "Arrêt demandé par l'utilisateur lors de la sélection de la méthode."
+            exit 0
         fi
 
         case "${answer}" in
@@ -2355,6 +2454,7 @@ function prompt_serial_device() {
 
     while true; do
         detect_serial_devices devices
+        local default_device=""
 
         if [[ ${#devices[@]} -gt 0 ]]; then
             echo "Ports série détectés :"
@@ -2363,18 +2463,33 @@ function prompt_serial_device() {
                 printf "  [%d] %s\n" "${index}" "${dev}"
                 ((index++))
             done
+            default_device="${devices[0]}"
         else
             warn "Aucun port série détecté pour le moment."
         fi
 
-        read -rp "Sélectionnez un port (numéro, chemin, 'r' pour rafraîchir) : " answer
+        echo "Astuce : saisissez un numéro, un chemin /dev/tty* ou 'q' pour quitter rapidement."
+        local prompt_hint=""
+        if [[ -n "${default_device}" ]]; then
+            prompt_hint=" (Entrée = ${default_device})"
+        fi
+
+        read -rp "Sélectionnez un port${prompt_hint} ('r' pour rafraîchir, 'q' pour quitter) : " answer
 
         case "${answer}" in
             r|R)
                 continue
                 ;;
+            q|Q)
+                info "Arrêt demandé par l'utilisateur lors de la sélection du port série."
+                exit 0
+                ;;
             "")
-                warn "Veuillez sélectionner un port valide."
+                if [[ -n "${default_device}" ]]; then
+                    SELECTED_DEVICE="${default_device}"
+                    break
+                fi
+                warn "Veuillez sélectionner un port valide ou saisir 'q' pour quitter."
                 ;;
             *)
                 if [[ "${answer}" =~ ^[0-9]+$ && ${#devices[@]} -gt 0 ]]; then
@@ -2405,9 +2520,58 @@ function prompt_serial_device() {
 }
 
 function prompt_sdcard_mountpoint() {
+    local default_mount=""
+    local nullglob_was_set=0
+    if shopt -q nullglob; then
+        nullglob_was_set=1
+    fi
+    shopt -s nullglob
+
+    local -a mount_candidates=()
+    if [[ -n "${USER:-}" ]]; then
+        mount_candidates+=(/media/"${USER}"/* /run/media/"${USER}"/*)
+    else
+        mount_candidates+=(/media/* /run/media/*)
+    fi
+    mount_candidates+=(/mnt/*)
+
+    for candidate in "${mount_candidates[@]}"; do
+        if [[ -d "${candidate}" ]]; then
+            default_mount="${candidate}"
+            break
+        fi
+    done
+
+    if [[ ${nullglob_was_set} -eq 0 ]]; then
+        shopt -u nullglob
+    fi
+
+    if [[ -n "${default_mount}" ]]; then
+        echo "Chemin détecté : ${default_mount} (Entrée pour utiliser ce chemin)."
+    fi
+    echo "Astuce : saisissez un dossier monté accessible en écriture (ex: /media/${USER:-<utilisateur>}/<volume>) ou 'q' pour quitter."
+
     while true; do
-        read -rp "Point de montage de la carte SD : " mountpoint
-        [[ -z "${mountpoint}" ]] && { warn "Le chemin ne peut pas être vide."; continue; }
+        local prompt_hint=""
+        if [[ -n "${default_mount}" ]]; then
+            prompt_hint=" (Entrée = ${default_mount})"
+        fi
+
+        read -rp "Point de montage de la carte SD${prompt_hint} ('q' pour quitter) : " mountpoint
+
+        if [[ -z "${mountpoint}" ]]; then
+            if [[ -n "${default_mount}" ]]; then
+                mountpoint="${default_mount}"
+            else
+                warn "Le chemin ne peut pas être vide."
+                continue
+            fi
+        fi
+
+        if [[ "${mountpoint,,}" == "q" ]]; then
+            info "Arrêt demandé par l'utilisateur lors de la sélection de la carte SD."
+            exit 0
+        fi
 
         local resolved="${mountpoint}"
         if [[ "${resolved}" != /* ]]; then
@@ -2662,6 +2826,12 @@ EOF
     info "Les logs détaillés sont disponibles ici : ${LOG_FILE}"
     if [[ "${DRY_RUN_MODE}" == "true" ]]; then
         info "Mode --dry-run : aucune opération de flash n'a été appliquée à la cible."
+    fi
+    if [[ "${QUIET_MODE}" == "true" ]]; then
+        echo "Procédure terminée. Consultez ${LOG_FILE} pour le détail."
+        if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+            echo "Mode --dry-run : aucune opération de flash n'a été appliquée à la cible."
+        fi
     fi
     log_message "INFO" "Procédure complète terminée avec succès."
 }
