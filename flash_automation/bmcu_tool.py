@@ -1492,12 +1492,9 @@ def run_dependency_installation():
     arch = platform.machine()
     is_arm = arch.startswith("arm") or arch.startswith("aarch")
 
-    if is_arm:
-        toolchain_packages = ["gcc-riscv-none-elf", "picolibc-riscv-none-elf"]
-    else:
-        toolchain_packages = ["gcc-riscv32-unknown-elf", "picolibc-riscv32-unknown-elf"]
+    toolchain_packages = ["gcc-riscv-none-elf", "picolibc-riscv-none-elf"]
 
-    base_packages = ["git", "python3", "python3-venv", "python3-pip", "make", "curl", "tar", "build-essential"]
+    base_packages = ["git", "python3", "python3-venv", "python3-pip", "make", "curl", "tar", "build-essential", "sshpass"]
     required_packages = base_packages + toolchain_packages
 
     print("Vérification des paquets requis...")
