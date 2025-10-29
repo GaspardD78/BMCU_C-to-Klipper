@@ -31,19 +31,20 @@ Ce document détaille la procédure complète pour compiler et flasher le firmwa
 
 ## 3. Mise en mode bootloader et flash
 
-1. Lancez l'assistant interactif :
+1. Lancez l'outil interactif :
    ```bash
-   python3 flash.py
+   python3 bmcu_tool.py
    ```
-   Utilisez l'option `--dry-run` pour valider le parcours sans écrire sur la carte. L'assistant rappelle les prérequis (connexion réseau/USB, sauvegardes, checksum du firmware), calcule automatiquement l'empreinte SHA-256 de `klipper.bin` et la compare à la valeur de référence définie dans `klipper.sha256` (ou fournie via `--firmware-sha256[(-file)]`). En cas d'écart, le processus s'arrête immédiatement pour éviter un flash risqué.
-   > ℹ️ Les invites `O/n` acceptent `Entrée` pour sélectionner la valeur par défaut. Dans `automation_cli.py`, un `Ctrl+C` isolé
-   > pendant une invite ramène désormais au menu sans quitter l'application.
+   Dans le menu, sélectionnez l'option **"Flasher le firmware (assistant)"**.
+
+   Utilisez l'option `--dry-run` pour valider le parcours sans écrire sur la carte (`python3 bmcu_tool.py --dry-run`). L'assistant rappelle les prérequis (connexion réseau/USB, sauvegardes, checksum du firmware), calcule automatiquement l'empreinte SHA-256 de `klipper.bin` et la compare à la valeur de référence définie dans `klipper.sha256` (ou fournie via `--firmware-sha256[(-file)]`). En cas d'écart, le processus s'arrête immédiatement pour éviter un flash risqué.
+   > ℹ️ Les invites `O/n` acceptent `Entrée` pour sélectionner la valeur par défaut.
 2. Lorsque le programme vous le demande, placez manuellement le module en mode bootloader :
    1. Maintenez le bouton **BOOT0** enfoncé.
    2. Appuyez puis relâchez le bouton **RESET**.
    3. Relâchez le bouton **BOOT0**.
    4. Revenez dans le terminal et appuyez sur Entrée pour lancer `wchisp`.
-3. L'assistant exécute ensuite `wchisp` (commande par défaut : `wchisp -d 30 -c ch32v20x flash ${KLIPPER_FIRMWARE_PATH:-.cache/klipper/out/klipper.bin}`) et affiche un message de confirmation en fin d'opération. Si le firmware est stocké ailleurs, exportez `KLIPPER_FIRMWARE_PATH` avant de lancer `python3 flash.py`.
+3. L'assistant exécute ensuite `wchisp` (commande par défaut : `wchisp -d 30 -c ch32v20x flash ${KLIPPER_FIRMWARE_PATH:-.cache/klipper/out/klipper.bin}`) et affiche un message de confirmation en fin d'opération. Si le firmware est stocké ailleurs, exportez `KLIPPER_FIRMWARE_PATH` avant de lancer `python3 bmcu_tool.py`.
 
 > 💡 Besoin d'un mode totalement non interactif ? Le script `./flash_automation.sh` reste disponible ; il applique les mêmes vérifications mais sans guidage étape par étape.
 

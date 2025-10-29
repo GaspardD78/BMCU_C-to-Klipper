@@ -31,11 +31,10 @@ flash (manuel ou distant).
 
 ```bash
 cd flash_automation
-chmod +x *.sh
-./build.sh
-python3 install_wchisp.py
-python3 flash.py
+python3 bmcu_tool.py
 ```
+
+Dans le menu, choisissez "Compiler le firmware" puis "Flasher le firmware". L'outil s'occupe du reste.
 
 ## 🧱 Architecture des scripts
 
@@ -80,8 +79,8 @@ sensibles de chaque module.
   Si Klipper est déjà installé ailleurs, exportez `KLIPPER_SRC_DIR=/chemin/vers/klipper`
   avant `./build.sh` pour réutiliser cet environnement et `KLIPPER_FIRMWARE_PATH`
   pour pointer `flash_automation.sh` vers le firmware compilé.
-- `flash.py` propose une interface interactive haut-niveau ;
-  `flash_automation.sh` fournit une version minimale (terminal) ;
+- `bmcu_tool.py` est l'outil interactif principal qui orchestre toutes les opérations.
+- `flash_automation.sh` fournit une version minimale (terminal) ;
   `flashBMCUtoKlipper_automation.py` permet l'orchestration distante (CI/batch).
   `automation_cli.py` centralise ces procédures dans un menu inspiré de KIAUH
   et consigne toutes les étapes dans `~/BMCU_C_to_Klipper_logs/automation-<horodatage>.log`.
@@ -93,7 +92,7 @@ sensibles de chaque module.
 
 ### 🔐 Vérification du firmware
 
-- `flash.py` calcule désormais automatiquement l'empreinte **SHA-256** du firmware
+- `bmcu_tool.py` calcule désormais automatiquement l'empreinte **SHA-256** du firmware
   avant de lancer le flash.
 - Placez la valeur de référence dans `klipper.sha256` (format `sha256sum`)
   pour qu'elle soit chargée automatiquement :
@@ -186,7 +185,7 @@ Le script shell accepte également quelques options CLI avancées :
 ## 🧪 Tests recommandés
 
 1. `./build.sh` – vérifie le téléchargement de Klipper et la compilation.
-2. `python3 flash.py --dry-run` – valide le parcours interactif sans flasher.
+2. `python3 bmcu_tool.py --dry-run` – valide le parcours interactif sans flasher.
 3. `./flash_automation.sh` – teste le flash local avec un BMCU-C connecté.
 4. `pytest tests/integration/flash_automation -q` – vérifie les scénarios d'intégration (dry-run, dépendances manquantes, wchisp/serial/dfu/SD) en mode automatisé.
 

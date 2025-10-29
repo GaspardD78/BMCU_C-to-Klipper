@@ -50,3 +50,55 @@ cd BMCU_C-to-Klipper-addon
    ```bash
    sudo service klipper restart
    ```
+
+## 5. Cas Particulier : Configuration avec CAN Bus
+
+Si votre imprimante utilise déjà des périphériques sur un bus CAN (comme une tête d'outil), votre configuration Klipper est "mixte" : elle doit gérer à la fois le BMCU-C en USB et vos autres outils en CAN.
+
+Voici comment vous assurer que tout fonctionne ensemble.
+
+### Identifier les périphériques
+
+1.  **Trouver le port série du BMCU-C (USB)** :
+    Même après un redémarrage, le chemin stable de votre BMCU-C se trouve avec la commande :
+    ```bash
+    ls /dev/serial/by-id/*
+    ```
+    Le résultat devrait ressembler à ceci :
+    ```
+    /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+    ```
+    C'est ce chemin qu'il faut utiliser dans la section `[bmcu]` de votre configuration.
+
+2.  **Trouver l'UUID de vos outils CAN** :
+    Utilisez le script `canbus_query.py` fourni par Klipper pour lister les périphériques sur votre bus CAN :
+    ```bash
+    ~/klippy-env/bin/python ~/klipper/scripts/canbus_query.py can0
+    ```
+    Vous obtiendrez une liste des `canbus_uuid` de vos périphériques, par exemple :
+    ```
+    Found canbus_uuid=0e8b37766f2a at an RTT of 0.000139
+    ```
+
+### Exemple de `printer.cfg` mixte
+
+Voici un exemple simplifié de `printer.cfg` qui montre comment déclarer à la fois le `[mcu]` principal, un `[mcu]` pour l'outil sur CAN Bus, et le `[bmcu]` :
+
+```ini
+[mcu]
+# MCU principal (ex: Manta E3EZ)
+serial: /dev/serial/by-id/usb-Klipper_stm32g0b1xx_...
+
+[mcu tool_head]
+# MCU de la tête d'outil sur le bus CAN (ex: Fly SB2040)
+canbus_uuid: 0e8b37766f2a
+
+[bmcu]
+# Configuration du BMCU-C en USB
+serial: /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+baud: 1250000
+
+# ... le reste de votre configuration (steppers, extrudeuse, etc.)
+```
+
+L'important est que chaque section (`[mcu]`, `[mcu tool_head]`, `[bmcu]`) pointe vers le bon périphérique via son identifiant unique (série ou `canbus_uuid`).

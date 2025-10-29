@@ -15,7 +15,7 @@ Le projet est organisé comme suit :
 - `addon/` : Contient la logique de l'addon Klipper pour l'intégration du BMCU-C.
 - `flash_automation/` : Regroupe les scripts et configurations pour la compilation et le flashage du firmware Klipper sur le BMCU-C.
   - `build.sh` : Script pour compiler le firmware (télécharge Klipper dans `.cache/`).
-  - `flash.py` : Script interactif pour flasher le firmware.
+  - `bmcu_tool.py` : Outil interactif central pour toutes les opérations (dépendances, build, flash).
   - `flash_automation.sh` : Script Shell pour automatiser le flashage en ligne de commande.
   - `lib/*.sh` : Modules Bash sourceables (`ui`, `permissions_cache`, `wchisp`) utilisés par `flash_automation.sh` et testés individuellement.
   - `klipper.config` : Fichier de configuration Klipper pour le BMCU-C.
@@ -39,7 +39,7 @@ Avant de lancer les workflows, assurez-vous que les outils suivants sont disponi
 | --- | --- | --- |
 | `gcc-riscv32-unknown-elf` | 13.2.0 | Nécessaire pour compiler le firmware CH32V203. Vérifier que `CROSS_PREFIX` pointe vers `riscv32-unknown-elf-`. |
 | `picolibc-riscv32-unknown-elf` | 1.8 | Bibliothèque standard utilisée lors de la compilation ; installer les headers correspondants. |
-| Python | 3.10 | Requis pour les scripts `flash.py` et les automatisations. Vérifier la présence de `python3` dans le PATH. |
+| Python | 3.10 | Requis pour les scripts `bmcu_tool.py` et les automatisations. Vérifier la présence de `python3` dans le PATH. |
 | `pip` | 23.0 | Utilisé pour installer les dépendances Python (ex. `pyserial`). |
 | `git` | 2.35 | Utilisé par `flash_automation/build.sh` pour cloner les sources Klipper. |
 | Accès USB / permissions `dialout` | N/A | Assurez-vous que l'utilisateur appartient au groupe permettant l'accès au port série. |
@@ -103,7 +103,7 @@ Format : `<type>[scope]: <description>`
   - `test` : Ajout ou modification de tests.
   - `chore` : Tâches de maintenance (mise à jour de dépendances, etc.).
 
-Exemple : `feat(flash_automation): add checksum validation to flash.py`
+Exemple : `feat(flash_automation): add checksum validation to bmcu_tool.py`
 
 ### Versionnement du Firmware
 
@@ -134,8 +134,8 @@ La version du firmware est gérée à l'aide de **tags Git**.
 Le flashage doit être effectué avec le script interactif pour minimiser les risques.
 
 1.  **Naviguer vers le bon répertoire :** `cd flash_automation/`
-2.  **Lancer le script de flashage :** `python3 flash.py`
-3.  **Suivre les instructions :** Le script guidera l'utilisateur à travers les étapes de vérification et de confirmation.
+2.  **Lancer le script de flashage :** `python3 bmcu_tool.py`
+3.  **Suivre les instructions :** L'outil guidera l'utilisateur à travers les étapes de vérification et de confirmation.
 
 #### Dépannage
 

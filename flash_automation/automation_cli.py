@@ -768,10 +768,10 @@ def build_firmware(context: AutomationContext) -> None:
 
 
 def flash_interactive(context: AutomationContext) -> None:
-    """Démarre le flash interactif (python3 flash.py)."""
+    """Démarre le flash interactif (python3 bmcu_tool.py)."""
 
     context.stop_controller.raise_if_requested()
-    context.run_command([sys.executable, "flash.py"], cwd=FLASH_DIR, description="Flash interactif du BMCU-C")
+    context.run_command([sys.executable, "bmcu_tool.py"], cwd=FLASH_DIR, description="Flash interactif du BMCU-C")
 
 
 def flash_cli(context: AutomationContext) -> None:
@@ -872,7 +872,7 @@ ACTIONS = (
     MenuAction("1", "Vérifier les permissions des scripts", ensure_permissions, "permissions"),
     MenuAction("2", "Installer les dépendances Python", install_python_dependencies, "dependencies"),
     MenuAction("3", "Compiler le firmware", build_firmware, "compile"),
-    MenuAction("4", "Flash interactif (flash.py)", flash_interactive),
+    MenuAction("4", "Flash interactif (bmcu_tool.py)", flash_interactive),
     MenuAction("5", "Flash minimal (flash_automation.sh)", flash_cli),
     MenuAction("6", "Automatisation distante", remote_orchestration),
     MenuAction("7", "Nettoyer les artefacts de compilation", clean_build_artifacts),

@@ -1459,19 +1459,158 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def show_main_screen(profile: QuickProfile, environment: EnvironmentDefaults) -> int:
+def show_main_menu(profile: QuickProfile, environment: EnvironmentDefaults) -> int:
     """Affiche l'écran d'accueil unique avec les options principales."""
 
     print_block(build_home_summary(profile, environment))
     print(colorize("Choisissez une action :", Colors.HEADER))
     return ask_menu(
         [
-            "Flasher le BMCU (assistant complet)",
-            "Construire le firmware Klipper (build.sh)",
+            "Vérifier et installer les dépendances",
+            "Compiler le firmware",
+            "Flasher le firmware (assistant)",
+            "Aide à la configuration post-flash",
             "Quitter",
         ],
-        default_index=0,
+        default_index=2,  # Default to flashing
     )
+
+
+def run_dependency_installation():
+    """Detects OS and offers to install required system packages."""
+    print_block(colorize("Vérification des dépendances système...", Colors.HEADER))
+    os_info = read_os_release()
+    os_id = os_info.get("ID", "").lower()
+    os_like = os_info.get("ID_LIKE", "").lower()
+
+    if not any(dist in ("debian", "ubuntu", "raspbian", "armbian") for dist in [os_id, os_like]):
+        print(colorize(f"Votre distribution ({os_id}) n'est pas supportée pour l'installation automatique.", Colors.WARNING))
+        print("Veuillez installer manuellement les paquets listés dans le README.md.")
+        input("\nAppuyez sur Entrée pour continuer...")
+        return
+
+    arch = platform.machine()
+    is_arm = arch.startswith("arm") or arch.startswith("aarch")
+
+    if is_arm:
+        toolchain_packages = ["gcc-riscv-none-elf", "picolibc-riscv-none-elf"]
+    else:
+        toolchain_packages = ["gcc-riscv32-unknown-elf", "picolibc-riscv32-unknown-elf"]
+
+    base_packages = ["git", "python3", "python3-venv", "python3-pip", "make", "curl", "tar", "build-essential"]
+    required_packages = base_packages + toolchain_packages
+
+    print("Vérification des paquets requis...")
+    missing_packages = []
+    for pkg in required_packages:
+        status = subprocess.run(["dpkg", "-s", pkg], capture_output=True, text=True).returncode
+        if status != 0:
+            missing_packages.append(pkg)
+
+    if not missing_packages:
+        print(colorize("\nToutes les dépendances système semblent déjà installées.", Colors.OKGREEN))
+        input("Appuyez sur Entrée pour continuer...")
+        return
+
+    print(colorize("\nDépendances manquantes détectées :", Colors.WARNING))
+    for pkg in missing_packages:
+        print(f"  - {pkg}")
+
+    install_command = f"sudo apt install -y {' '.join(missing_packages)}"
+    print("\nLa commande suivante sera exécutée pour les installer :")
+    print(colorize(f"  {install_command}", Colors.BOLD))
+
+    if not ask_yes_no("\nVoulez-vous lancer cette commande maintenant ?", default=True):
+        print(colorize("Installation annulée.", Colors.WARNING))
+        input("Appuyez sur Entrée pour continuer...")
+        return
+
+    try:
+        print("Lancement de l'installation (cela peut prendre quelques minutes)...")
+        process = subprocess.run(install_command, shell=True, check=True)
+        if process.returncode == 0:
+            print(colorize("\nInstallation des dépendances terminée avec succès !", Colors.OKGREEN))
+    except subprocess.CalledProcessError as e:
+        print(colorize(f"\nErreur lors de l'installation des dépendances (code {e.returncode}).", Colors.FAIL))
+        print("Veuillez vérifier les messages d'erreur ci-dessus et réessayer manuellement.")
+    except Exception as e:
+        print(colorize(f"\nUne erreur inattendue est survenue : {e}", Colors.FAIL))
+
+    input("Appuyez sur Entrée pour continuer...")
+
+
+def run_post_flash_help():
+    """Guides the user to find the serial port and generate the Klipper config."""
+    print_block(colorize("Aide à la configuration Klipper", Colors.HEADER))
+    print(
+        "Cet assistant va vous aider à trouver le port série de votre BMCU-C\n"
+        "et à générer la configuration Klipper nécessaire."
+    )
+
+    if not ask_yes_no(
+        "\nExécutez-vous ce script sur la machine qui héberge Klipper (votre Raspberry Pi, CB1, etc.) ?",
+        default=True,
+    ):
+        print(colorize("\nAction requise :", Colors.WARNING))
+        print("Connectez-vous en SSH à votre machine Klipper et exécutez la commande suivante :")
+        print(colorize("  ls /dev/serial/by-id/*", Colors.BOLD))
+        print("Repérez la ligne contenant '1a86_USB_Serial' et utilisez-la dans votre configuration.")
+        input("\nAppuyez sur Entrée pour continuer...")
+        return
+
+    print("\nRecherche des périphériques série...")
+    try:
+        result = subprocess.run(
+            "ls /dev/serial/by-id/*",
+            shell=True,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        devices = result.stdout.strip().splitlines()
+    except subprocess.CalledProcessError:
+        print(colorize("\nImpossible de lister les périphériques dans /dev/serial/by-id/.", Colors.FAIL))
+        print("Assurez-vous que votre BMCU-C est bien branché et reconnu par le système.")
+        input("\nAppuyez sur Entrée pour continuer...")
+        return
+
+    bmcu_devices = [dev for dev in devices if "1a86_USB_Serial" in dev or "wch" in dev.lower()]
+
+    serial_port = ""
+    if len(bmcu_devices) == 1:
+        serial_port = bmcu_devices[0]
+        print(colorize(f"\nPériphérique BMCU-C détecté : {serial_port}", Colors.OKGREEN))
+    elif len(bmcu_devices) > 1:
+        print(colorize("\nPlusieurs périphériques correspondants trouvés :", Colors.WARNING))
+        for i, dev in enumerate(bmcu_devices, 1):
+            print(f"  {i}. {dev}")
+        choice = ask_menu([f"Utiliser {dev}" for dev in bmcu_devices], default_index=0)
+        serial_port = bmcu_devices[choice]
+    else:
+        print(colorize("\nImpossible de détecter automatiquement le BMCU-C.", Colors.FAIL))
+        print("Voici la liste de tous les périphériques série trouvés :")
+        for dev in devices:
+            print(f"  - {dev}")
+        serial_port = ask_text(
+            "\nEntrez manuellement le chemin du port série pour le BMCU-C", required=False
+        )
+
+    if not serial_port:
+        print(colorize("\nAucun port série sélectionné. Opération annulée.", Colors.WARNING))
+        input("\nAppuyez sur Entrée pour continuer...")
+        return
+
+    config_block = f"""
+[bmcu]
+serial: {serial_port}
+baud: 1250000
+# Décommentez la ligne suivante si vous utilisez une version patchée de pyserial
+# pour supporter ce baud rate non standard.
+# use_custom_baudrate: true
+"""
+    print(colorize("\nVoici le bloc de configuration à ajouter à votre fichier printer.cfg :", Colors.OKGREEN))
+    print_block(colorize(textwrap.dedent(config_block).strip(), Colors.BOLD))
+    input("Appuyez sur Entrée pour revenir au menu principal...")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1496,27 +1635,20 @@ def main(argv: list[str] | None = None) -> int:
             ask_confirmation=not (args.auto_confirm or args.non_interactif),
         )
 
-    selection = show_main_screen(profile, environment)
+    while True:
+        selection = show_main_menu(profile, environment)
 
-    if selection == 0:
-        return run_flash_flow(profile, environment, ask_confirmation=not args.auto_confirm)
-
-    if selection == 1:
-        build_success = run_build()
-        if build_success and ask_yes_no(
-            "Enchaîner avec le flash ?",
-            default=True,
-            help_message="Acceptez pour utiliser directement le firmware fraîchement compilé.",
-        ):
-            return run_flash_flow(
-                profile,
-                environment,
-                ask_confirmation=not args.auto_confirm,
-            )
-        return 0 if build_success else 1
-
-    print(colorize("À bientôt !", Colors.OKBLUE))
-    return 0
+        if selection == 0:  # Install dependencies
+            run_dependency_installation()
+        elif selection == 1:  # Build firmware
+            run_build()
+        elif selection == 2:  # Flash firmware
+            return run_flash_flow(profile, environment, ask_confirmation=not args.auto_confirm)
+        elif selection == 3:  # Post-flash help
+            run_post_flash_help()
+        elif selection == 4:  # Quit
+            print(colorize("À bientôt !", Colors.OKBLUE))
+            return 0
 
 
 if __name__ == "__main__":  # pragma: no cover - point d'entrée CLI
