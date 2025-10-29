@@ -1846,16 +1846,20 @@ verify_method_dependencies() {
         serial)
             check_command "python3" true
             check_command "make" false
-            local flash_script
-            if ! flash_script="$(ensure_flash_usb_script_available)"; then
-                exit 1
-            fi
-            local display_path
-            display_path="$(format_path_for_display "${flash_script}")"
-            if [[ -n "${FLASH_USB_SCRIPT_SOURCE}" ]]; then
-                success "flash_usb.py disponible (${display_path}, ${FLASH_USB_SCRIPT_SOURCE})."
+            if [[ "${DRY_RUN_MODE}" == "true" ]]; then
+                info "Mode --dry-run : vérification de flash_usb.py ignorée."
             else
-                success "flash_usb.py disponible (${display_path})."
+                local flash_script
+                if ! flash_script="$(ensure_flash_usb_script_available)"; then
+                    exit 1
+                fi
+                local display_path
+                display_path="$(format_path_for_display "${flash_script}")"
+                if [[ -n "${FLASH_USB_SCRIPT_SOURCE}" ]]; then
+                    success "flash_usb.py disponible (${display_path}, ${FLASH_USB_SCRIPT_SOURCE})."
+                else
+                    success "flash_usb.py disponible (${display_path})."
+                fi
             fi
             ;;
         dfu)

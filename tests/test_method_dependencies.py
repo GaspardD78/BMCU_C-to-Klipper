@@ -53,3 +53,29 @@ def test_serial_dependencies_accept_custom_flash_usb_script(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "flash_usb.py disponible" in result.stdout
     assert "status=0" in result.stdout
+
+
+def test_serial_dependencies_skip_flash_usb_check_in_dry_run(tmp_path):
+    missing_path = tmp_path / "flash_usb.py"
+
+    script = textwrap.dedent(
+        f"""
+        export FLASH_AUTOMATION_FLASH_USB_SCRIPT="{missing_path}"
+        source "{SCRIPT_PATH}"
+        flash_automation_initialize
+        trap - ERR
+        trap - EXIT
+        set +e
+        parse_cli_arguments --dry-run
+        apply_configuration_defaults
+        verify_method_dependencies serial manual
+        status=$?
+        echo "status=$status"
+        """
+    )
+
+    result = _run_bash(script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    combined_output = result.stdout + result.stderr
+    assert "Mode --dry-run" in combined_output
+    assert "status=0" in combined_output
