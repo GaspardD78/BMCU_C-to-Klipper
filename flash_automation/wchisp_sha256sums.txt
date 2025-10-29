@@ -1,0 +1,4 @@
+# SHA-256 sums for official wchisp release archives.
+# Format: <sha256>  <archive-name>
+67e3d4eb0ffd3cc610d8927e3c3f452e2110531a3f14405dcaef87df219f200d  wchisp-v0.3.0-linux-x64.tar.gz
+3d7477c05c65f69091d041623a06c558c549dc27bfe2a043d9325f310f2ee40f  wchisp-v0.3.0-linux-aarch64.tar.gz
