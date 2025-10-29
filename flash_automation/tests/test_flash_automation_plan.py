@@ -37,14 +37,19 @@ def run_flash_script(commands: str, *, env: dict[str, str] | None = None, input_
     )
 
 
-def create_stub_environment(tmp_path: Path, *, include_system_path: bool = False) -> tuple[dict[str, str], Path]:
+def create_stub_environment(
+    tmp_path: Path, *, include_system_path: bool = False, set_user: bool = True
+) -> tuple[dict[str, str], Path]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     base_path = env.get("PATH", "") if include_system_path else ""
     env["PATH"] = f"{bin_dir}{os.pathsep}{base_path}" if base_path else str(bin_dir)
     env["HOME"] = str(tmp_path)
-    env["USER"] = env.get("USER", "testuser")
+    if set_user:
+        env["USER"] = env.get("USER", "testuser")
+    else:
+        env.pop("USER", None)
     return env, bin_dir
 
 
@@ -55,18 +60,30 @@ def add_symlink(bin_dir: Path, command: str, target: str | None = None):
     return link_path
 
 
-def add_id_stub(bin_dir: Path, groups: str):
+def add_failing_stub(bin_dir: Path, command: str):
+    path = bin_dir / command
+    path.write_text("#!/bin/sh\nexit 1\n")
+    path.chmod(0o755)
+    return path
+
+
+def add_id_stub(bin_dir: Path, groups: str, *, username: str | None = "stubuser"):
     real_id = ensure_real_command("id")
+    username_case = "exit 1" if username is None else f'echo "{username}"'
     script = textwrap.dedent(
         f"""#!/bin/sh
-        if [ "$1" = "-nG" ]; then
-            if [ -n "$2" ]; then
+        case "$1" in
+            -nG)
                 shift
-            fi
-            echo "{groups}"
-        else
-            exec "{real_id}" "$@"
-        fi
+                echo "{groups}"
+                ;;
+            -un)
+                {username_case}
+                ;;
+            *)
+                exec "{real_id}" "$@"
+                ;;
+        esac
         """
     )
     path = bin_dir / "id"
@@ -219,6 +236,22 @@ def test_verify_environment_uses_permission_cache(tmp_path):
     second = run_flash_script("verify_environment", env=env)
     assert second.returncode == 0
     assert "Vérification des permissions sautée" in second.stdout
+
+
+def test_check_group_membership_warns_without_user(tmp_path):
+    env, bin_dir = create_stub_environment(tmp_path, set_user=False)
+    add_symlink(bin_dir, "bash")
+    populate_common_commands(bin_dir)
+    add_id_stub(bin_dir, "dialout", username=None)
+    add_failing_stub(bin_dir, "logname")
+    add_failing_stub(bin_dir, "whoami")
+
+    result = run_flash_script('check_group_membership "dialout" || true', env=env)
+
+    assert result.returncode == 0
+    assert "Impossible de déterminer l'utilisateur courant ; vérification du groupe 'dialout' ignorée." in (
+        result.stdout + result.stderr
+    )
 
 
 def make_stub_curl(bin_dir: Path):
