@@ -1417,6 +1417,7 @@ function check_command() {
     local hint=""
 
     if command_exists "${cmd}"; then
+        register_check_command_result "${cmd}" "${mandatory}" "success"
         success "${cmd} disponible."
         return 0
     fi
@@ -1424,6 +1425,7 @@ function check_command() {
     hint="$(command_install_hint "${cmd}")"
 
     if [[ "${mandatory}" == "true" ]]; then
+        register_check_command_result "${cmd}" "${mandatory}" "missing"
         local message="La dépendance obligatoire '${cmd}' est introuvable."
         if [[ -n "${hint}" ]]; then
             message+=" ${hint}"
@@ -1431,6 +1433,7 @@ function check_command() {
         error_msg "${message}"
         exit 1
     else
+        register_check_command_result "${cmd}" "${mandatory}" "missing"
         local message="La dépendance optionnelle '${cmd}' est absente. Certaines fonctionnalités peuvent être limitées."
         if [[ -n "${hint}" ]]; then
             message+=" ${hint}"
@@ -1444,8 +1447,17 @@ function check_group_membership() {
     local group="$1"
     local username=""
     local candidate=""
+    local current_uid=""
+    local running_as_root="false"
 
     if command_exists id; then
+        if current_uid=$(id -u 2>/dev/null); then
+            if [[ "${current_uid}" == "0" ]]; then
+                running_as_root="true"
+            fi
+        else
+            current_uid=""
+        fi
         if candidate=$(id -un 2>/dev/null) && [[ -n "${candidate}" ]]; then
             username="${candidate}"
         fi
@@ -1477,7 +1489,22 @@ function check_group_membership() {
         success "Utilisateur membre du groupe '${group}'."
         return 0
     else
-        warn "L'utilisateur courant n'appartient pas au groupe '${group}'. L'accès aux ports série peut être restreint."
+        if [[ "${group}" == "dialout" ]]; then
+            local summary=""
+            if summary=$(summarize_serial_write_access 2>/dev/null); then
+                summary=" ${summary}"
+            elif [[ -n "${summary}" ]]; then
+                summary=" ${summary}"
+            fi
+
+            if [[ "${running_as_root}" == "true" ]]; then
+                note "L'utilisateur courant n'appartient pas au groupe '${group}', mais la session dispose des privilèges superutilisateur.${summary}"
+            else
+                warn "L'utilisateur courant n'appartient pas au groupe '${group}'. L'accès aux ports série peut être restreint.${summary}"
+            fi
+        else
+            warn "L'utilisateur courant n'appartient pas au groupe '${group}'. L'accès aux ressources associées peut être restreint."
+        fi
         return 1
     fi
 }
@@ -1495,6 +1522,55 @@ function check_device_write_access() {
     fi
 
     warn "Permissions insuffisantes pour écrire sur ${device}. Ajoutez l'utilisateur au groupe adéquat ou ajustez les règles udev."
+    return 1
+}
+
+summarize_serial_write_access() {
+    local -a serial_devices=()
+    detect_serial_devices serial_devices
+
+    if (( ${#serial_devices[@]} == 0 )); then
+        printf '%s' "Aucun périphérique série détecté pour vérifier les permissions."
+        return 2
+    fi
+
+    local -a writable=()
+    local -a restricted=()
+    local device=""
+    for device in "${serial_devices[@]}"; do
+        if [[ -w "${device}" ]]; then
+            writable+=("${device}")
+        else
+            restricted+=("${device}")
+        fi
+    done
+
+    local message=""
+    if (( ${#writable[@]} > 0 )); then
+        message="Accès direct confirmé sur ${writable[0]}"
+        local idx
+        for idx in "${writable[@]:1}"; do
+            message+="; ${idx}"
+        done
+        if (( ${#restricted[@]} > 0 )); then
+            message+=" (accès refusé sur ${#restricted[@]} autre(s) périphérique(s))."
+        else
+            message+="."
+        fi
+        printf '%s' "${message}"
+        return 0
+    fi
+
+    message="Aucun périphérique série accessible en écriture."
+    if (( ${#restricted[@]} > 0 )); then
+        message+=" Périphériques détectés sans accès : ${restricted[0]}"
+        local denied
+        for denied in "${restricted[@]:1}"; do
+            message+="; ${denied}"
+        done
+        message+="."
+    fi
+    printf '%s' "${message}"
     return 1
 }
 
@@ -1959,6 +2035,8 @@ function verify_environment() {
     CURRENT_STEP="Étape 0: Diagnostic de l'environnement"
     render_box "${CURRENT_STEP}"
 
+    reset_check_command_results
+
     local planned_method="${RESOLVED_METHOD:-wchisp}"
     local method_label
     method_label="$(flash_method_to_human "${planned_method}")"
@@ -1989,6 +2067,9 @@ function verify_environment() {
 
     info "Analyse des périphériques série et DFU disponibles."
     display_available_devices
+
+    display_check_command_summary
+    reset_check_command_results
 }
 
 function perform_bootstrap_if_requested() {

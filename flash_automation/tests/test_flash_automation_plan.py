@@ -72,9 +72,16 @@ def add_failing_stub(bin_dir: Path, command: str):
     return path
 
 
-def add_id_stub(bin_dir: Path, groups: str, *, username: str | None = "stubuser"):
+def add_id_stub(
+    bin_dir: Path,
+    groups: str,
+    *,
+    username: str | None = "stubuser",
+    uid: str | None = None,
+):
     real_id = ensure_real_command("id")
     username_case = "exit 1" if username is None else f'echo "{username}"'
+    uid_case = f'echo "{uid}"' if uid is not None else f'exec "{real_id}" "$@"'
     script = textwrap.dedent(
         f"""#!/bin/sh
         case "$1" in
@@ -84,6 +91,9 @@ def add_id_stub(bin_dir: Path, groups: str, *, username: str | None = "stubuser"
                 ;;
             -un)
                 {username_case}
+                ;;
+            -u)
+                {uid_case}
                 ;;
             *)
                 exec "{real_id}" "$@"
@@ -237,6 +247,13 @@ def test_verify_environment_dependency_checks(tmp_path, missing_command, expecte
     for expected_message in expected_messages:
         assert expected_message in combined_output
 
+    if missing_command is None:
+        assert "Résumé des dépendances :" in combined_output
+        assert "| ✔ find" in combined_output
+        assert "| ✔ python3" in combined_output
+        assert "| ✔ curl" in combined_output
+        assert "| ✔ tar" in combined_output
+
 
 def test_verify_environment_warns_when_python_missing(tmp_path):
     env, bin_dir = create_stub_environment(tmp_path)
@@ -248,8 +265,12 @@ def test_verify_environment_warns_when_python_missing(tmp_path):
 
     result = run_flash_script("verify_environment || true", env=env)
     assert result.returncode == 0
-    assert "La dépendance optionnelle 'python3' est absente" in result.stdout
-    assert "Installez 'python3' via votre gestionnaire de paquets" in result.stdout
+    combined_output = result.stdout + result.stderr
+    assert "La dépendance optionnelle 'python3' est absente" in combined_output
+    assert "Installez 'python3' via votre gestionnaire de paquets" in combined_output
+    assert "Résumé des dépendances :" in combined_output
+    assert "| ✖ python3" in combined_output
+    assert "Absente (optionnelle)" in combined_output
 
 
 def test_verify_environment_uses_permission_cache(tmp_path):
@@ -267,10 +288,12 @@ def test_verify_environment_uses_permission_cache(tmp_path):
     first = run_flash_script("verify_environment", env=env)
     assert first.returncode == 0
     assert "Cache des permissions mis à jour" in first.stdout
+    assert "Résumé des dépendances :" in first.stdout
 
     second = run_flash_script("verify_environment", env=env)
     assert second.returncode == 0
     assert "Vérification des permissions sautée" in second.stdout
+    assert "Résumé des dépendances :" in second.stdout
 
 
 def test_check_group_membership_warns_without_user(tmp_path):
@@ -287,6 +310,21 @@ def test_check_group_membership_warns_without_user(tmp_path):
     assert "Impossible de déterminer l'utilisateur courant ; vérification du groupe 'dialout' ignorée." in (
         result.stdout + result.stderr
     )
+
+
+def test_check_group_membership_root_emits_note_with_summary(tmp_path):
+    env, bin_dir = create_stub_environment(tmp_path)
+    add_symlink(bin_dir, "bash")
+    populate_common_commands(bin_dir)
+    add_id_stub(bin_dir, "", username="root", uid="0")
+
+    result = run_flash_script('check_group_membership "dialout" || true', env=env)
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0
+    assert "[NOTE] L'utilisateur courant n'appartient pas au groupe 'dialout'" in combined
+    assert "privilèges superutilisateur" in combined
+    assert "périphérique série" in combined
 
 
 def make_stub_curl(bin_dir: Path):
