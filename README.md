@@ -315,6 +315,10 @@ Le script [`flash_automation/flash_automation.sh`](flash_automation/flash_automa
 
 Astuce : laissez `--method auto` (valeur par défaut) pour bénéficier de la détection guidée ; le script indiquera la raison du choix proposé (ex. périphérique DFU détecté, wchisp présent, etc.).
 
+> ℹ️ **python3 manquant ?** `flash_automation.sh` bascule automatiquement sur un cache de permissions minimaliste en Bash.
+> Les informations sont stockées dans un fichier TSV (`bmcu_permissions.tsv`) qui conserve le statut, l'horodatage et un message de diagnostic.
+> Lorsque Python redevient disponible, le cache JSON historique continue d'être pris en charge.
+
 Tous ces outils se trouvent dans le dossier [`flash_automation/`](flash_automation) et respectent les conventions décrites dans [AGENTS.md](AGENTS.md).
 
 ---
