@@ -765,110 +765,22 @@ def ask_menu(options: list[str], *, default_index: int = 0) -> int:
         print(colorize("Merci d'entrer un numéro valide.", Colors.WARNING))
 
 
+from flash_manager import FlashManager
+
 def gather_user_choices(profile: QuickProfile, environment: EnvironmentDefaults) -> UserChoices:
     """Collecte les informations essentielles en mode simplifié."""
+    flash_manager = FlashManager(Path(__file__).resolve().parent)
 
     intro_text = f"""
 {colorize("Assistant BMCU → Klipper", f"{Colors.BOLD}{Colors.OKBLUE}")}
 
-1. Vérifie trois prérequis.
-2. Récupère les infos minimales.
-3. Confirme l'empreinte SHA-256 du firmware.
-4. Lance l'automatisation.
-
-Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
+1. Sélection du firmware.
+2. Sélection du périphérique série.
+3. Lancement du flash.
 """
     print_block(intro_text)
 
-    with progress_step("Diagnostic local"):
-        local_checks = run_local_prerequisite_checks()
-    display_check_results("Diagnostic local :", local_checks)
-    if not all(result.success for result in local_checks):
-        print(colorize("Préparez l'environnement local puis relancez l'assistant.", Colors.FAIL))
-        sys.exit(1)
-
-    print(colorize("Connexion passerelle :", Colors.HEADER))
-    print_block(
-        """
-        Le script ouvre ses propres connexions SSH pour copier le firmware et lancer
-        les commandes de flash. Renseignez donc l'adresse IP ou le nom d'hôte de la
-        passerelle (Raspberry Pi ou CB2) sur laquelle le BMCU est branché. Si vous
-        exécutez l'assistant directement depuis cette machine, indiquez simplement
-        « localhost » (ou 127.0.0.1).
-        """
-    )
-
-    host_question = "IP/nom du Raspberry ou CB2"
-    host_default = profile.gateway_host or environment.host or "localhost"
-    user_default = profile.gateway_user or environment.user or "pi"
-    ssh_port = 22
-
-    attempt = 0
-    detected_devices: list[str] = []
-    while True:
-        if attempt == 0:
-            bmc_host = ask_text(
-                host_question,
-                default=host_default,
-                required=True,
-                help_message="Merci de saisir l'adresse IP ou le nom d'hôte de la passerelle (ex. 192.168.0.42).",
-            )
-            bmc_user = ask_text(
-                "Utilisateur SSH",
-                default=user_default,
-                required=True,
-                help_message="Merci de saisir l'utilisateur SSH autorisé (ex. pi, bambu).",
-            )
-        else:
-            print(colorize("Réessayons la connexion. Ajustez les informations si nécessaire.", Colors.WARNING))
-            bmc_host = ask_text(
-                host_question,
-                default=bmc_host or host_default,
-                required=True,
-                help_message="Merci de saisir un hôte atteignable (localhost si vous êtes sur la passerelle).",
-            )
-            bmc_user = ask_text(
-                "Utilisateur SSH",
-                default=bmc_user or user_default,
-                required=True,
-                help_message="Merci de saisir un utilisateur SSH valide (pi, bambu, utilisateur courant, ...).",
-            )
-        bmc_password = ask_password(
-            "Mot de passe SSH",
-            help_message="Merci de saisir le mot de passe SSH (aucune frappe n'apparaît, Ctrl+C pour annuler).",
-        )
-
-        with progress_step("Diagnostic de la passerelle"):
-            remote_checks, detected_devices = run_remote_prerequisite_checks(
-                bmc_host, bmc_user, bmc_password, ssh_port
-            )
-        display_check_results("Diagnostic passerelle :", remote_checks)
-        ssh_ok = any(result.label == "Connexion SSH" and result.success for result in remote_checks)
-        if ssh_ok:
-            break
-
-        attempt += 1
-        print(
-            colorize(
-                "Connexion SSH impossible : corrigez l'accès distant avant de continuer.",
-                Colors.FAIL,
-            )
-        )
-        if not ask_yes_no(
-            "Souhaitez-vous réessayer ?",
-            default=True,
-            help_message="Merci de confirmer si vous souhaitez retenter la connexion après vos ajustements.",
-        ):
-            print(colorize("Opération annulée.", Colors.WARNING))
-            sys.exit(1)
-
-    profile.gateway_host = bmc_host
-    profile.gateway_user = bmc_user
-
-    serial_device = prompt_serial_device(detected_devices, profile.serial_device)
-    profile.serial_device = serial_device
-
-    print()
+    # Sélection du firmware
     print(colorize("Firmware :", Colors.HEADER))
     detected_firmware = find_default_firmware()
     firmware_file: Path
@@ -891,75 +803,31 @@ Tout passe par l'hôte passerelle (Raspberry Pi ou CB2).
             except FileNotFoundError as err:
                 print(err)
 
-    remote_default = profile.remote_firmware_path or environment.remote_path
-    remote_firmware_path = ask_text(
-        "Chemin distant (SSH)",
-        default=remote_default,
-        help_message="Merci de préciser où copier le firmware sur la passerelle (chemin absolu).",
-    )
-    profile.remote_firmware_path = remote_firmware_path
-
-    wait_for_reboot = ask_yes_no(
-        "Attendre le reboot automatique ?",
-        default=profile.wait_for_reboot,
-        help_message="Merci de confirmer si l'assistant doit surveiller automatiquement le redémarrage du BMCU.",
-    )
-    profile.wait_for_reboot = wait_for_reboot
-    reboot_timeout = 600
-    reboot_check_interval = 10
-
-    log_default = profile.log_root or environment.log_root
-    log_root_input = ask_text(
-        "Dossier de logs",
-        default=log_default,
-        help_message="Merci d'indiquer le dossier qui accueillera les rapports d'exécution.",
-    )
-    profile.log_root = log_root_input
-    log_root = Path(log_root_input).expanduser().resolve()
-
-    checksum_file = DEFAULT_CHECKSUM_FILE if DEFAULT_CHECKSUM_FILE.exists() else None
-    if checksum_file:
-        print_block(
-            textwrap.dedent(
-                f"""
-                Vérification SHA-256 activée :
-                  • Fichier de référence : {checksum_file}
-                  • Modifiez ce fichier ou relancez le script avec --firmware-sha256 pour mettre à jour la valeur attendue.
-                """
-            ).strip()
-        )
-    else:
-        print_block(
-            textwrap.dedent(
-                f"""
-                Aucun fichier de checksum détecté.
-                Créez-en un avec :
-                  sha256sum {firmware_file} > {DEFAULT_CHECKSUM_FILE.name}
-                ou utilisez l'option --firmware-sha256=<empreinte> pour fournir la valeur attendue.
-                """
-            ).strip()
-        )
+    # Sélection du périphérique série
+    detected_devices = flash_manager.detect_serial_devices()
+    serial_device = prompt_serial_device(detected_devices, profile.serial_device)
+    profile.serial_device = serial_device
 
     return UserChoices(
-        bmc_host=bmc_host,
-        bmc_user=bmc_user,
-        bmc_password=bmc_password,
+        bmc_host="", # Plus utilisé pour le flash local
+        bmc_user="", # Plus utilisé pour le flash local
+        bmc_password="", # Plus utilisé pour le flash local
         firmware_file=firmware_file,
-        remote_firmware_path=remote_firmware_path,
-        ssh_port=ssh_port,
+        remote_firmware_path="", # Plus utilisé pour le flash local
+        ssh_port=22,
         pre_update_command="",
-        flash_command="socflash -s {firmware}",
+        flash_command="", # Géré par le FlashManager
         flash_timeout=1800,
-        wait_for_reboot=wait_for_reboot,
-        reboot_timeout=reboot_timeout,
-        reboot_check_interval=reboot_check_interval,
+        wait_for_reboot=False,
+        reboot_timeout=600,
+        reboot_check_interval=10,
         allow_same_version=False,
         expected_final_version="",
         firmware_sha256="",
         dry_run=False,
-        log_root=log_root,
+        log_root=Path("logs"),
         serial_device=serial_device,
-        firmware_checksum_file=checksum_file,
+        firmware_checksum_file=None,
     )
 
 
@@ -1141,6 +1009,7 @@ def build_command(choices: UserChoices) -> list[str]:
 
 def run_build() -> bool:
     """Lance le script de build et retourne le succès."""
+    from build_manager import BuildManager
 
     existing_firmware = find_default_firmware()
     if existing_firmware:
@@ -1151,16 +1020,12 @@ def run_build() -> bool:
             print(colorize("Compilation annulée.", Colors.WARNING))
             return True
 
-    build_script = Path(__file__).resolve().with_name("build.sh")
-    if not build_script.exists():
-        print(colorize("Script build.sh introuvable.", Colors.FAIL))
-        return False
-
     try:
         with progress_step("Compilation du firmware Klipper"):
-            subprocess.run([str(build_script)], check=True)
-    except subprocess.CalledProcessError as err:
-        print(colorize(f"La compilation a échoué (code {err.returncode}).", Colors.FAIL))
+            manager = BuildManager(Path(__file__).resolve().parent)
+            manager.compile_firmware()
+    except (subprocess.CalledProcessError, FileNotFoundError) as err:
+        print(colorize(f"La compilation a échoué : {err}", Colors.FAIL))
         return False
 
     print(colorize("✅ Build terminé.", Colors.OKGREEN))
@@ -1175,6 +1040,7 @@ def run_flash_flow(
     ask_confirmation: bool = True,
 ) -> int:
     """Enchaîne la collecte d'infos puis le flash."""
+    from flash_manager import FlashManager
 
     if preset_choices is None:
         try:
@@ -1230,30 +1096,17 @@ def run_flash_flow(
             print(colorize("Opération annulée.", Colors.WARNING))
             return 0
 
-    choices.log_root.mkdir(parents=True, exist_ok=True)
-    command = build_command(choices)
-    result = run_automation(command)
-    latest_log_dir = find_latest_log_dir(choices.log_root)
+    try:
+        with progress_step("Flashage du firmware"):
+            manager = FlashManager(Path(__file__).resolve().parent)
+            # Pour l'instant, on ne gère que le flash série local
+            manager.flash("serial", choices.firmware_file, choices.serial_device)
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError) as err:
+        print(colorize(f"Le flashage a échoué : {err}", Colors.FAIL))
+        return 1
 
-    if result.returncode == 0:
-        print(colorize("\n✅ Flash terminé avec succès !", f"{Colors.BOLD}{Colors.OKGREEN}"))
-        if latest_log_dir is not None:
-            print(f"Journaux : {latest_log_dir}")
-        return 0
-
-    print(colorize(
-        f"\n❌ Le script d'automatisation a signalé une erreur (code de sortie {result.returncode}).",
-        f"{Colors.BOLD}{Colors.FAIL}",
-    ))
-    if latest_log_dir is not None:
-        print(f"Consultez le journal : {latest_log_dir / 'debug.log'}")
-
-    prompt = generate_assistance_prompt(choices, command, latest_log_dir, result.returncode)
-    print(colorize("\n--- Prompt d'assistance suggéré ---", Colors.HEADER))
-    print(prompt)
-    print(colorize("--- Fin du prompt ---", Colors.HEADER) + "\n")
-
-    return result.returncode
+    print(colorize("\n✅ Flash terminé avec succès !", f"{Colors.BOLD}{Colors.OKGREEN}"))
+    return 0
 
 
 def run_automation(command: list[str]) -> subprocess.CompletedProcess[None]:
