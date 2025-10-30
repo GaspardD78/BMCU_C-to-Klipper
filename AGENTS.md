@@ -14,12 +14,10 @@ Le projet est organisé comme suit :
 
 - `addon/` : Contient la logique de l'addon Klipper pour l'intégration du BMCU-C.
 - `flash_automation/` : Regroupe les scripts et configurations pour la compilation et le flashage du firmware Klipper sur le BMCU-C.
-  - `build.sh` : Script pour compiler le firmware (télécharge Klipper dans `.cache/`).
   - `bmcu_tool.py` : Outil interactif central pour toutes les opérations (dépendances, build, flash).
-  - `flash_automation.sh` : Script Shell pour automatiser le flashage en ligne de commande.
-  - `lib/*.sh` : Modules Bash sourceables (`ui`, `permissions_cache`, `wchisp`) utilisés par `flash_automation.sh` et testés individuellement.
+  - `build_manager.py` : Module Python gérant la compilation du firmware.
+  - `flash_manager.py` : Module Python gérant le flashage du firmware.
   - `klipper.config` : Fichier de configuration Klipper pour le BMCU-C.
-  - `flashBMCUtoKlipper_automation.py` : Automatisation avancée (CI, ateliers, etc.).
 - `assets/` : Ressources graphiques (logo SVG).
 
 ### Matrice des Zones Sensibles
@@ -117,25 +115,13 @@ La version du firmware est gérée à l'aide de **tags Git**.
 
 ## 7. Workflows Essentiels
 
-### Compilation du Firmware
+### Compilation et Flashage du Firmware
+
+Toutes les opérations de compilation et de flashage sont maintenant gérées par l'outil interactif `bmcu_tool.py`.
 
 1.  **Naviguer vers le bon répertoire :** `cd flash_automation/`
-2.  **Lancer le script de build :** `./build.sh`
-3.  **Vérifier la sortie :** Le firmware compilé (`klipper.bin`) sera disponible dans `.cache/klipper/out/`.
-
-#### Dépannage
-
-- **Erreur : `riscv32-unknown-elf-gcc: command not found`** → Vérifier que le compilateur est installé et que le PATH contient le dossier des binaires.
-- **Erreur de permission sur `build.sh`** → Donner les droits d'exécution : `chmod +x flash_automation/build.sh`.
-- **Téléchargement de Klipper impossible** → Vérifier la connexion réseau et ajuster `KLIPPER_REPO_URL`/`KLIPPER_REF`.
-
-### Flashage du Firmware
-
-Le flashage doit être effectué avec le script interactif pour minimiser les risques.
-
-1.  **Naviguer vers le bon répertoire :** `cd flash_automation/`
-2.  **Lancer le script de flashage :** `python3 bmcu_tool.py`
-3.  **Suivre les instructions :** L'outil guidera l'utilisateur à travers les étapes de vérification et de confirmation.
+2.  **Lancer l'outil principal :** `python3 bmcu_tool.py`
+3.  **Suivre les instructions :** L'outil propose un menu pour compiler le firmware, le flasher, et obtenir de l'aide pour la configuration.
 
 #### Dépannage
 
