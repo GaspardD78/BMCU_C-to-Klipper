@@ -174,6 +174,9 @@ class BuildManager:
         if out_dir.exists():
             shutil.rmtree(out_dir)
 
+        print("Préparation de la configuration Klipper...")
+        self._run_command(["make", "olddefconfig"], cwd=self.klipper_dir)
+
         print("Lancement de la compilation...")
         make_process = self._run_command(["make"], cwd=self.klipper_dir)
 

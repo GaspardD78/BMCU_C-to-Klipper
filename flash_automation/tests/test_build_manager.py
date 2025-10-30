@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 
 import pytest
 
@@ -88,7 +88,11 @@ def test_compile_firmware_with_default_config(mock_copy, mock_ensure_repo, mock_
 
     mock_ensure_repo.assert_called_once()
     mock_copy.assert_called_once()
-    mock_run.assert_called_once_with(["make"], cwd=manager.klipper_dir)
+    expected_calls = [
+        call(["make", "olddefconfig"], cwd=manager.klipper_dir),
+        call(["make"], cwd=manager.klipper_dir)
+    ]
+    mock_run.assert_has_calls(expected_calls)
 
 @patch.object(BuildManager, "_run_command")
 @patch.object(BuildManager, "ensure_klipper_repo")
@@ -104,4 +108,8 @@ def test_compile_firmware_without_default_config(mock_copy, mock_ensure_repo, mo
 
     mock_ensure_repo.assert_called_once()
     mock_copy.assert_not_called()
-    mock_run.assert_called_once_with(["make"], cwd=manager.klipper_dir)
+    expected_calls = [
+        call(["make", "olddefconfig"], cwd=manager.klipper_dir),
+        call(["make"], cwd=manager.klipper_dir)
+    ]
+    mock_run.assert_has_calls(expected_calls)
