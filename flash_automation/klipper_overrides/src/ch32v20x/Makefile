@@ -1,6 +1,6 @@
 # Build rules for WCH CH32V20x (RISC-V)
 
-CROSS_PREFIX=riscv32-unknown-elf-
+CROSS_PREFIX=riscv-none-elf-
 
 dirs-y += src/ch32v20x src/generic
 
