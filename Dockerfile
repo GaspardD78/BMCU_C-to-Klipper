@@ -13,16 +13,26 @@ RUN apt-get update && \
     python3-pip \
     python3-venv \
     git \
-    # Le compilateur cross-platform pour le firmware Klipper sur le CH32V203
-    gcc-riscv32-unknown-elf \
+    # Outils pour télécharger et extraire le toolchain
+    wget \
+    tar \
     # Dépendance système trouvée dans le workflow GitHub Actions existant
     expect \
     # Nettoyer le cache pour réduire la taille de l'image
     && rm -rf /var/lib/apt/lists/*
+
+# Télécharger et installer le toolchain RISC-V pré-compilé
+RUN wget https://github.com/stnolting/riscv-gcc-prebuilt/releases/download/rv32e-231223/riscv32-unknown-elf.gcc-13.2.0.picolibc-1.8.6.tar.gz -O /tmp/riscv-toolchain.tar.gz && \
+    mkdir -p /opt/riscv-toolchain && \
+    tar -xvf /tmp/riscv-toolchain.tar.gz -C /opt/riscv-toolchain --strip-components=1 && \
+    rm /tmp/riscv-toolchain.tar.gz
+
+# Ajouter le toolchain au PATH
+ENV PATH="/opt/riscv-toolchain/bin:${PATH}"
 
 # Créer un répertoire de travail pour l'application
 WORKDIR /app
 
 # Commande par défaut (peut être surchargée par le script de lancement)
 # Ici, nous affichons simplement les versions pour vérifier que tout est bien installé
-CMD ["/bin/bash", "-c", "python3 --version && gcc-riscv32-unknown-elf --version"]
+CMD ["/bin/bash", "-c", "python3 --version && riscv32-unknown-elf-gcc --version"]
