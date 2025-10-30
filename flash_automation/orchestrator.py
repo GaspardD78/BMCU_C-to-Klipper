@@ -130,8 +130,8 @@ def find_default_firmware() -> Path | None:
     return None
 
 
-from .build_manager import BuildManager
-from .flash_manager import FlashManager
+from .build_manager import BuildManager, BuildManagerError
+from .flash_manager import FlashManager, FlashManagerError
 
 
 class Orchestrator:
@@ -145,46 +145,71 @@ class Orchestrator:
         try:
             manager = BuildManager(self.base_dir)
             manager.compile_firmware()
-        except (subprocess.CalledProcessError, FileNotFoundError) as err:
-            print(f"La compilation a échoué : {err}")
+            return True
+        except BuildManagerError as e:
+            print(f"\n--- ERREUR DE COMPILATION ---\n{e}")
             return False
-        return True
 
     def run_flash(self, firmware_path: Path, serial_device: str) -> bool:
         """Lance le flash et retourne le succès."""
         try:
             manager = FlashManager(self.base_dir)
             manager.flash("serial", firmware_path, serial_device)
-        except (subprocess.CalledProcessError, FileNotFoundError, ValueError) as err:
-            print(f"Le flashage a échoué : {err}")
+            return True
+        except FlashManagerError as e:
+            print(f"\n--- ERREUR DE FLASHAGE ---\n{e}")
             return False
-        return True
 
-    def get_system_dependencies(self) -> tuple[list[str], list[str]]:
-        """Retourne les paquets système requis et ceux qui sont manquants."""
+    def get_system_dependencies(self) -> tuple[str | None, list[str], list[str]]:
+        """Détecte le gestionnaire de paquets et retourne les dépendances."""
         os_info = read_os_release()
         os_id = os_info.get("ID", "").lower()
         os_like = os_info.get("ID_LIKE", "").lower()
 
-        if not any(dist in ("debian", "ubuntu", "raspbian", "armbian") for dist in [os_id, os_like]):
-            return [], []
+        # Définir les paquets pour chaque gestionnaire
+        deps = {
+            "apt": ["git", "python3", "python3-venv", "python3-pip", "make", "curl", "tar", "build-essential", "sshpass", "ipmitool"],
+            "dnf": ["git", "python3", "python3-pip", "make", "curl", "tar", "gcc", "gcc-c++", "sshpass", "ipmitool"],
+            "pacman": ["git", "python", "python-pip", "make", "curl", "tar", "base-devel", "sshpass", "ipmitool"],
+        }
 
-        base_packages = ["git", "python3", "python3-venv", "python3-pip", "make", "curl", "tar", "build-essential", "sshpass", "ipmitool"]
+        # Détecter le gestionnaire de paquets
+        if any(dist in ("debian", "ubuntu", "raspbian", "armbian") for dist in [os_id, os_like]):
+            pm = "apt"
+            check_cmd = ["dpkg", "-s"]
+        elif any(dist in ("fedora", "centos", "rhel") for dist in [os_id, os_like]):
+            pm = "dnf"
+            check_cmd = ["rpm", "-q"]
+        elif "arch" in os_id or "arch" in os_like:
+            pm = "pacman"
+            check_cmd = ["pacman", "-Q"]
+        else:
+            return None, list(set(p for backend_deps in deps.values() for p in backend_deps)), []
 
-        missing_packages = []
-        for pkg in base_packages:
-            status = subprocess.run(["dpkg", "-s", pkg], capture_output=True, text=True).returncode
-            if status != 0:
-                missing_packages.append(pkg)
+        required = deps[pm]
+        missing = [pkg for pkg in required if subprocess.run([*check_cmd, pkg], capture_output=True).returncode != 0]
+        return pm, required, missing
 
-        return base_packages, missing_packages
+    def install_system_dependencies(self, package_manager: str, packages: list[str]) -> bool:
+        """Installe les dépendances système en utilisant le gestionnaire de paquets détecté."""
+        commands = {
+            "apt": f"sudo apt install -y {' '.join(packages)}",
+            "dnf": f"sudo dnf install -y {' '.join(packages)}",
+            "pacman": f"sudo pacman -S --noconfirm {' '.join(packages)}",
+        }
+        install_command = commands.get(package_manager)
+        if not install_command:
+            print(f"Gestionnaire de paquets '{package_manager}' non supporté.")
+            return False
 
-    def install_system_dependencies(self, packages: list[str]) -> bool:
-        """Installe les dépendances système via apt."""
-        install_command = f"sudo apt install -y {' '.join(packages)}"
         try:
-            process = subprocess.run(install_command, shell=True, check=True)
-            return process.returncode == 0
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            print(f"Erreur lors de l'installation des dépendances : {e}")
+            subprocess.run(install_command, shell=True, check=True)
+            return True
+        except FileNotFoundError:
+            print(f"\nErreur: Impossible de lancer la commande d'installation via '{package_manager}'.")
+            print("Vérifiez que 'sudo' et le gestionnaire de paquets sont installés et accessibles.")
+            return False
+        except subprocess.CalledProcessError as e:
+            print(f"\nL'installation a échoué (code de sortie {e.returncode}).")
+            print("Veuillez consulter les messages d'erreur ci-dessus.")
             return False

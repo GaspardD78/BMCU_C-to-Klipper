@@ -1,0 +1,6 @@
+{
+  "klipper": {
+    "repository_url": "https://github.com/Klipper3d/klipper.git",
+    "git_ref": "v0.12.0"
+  }
+}

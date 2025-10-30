@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from flash_automation.flash_manager import FlashManager
+from flash_automation.flash_manager import FlashManager, FlashManagerError
 
 
 @pytest.fixture
@@ -41,51 +41,49 @@ def test_flash_serial_success(manager: FlashManager):
     firmware_path.touch()
 
     # Create the mock flash script
-    flash_script_path = manager.base_dir / ".cache/scripts/flash_usb.py"
+    flash_script_path = manager.base_dir / ".cache/klipper/lib/flash_usb.py"
     flash_script_path.parent.mkdir(parents=True)
     flash_script_path.touch()
 
     device = "/dev/ttyUSB0"
 
-    with patch("subprocess.run") as mock_run:
+    with patch("flash_automation.flash_manager.FlashManager._run_command") as mock_run:
         manager.flash_serial(firmware_path, device)
-        mock_run.assert_called_once_with(
-            ["python3", str(flash_script_path), "-d", device, "-f", str(firmware_path)],
-            check=True,
-        )
+        expected_command = ["python3", str(flash_script_path), "-d", device, "-f", str(firmware_path)]
+        mock_run.assert_called_once_with(expected_command)
 
 
 def test_flash_serial_no_device_raises_error(manager: FlashManager):
-    """Verify that flashing without a device raises a ValueError."""
+    """Verify that flashing without a device raises a FlashManagerError."""
     firmware_path = manager.base_dir / "klipper.bin"
     firmware_path.touch()
 
-    with pytest.raises(ValueError, match="Un périphérique série est requis"):
+    with pytest.raises(FlashManagerError, match="Un périphérique série est requis"):
         manager.flash_serial(firmware_path, None)
 
 
 def test_flash_serial_missing_script_raises_error(manager: FlashManager):
-    """Verify that a missing flash_usb.py script raises FileNotFoundError."""
+    """Verify that a missing flash_usb.py script raises FlashManagerError."""
     firmware_path = manager.base_dir / "klipper.bin"
     firmware_path.touch()
     device = "/dev/ttyUSB0"
 
-    with pytest.raises(FileNotFoundError, match="Le script de flash .* est introuvable"):
+    with pytest.raises(FlashManagerError, match="Le script de flash .* est introuvable"):
         manager.flash_serial(firmware_path, device)
 
 
 def test_flash_serial_subprocess_failure_propagates(manager: FlashManager):
-    """Check that a subprocess failure is propagated."""
+    """Check that a subprocess failure is propagated as a FlashManagerError."""
     firmware_path = manager.base_dir / "klipper.bin"
     firmware_path.touch()
 
-    flash_script_path = manager.base_dir / ".cache/scripts/flash_usb.py"
+    flash_script_path = manager.base_dir / ".cache/klipper/lib/flash_usb.py"
     flash_script_path.parent.mkdir(parents=True)
     flash_script_path.touch()
 
     device = "/dev/ttyUSB0"
 
-    with patch("subprocess.run") as mock_run:
-        mock_run.side_effect = subprocess.CalledProcessError(1, "cmd")
-        with pytest.raises(subprocess.CalledProcessError):
+    with patch("flash_automation.flash_manager.FlashManager._run_command") as mock_run:
+        mock_run.side_effect = FlashManagerError("Subprocess failed")
+        with pytest.raises(FlashManagerError, match="Subprocess failed"):
             manager.flash_serial(firmware_path, device)

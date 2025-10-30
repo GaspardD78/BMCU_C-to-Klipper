@@ -178,27 +178,38 @@ def progress_step(title: str):
 def run_dependency_check(orchestrator: Orchestrator):
     """Vérifie et propose d'installer les dépendances."""
     print_block(colorize("Vérification des dépendances système...", Colors.HEADER))
-    _, missing = orchestrator.get_system_dependencies()
+    pm, all_deps, missing = orchestrator.get_system_dependencies()
+
     if not missing:
         print(colorize("Toutes les dépendances système semblent déjà installées.", Colors.OKGREEN))
-        input("Appuyez sur Entrée pour continuer...")
-        return
+    elif pm:
+        print(colorize(f"Dépendances manquantes détectées pour '{pm}':", Colors.WARNING))
+        for pkg in missing:
+            print(f"  - {pkg}")
 
-    print(colorize("Dépendances manquantes détectées :", Colors.WARNING))
-    for pkg in missing:
-        print(f"  - {pkg}")
+        install_commands = {
+            "apt": f"sudo apt install -y {' '.join(missing)}",
+            "dnf": f"sudo dnf install -y {' '.join(missing)}",
+            "pacman": f"sudo pacman -S --noconfirm {' '.join(missing)}",
+        }
+        install_command = install_commands.get(pm)
+        print(f"\nLa commande suivante peut être exécutée : {colorize(install_command, Colors.BOLD)}")
 
-    install_command = f"sudo apt install -y {' '.join(missing)}"
-    print(f"\nLa commande suivante sera exécutée : {colorize(install_command, Colors.BOLD)}")
-    if ask_yes_no("Voulez-vous lancer cette commande maintenant ?", default=True):
-        with progress_step("Installation des dépendances"):
-            if orchestrator.install_system_dependencies(missing):
-                print(colorize("Installation terminée avec succès !", Colors.OKGREEN))
-            else:
-                print(colorize("L'installation a échoué.", Colors.FAIL))
+        if ask_yes_no("Voulez-vous lancer cette commande maintenant ?", default=True):
+            with progress_step("Installation des dépendances"):
+                if orchestrator.install_system_dependencies(pm, missing):
+                    print(colorize("Installation terminée avec succès !", Colors.OKGREEN))
+                else:
+                    print(colorize("L'installation a échoué.", Colors.FAIL))
+        else:
+            print(colorize("Installation annulée.", Colors.WARNING))
     else:
-        print(colorize("Installation annulée.", Colors.WARNING))
-    input("Appuyez sur Entrée pour continuer...")
+        print(colorize("Votre système d'exploitation n'est pas auto-détecté.", Colors.WARNING))
+        print("Veuillez installer manuellement les dépendances suivantes :")
+        for pkg in sorted(all_deps):
+            print(f"  - {pkg}")
+
+    input("\nAppuyez sur Entrée pour continuer...")
 
 def run_build_flow(orchestrator: Orchestrator):
     """Gère le processus de compilation du firmware."""
