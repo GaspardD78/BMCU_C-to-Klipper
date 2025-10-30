@@ -119,8 +119,8 @@ La version du firmware est gérée à l'aide de **tags Git**.
 
 Toutes les opérations de compilation et de flashage sont maintenant gérées par l'outil interactif `bmcu_tool.py`.
 
-1.  **Naviguer vers le bon répertoire :** `cd flash_automation/`
-2.  **Lancer l'outil principal :** `python3 bmcu_tool.py`
+1.  **Assurez-vous d'être à la racine du projet.**
+2.  **Lancer l'outil principal en tant que module :** `python3 -m flash_automation.bmcu_tool`
 3.  **Suivre les instructions :** L'outil propose un menu pour compiler le firmware, le flasher, et obtenir de l'aide pour la configuration.
 
 #### Dépannage
