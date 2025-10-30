@@ -245,24 +245,49 @@ def run_python_dependency_check(orchestrator: Orchestrator):
     input("\nAppuyez sur Entrée pour continuer...")
 
 def run_build_flow(orchestrator: Orchestrator):
-    """Gère le processus de compilation du firmware."""
-    existing_firmware = find_default_firmware()
-    if existing_firmware and not ask_yes_no(f"Un firmware existe ({existing_firmware.name}). Recompiler ?", default=False):
-        print(colorize("Compilation annulée.", Colors.WARNING))
-        return
+    """Gère le sous-menu de gestion du firmware."""
+    from .build_manager import BuildManager # Importation locale pour l'accès aux méthodes
 
-    try:
-        with progress_step("Compilation du firmware Klipper"):
-            orchestrator.run_build()
-        print(colorize("Build terminé.", Colors.OKGREEN))
-    except BuildManagerError as e:
-        error_title = colorize("Rapport d'erreur de compilation", Colors.FAIL)
-        print_block(
-            f"{error_title}\n"
-            "La compilation a échoué. Voici les détails de l'erreur :\n"
-            f"--------------------------------------------------\n{e}\n"
-            "--------------------------------------------------"
-        )
+    build_manager = BuildManager(orchestrator.base_dir)
+
+    while True:
+        print_block(colorize("Gestion du Firmware", Colors.HEADER))
+        selection = ask_menu([
+            "Configurer le firmware (menuconfig)",
+            "Compiler le firmware",
+            "Sauvegarder la configuration actuelle",
+            "Charger une configuration",
+            "Retour au menu principal"
+        ], default_index=1)
+
+        if selection == 0:
+            try:
+                build_manager.launch_menuconfig()
+            except BuildManagerError as e:
+                print(colorize(f"Erreur: {e}", Colors.FAIL))
+        elif selection == 1:
+            try:
+                with progress_step("Compilation du firmware Klipper"):
+                    # Nous compilons avec la configuration actuelle, pas celle par défaut
+                    build_manager.compile_firmware(use_default_config=False)
+                print(colorize("Build terminé.", Colors.OKGREEN))
+            except (BuildManagerError, FileNotFoundError) as e:
+                print(colorize(f"La compilation a échoué: {e}", Colors.FAIL))
+        elif selection == 2:
+            name = ask_text("Nom pour la sauvegarde", default="ma_config")
+            try:
+                build_manager.save_config(name)
+            except BuildManagerError as e:
+                print(colorize(f"Erreur de sauvegarde: {e}", Colors.FAIL))
+        elif selection == 3:
+            # Idéalement, on listerait les configs disponibles. Simplifions pour l'instant.
+            name = ask_text("Nom de la configuration à charger")
+            try:
+                build_manager.load_config(name)
+            except BuildManagerError as e:
+                print(colorize(f"Erreur de chargement: {e}", Colors.FAIL))
+        elif selection == 4:
+            return
 
 def run_flash_flow(orchestrator: Orchestrator, profile: QuickProfile):
     """Gère le processus de flashage."""
@@ -307,12 +332,51 @@ def run_flash_flow(orchestrator: Orchestrator, profile: QuickProfile):
         print(colorize("\nFlash terminé avec succès !", f"{Colors.BOLD}{Colors.OKGREEN}"))
     except FlashManagerError as e:
         error_title = colorize("Rapport d'erreur de flashage", Colors.FAIL)
+        bootloader_instructions = f"""
+        {colorize('Procédure pour le mode Bootloader Manuel :', f'{Colors.BOLD}{Colors.WARNING}')}
+        Certaines cartes nécessitent une intervention manuelle pour entrer en mode flash.
+        Veuillez suivre ces étapes et réessayer :
+          1. Débranchez la carte de l'ordinateur.
+          2. Maintenez le bouton 'BOOT' (ou 'B') enfoncé.
+          3. Tout en le maintenant, rebranchez la carte.
+          4. Relâchez le bouton.
+          5. Relancez l'opération de flashage.
+        """
         print_block(
             f"{error_title}\n"
             "Le flashage a échoué. Voici les détails de l'erreur :\n"
             f"--------------------------------------------------\n{e}\n"
-            "--------------------------------------------------"
+            f"--------------------------------------------------\n"
+            f"{textwrap.dedent(bootloader_instructions)}"
         )
+
+def display_dashboard(orchestrator: Orchestrator):
+    """Affiche le tableau de bord dynamique."""
+    status = orchestrator.get_system_status()
+
+    # Formatage des statuts
+    repo_status = colorize("[✓] Cloné", Colors.OKGREEN) if status.klipper_repo_exists else colorize("[✗] Non trouvé", Colors.FAIL)
+    firmware_status = colorize("[✓] Compilé", Colors.OKGREEN) if status.firmware_exists else colorize("[✗] Non compilé", Colors.FAIL)
+
+    if status.detected_devices:
+        device_status = colorize(f"[✓] {status.detected_devices[0]}", Colors.OKGREEN)
+        if len(status.detected_devices) > 1:
+            device_status += colorize(f" (+{len(status.detected_devices) - 1} autres)", Colors.OKCYAN)
+    else:
+        device_status = colorize("[!] Aucune carte détectée", Colors.WARNING)
+
+    dashboard = f"""
+    {colorize('Assistant BMCU → Klipper', f'{Colors.BOLD}{Colors.OKBLUE}')}
+    /-------------------------------------------------------\\
+    | ÉTAT DU SYSTÈME :                                      |
+    |-------------------------------------------------------|
+    | 1. Dépôt Klipper : {repo_status:<46} |
+    | 2. Firmware BMCU-C : {firmware_status:<46} |
+    | 3. Carte connectée : {device_status:<46} |
+    \\-------------------------------------------------------/
+    """
+    print_block(dashboard)
+
 
 def main(argv: list[str] | None = None) -> int:
     """Point d'entrée CLI."""
@@ -321,38 +385,30 @@ def main(argv: list[str] | None = None) -> int:
 
     display_logo()
     profile = load_profile()
-    orchestrator = Orchestrator(Path(__file__).resolve().parent)
+    base_dir = Path(__file__).resolve().parent
+    orchestrator = Orchestrator(base_dir)
 
     while True:
-        firmware = find_default_firmware()
-        firmware_display = str(firmware) if firmware else "à générer"
-        summary = f"""
-        {colorize('Assistant BMCU → Klipper', f'{Colors.BOLD}{Colors.OKBLUE}')}
-          • Firmware local   : {firmware_display}
-          • Périphérique USB : {profile.serial_device or '(auto)'}
-        """
-        print_block(summary)
+        display_dashboard(orchestrator)
 
         selection = ask_menu(
             [
-                "Vérifier les dépendances système",
-                "Vérifier les dépendances Python (pip)",
-                "Compiler le firmware",
-                "Flasher le firmware (assistant)",
+                "Gestion du firmware",
+                "Flasher le firmware",
+                "Vérifier les dépendances (avancé)",
                 "Quitter",
             ],
-            default_index=3,
+            default_index=0,
         )
 
         if selection == 0:
-            run_dependency_check(orchestrator)
-        elif selection == 1:
-            run_python_dependency_check(orchestrator)
-        elif selection == 2:
             run_build_flow(orchestrator)
-        elif selection == 3:
+        elif selection == 1:
             run_flash_flow(orchestrator, profile)
-        elif selection == 4:
+        elif selection == 2:
+            run_dependency_check(orchestrator)
+            run_python_dependency_check(orchestrator)
+        elif selection == 3:
             print(colorize("À bientôt !", Colors.OKBLUE))
             return 0
 

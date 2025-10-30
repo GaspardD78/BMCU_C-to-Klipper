@@ -89,22 +89,62 @@ class BuildManager:
             self._run_command(["git", "fetch", "origin", "--tags"], cwd=self.klipper_dir)
             self._run_command(["git", "checkout", self.klipper_ref], cwd=self.klipper_dir)
 
-    def compile_firmware(self) -> Path:
+    def _run_interactive_command(self, command: list[str], *, cwd: Path) -> None:
+        """Exécute une commande interactive."""
+        try:
+            subprocess.run(command, cwd=cwd, check=True)
+        except FileNotFoundError as e:
+            raise BuildManagerError(f"La commande '{command[0]}' est introuvable.") from e
+        except subprocess.CalledProcessError as e:
+            raise BuildManagerError(f"La commande `{' '.join(command)}` a échoué.") from e
+
+    def launch_menuconfig(self) -> None:
+        """Lance l'interface de configuration interactive `menuconfig`."""
+        self.ensure_klipper_repo()
+        print("Lancement de l'interface de configuration de Klipper (menuconfig)...")
+        self._run_interactive_command(["make", "menuconfig"], cwd=self.klipper_dir)
+
+    def save_config(self, name: str) -> Path:
+        """Sauvegarde la configuration actuelle sous un nom donné."""
+        config_src = self.klipper_dir / ".config"
+        if not config_src.exists():
+            raise BuildManagerError("Aucun fichier .config à sauvegarder. Veuillez d'abord lancer la configuration.")
+
+        config_dir = self.base_dir / "configs"
+        config_dir.mkdir(exist_ok=True)
+        config_dest = config_dir / f"{name}.config"
+
+        shutil.copy(config_src, config_dest)
+        print(f"Configuration sauvegardée sous : {config_dest}")
+        return config_dest
+
+    def load_config(self, name: str) -> None:
+        """Charge une configuration sauvegardée."""
+        config_src = self.base_dir / f"configs/{name}.config"
+        if not config_src.exists():
+            raise BuildManagerError(f"La configuration '{name}' est introuvable.")
+
+        config_dest = self.klipper_dir / ".config"
+        self.ensure_klipper_repo()
+        shutil.copy(config_src, config_dest)
+        print(f"Configuration '{name}' chargée.")
+
+    def compile_firmware(self, use_default_config: bool = True) -> Path:
         """Compile le firmware et retourne le chemin vers le binaire."""
         print("Compilation du firmware Klipper...")
         self.ensure_klipper_repo()
 
-        config_src = self.base_dir / "klipper.config"
-        config_dest = self.klipper_dir / ".config"
-        print(f"Copie de {config_src} vers {config_dest}")
-        shutil.copy(config_src, config_dest)
+        if use_default_config:
+            config_src = self.base_dir / "klipper.config"
+            config_dest = self.klipper_dir / ".config"
+            if not config_src.exists():
+                raise BuildManagerError(f"Le fichier de configuration par défaut '{config_src}' est introuvable.")
+            print(f"Utilisation de la configuration par défaut : {config_src}")
+            shutil.copy(config_src, config_dest)
 
         print("Nettoyage de l'environnement de compilation...")
-        # Remplacer 'make clean' par une suppression manuelle du répertoire 'out'
-        # pour forcer une reconstruction complète et éviter les erreurs de linker.
         out_dir = self.klipper_dir / "out"
         if out_dir.exists():
-            print(f"Suppression du répertoire de sortie : {out_dir}")
             shutil.rmtree(out_dir)
 
         print("Lancement de la compilation...")

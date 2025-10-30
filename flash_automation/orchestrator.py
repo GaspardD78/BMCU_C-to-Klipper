@@ -44,6 +44,15 @@ class SystemInfo:
 
 
 @dataclass(frozen=True)
+class SystemStatus:
+    """Représente l'état complet du système pour l'affichage du tableau de bord."""
+    klipper_repo_exists: bool
+    firmware_exists: bool
+    detected_devices: list[str]
+    # On pourrait ajouter d'autres statuts ici, comme les dépendances.
+
+
+@dataclass(frozen=True)
 class EnvironmentDefaults:
     """Valeurs par défaut déterminées à partir de l'environnement."""
 
@@ -150,6 +159,17 @@ class Orchestrator:
 
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir
+        self.klipper_dir = self.base_dir / ".cache/klipper"
+        self.firmware_path = self.klipper_dir / "out/klipper.bin"
+
+    def get_system_status(self) -> SystemStatus:
+        """Collecte et retourne l'état actuel du système."""
+        fm = FlashManager(self.base_dir)
+        return SystemStatus(
+            klipper_repo_exists=self.klipper_dir.is_dir(),
+            firmware_exists=self.firmware_path.is_file(),
+            detected_devices=fm.detect_serial_devices()
+        )
 
     def run_build(self) -> bool:
         """Lance le script de build et retourne le succès."""
@@ -157,11 +177,42 @@ class Orchestrator:
         manager.compile_firmware()
         return True
 
+    def _run_system_command(self, command: list[str], ignore_errors: bool = False) -> None:
+        """Wrapper pour les commandes système générales."""
+        try:
+            subprocess.run(
+                command, check=True, capture_output=True, text=True,
+                encoding="utf-8", errors="replace"
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            if not ignore_errors:
+                # Simplification de l'erreur pour les services, car l'échec n'est pas toujours critique
+                print(f"Avertissement : La commande `{' '.join(command)}` a échoué : {e}")
+
+    def _stop_klipper_service(self) -> None:
+        """Arrête le service Klipper s'il est en cours d'exécution."""
+        print("Arrêt du service Klipper pour libérer le port série...")
+        self._run_system_command(["sudo", "systemctl", "stop", "klipper.service"], ignore_errors=True)
+
+    def _start_klipper_service(self) -> None:
+        """Démarre le service Klipper."""
+        print("Démarrage du service Klipper...")
+        self._run_system_command(["sudo", "systemctl", "start", "klipper.service"], ignore_errors=True)
+
     def run_flash(self, firmware_path: Path, serial_device: str) -> bool:
-        """Lance le flash et retourne le succès."""
+        """Orchestre le flashage : arrêt du service, flashage, redémarrage."""
         manager = FlashManager(self.base_dir)
-        manager.flash("serial", firmware_path, serial_device)
-        return True
+        self._stop_klipper_service()
+        try:
+            manager.flash("serial", firmware_path, serial_device)
+            print("Flashage réussi !")
+            return True
+        except FlashManagerError as e:
+            print(f"ERREUR LORS DU FLASHAGE : {e}")
+            # L'erreur sera gérée par l'interface utilisateur pour guider l'utilisateur
+            raise  # Fait remonter l'exception pour que l'UI puisse la traiter
+        finally:
+            self._start_klipper_service()
 
     def get_system_dependencies(self) -> tuple[str | None, list[str], list[str]]:
         """Détecte le gestionnaire de paquets et retourne les dépendances."""

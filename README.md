@@ -64,11 +64,28 @@ L'outil `bmcu_tool.py` est le **point d'entrée unique** pour toutes les opérat
 
 ### Utilisation du menu
 
-Suivez simplement les options dans l'ordre :
+L'outil vous présente un **tableau de bord** qui résume l'état de votre système. Les options du menu vous permettent d'agir sur cet état.
 
-1.  **Vérifier et installer les dépendances** : L'outil détecte votre système et vous propose d'installer les paquets manquants.
-2.  **Compiler le firmware** : Prépare le firmware Klipper pour votre BMCU-C.
-3.  **Flasher le firmware (assistant)** : Vous guide pour sélectionner le firmware et le port série, puis lance le flashage.
+```
+    Assistant BMCU → Klipper
+    /-------------------------------------------------------\
+    | ÉTAT DU SYSTÈME :                                      |
+    |-------------------------------------------------------|
+    | 1. Dépôt Klipper : [✓] Cloné                          |
+    | 2. Firmware BMCU-C : [✗] Non compilé                  |
+    | 3. Carte connectée : [!] Aucune carte détectée        |
+    \-------------------------------------------------------/
+
+      1. Gestion du firmware
+      2. Flasher le firmware
+      3. Vérifier les dépendances (avancé)
+      4. Quitter
+```
+
+Le flux de travail typique est :
+1.  **Gestion du firmware** → **Compiler le firmware** : Prépare le binaire Klipper. Vous pouvez aussi utiliser ce menu pour configurer des options avancées (`menuconfig`).
+2.  **Flasher le firmware** : Vous guide pour sélectionner le port série de votre BMCU-C et y transférer le firmware.
+3.  **Vérifier les dépendances (avancé)** : Utile lors de la première utilisation pour installer les paquets système et Python nécessaires.
 
 ---
 
