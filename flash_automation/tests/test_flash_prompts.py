@@ -1,59 +1,53 @@
-import io
 import sys
-import time
-from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
 
+# S'assurer que le répertoire `flash_automation` est dans le path pour l'import
 ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+FLASH_AUTOMATION_DIR = ROOT_DIR / "flash_automation"
+if str(FLASH_AUTOMATION_DIR) not in sys.path:
+    sys.path.insert(0, str(FLASH_AUTOMATION_DIR))
 
-# @pytest.mark.skip(reason="These tests are for the deprecated flash.py and need to be adapted for bmcu_tool.py")
-# from flash_automation import flash
+# Importer les classes et fonctions nécessaires depuis bmcu_tool
+from bmcu_tool import (
+    SystemInfo,
+    QuickProfile,
+    EnvironmentDefaults,
+    detect_environment_defaults,
+    apply_environment_defaults,
+    build_home_summary,
+    find_default_firmware,
+)
 
 
-@pytest.mark.skip(reason="Test for deprecated flash.py")
 def test_detect_environment_defaults_raspberry_pi():
-    info = flash.SystemInfo(
+    """Vérifie la détection d'un environnement Raspberry Pi."""
+    info = SystemInfo(
         model="Raspberry Pi 4 Model B Rev 1.2",
         os_release={"ID": "raspbian", "ID_LIKE": "debian"},
         machine="armv7l",
     )
-
-    defaults = flash.detect_environment_defaults(info)
-
+    defaults = detect_environment_defaults(info)
     assert defaults.label == "Raspberry Pi"
     assert defaults.host == "localhost"
     assert defaults.user == "pi"
 
 
-@pytest.mark.skip(reason="Test for deprecated flash.py")
-def test_prompt_timer_emits_help_message():
-    buffer = io.StringIO()
-    with redirect_stdout(buffer):
-        with flash.PromptTimer("Question : ", "Saisissez les informations requises.", interval=0.05):
-            time.sleep(0.12)
-
-    output = buffer.getvalue()
-    assert "Saisissez les informations requises." in output
-
-
-@pytest.mark.skip(reason="Test for deprecated flash.py")
 @pytest.mark.parametrize(
     "initial_host,expected_host",
     [("", "localhost"), ("10.0.0.2", "10.0.0.2")],
 )
 def test_apply_environment_defaults_respects_existing_values(initial_host, expected_host):
-    profile = flash.QuickProfile(
+    """Vérifie que les valeurs existantes du profil ne sont pas écrasées."""
+    profile = QuickProfile(
         gateway_host=initial_host,
         gateway_user="",
         remote_firmware_path="",
         serial_device="",
         log_root="",
     )
-    defaults = flash.EnvironmentDefaults(
+    defaults = EnvironmentDefaults(
         label="Bambu Lab CB2",
         host="localhost",
         user="bambu",
@@ -62,7 +56,7 @@ def test_apply_environment_defaults_respects_existing_values(initial_host, expec
         log_root="logs",
     )
 
-    flash.apply_environment_defaults(profile, defaults)
+    apply_environment_defaults(profile, defaults)
 
     assert profile.gateway_host == expected_host
     assert profile.gateway_user == "bambu"
@@ -71,17 +65,18 @@ def test_apply_environment_defaults_respects_existing_values(initial_host, expec
     assert profile.log_root == "logs"
 
 
-@pytest.mark.skip(reason="Test for deprecated flash.py")
 def test_home_summary_includes_environment_snapshot(tmp_path, monkeypatch):
+    """Vérifie que le résumé d'accueil affiche les bonnes informations."""
     firmware_path = tmp_path / "klipper.bin"
     firmware_path.write_text("binary")
 
-    monkeypatch.setattr(flash, "find_default_firmware", lambda: firmware_path)
+    # Simuler la détection du firmware
+    monkeypatch.setattr("bmcu_tool.find_default_firmware", lambda: firmware_path)
 
-    profile = flash.QuickProfile(gateway_host="localhost", gateway_user="pi")
-    defaults = flash.EnvironmentDefaults(label="Raspberry Pi", host="localhost", user="pi")
+    profile = QuickProfile(gateway_host="localhost", gateway_user="pi")
+    defaults = EnvironmentDefaults(label="Raspberry Pi", host="localhost", user="pi")
 
-    summary = flash.build_home_summary(profile, defaults)
+    summary = build_home_summary(profile, defaults)
 
     assert "Environnement détecté : Raspberry Pi" in summary
     assert str(firmware_path) in summary
