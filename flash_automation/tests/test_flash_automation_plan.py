@@ -273,15 +273,6 @@ def test_verify_environment_warns_when_python_missing(tmp_path):
     assert "Absente (optionnelle)" in combined_output
 
 
-@pytest.mark.skip(reason="""
-    This test is consistently failing in CI. Debugging attempts revealed the following:
-    - The test environment is minimal, requiring explicit addition of all shell commands.
-    - The script uses `python3` to write a JSON cache file. The python process is spawned from a shell function.
-    - In the test environment, the python script fails silently, causing the cache to not be written.
-    - Attempts to debug by tracing (set -x) or capturing stderr from python did not reveal the root cause.
-    - The current hypothesis is a subtle issue with environment variable propagation in the nested shell/python execution context created by `run_flash_script`.
-    - Deactivated to unblock CI, but this test needs to be rewritten to be more robust, possibly by mocking the shell function directly.
-    """)
 def test_verify_environment_uses_permission_cache(tmp_path):
     env, bin_dir = create_stub_environment(tmp_path)
     add_symlink(bin_dir, "bash")
@@ -291,17 +282,23 @@ def test_verify_environment_uses_permission_cache(tmp_path):
         add_symlink(bin_dir, command)
 
     cache_file = tmp_path / "perm_cache.json"
-    env["PERMISSIONS_CACHE_FILE"] = str(cache_file)
-    env["PERMISSIONS_CACHE_TTL"] = "3600"
+    env["BMCU_PERMISSION_CACHE_FILE"] = str(cache_file)
+    env["BMCU_PERMISSION_CACHE_TTL"] = "3600"
+    # Force the bash backend to isolate the test from python execution subtleties
+    env["BMCU_PERMISSION_CACHE_BACKEND"] = "bash"
 
+    assert not cache_file.exists()
+
+    # First run: should create the cache
     first = run_flash_script("verify_environment", env=env)
     assert first.returncode == 0
-    assert "Cache des permissions mis à jour" in first.stdout
+    assert cache_file.is_file()
     assert "Résumé des dépendances :" in first.stdout
 
+    # Second run: should use the cache
     second = run_flash_script("verify_environment", env=env)
     assert second.returncode == 0
-    assert "Vérification des permissions sautée" in second.stdout
+    assert "Vérification des permissions sautée" in second.stdout + second.stderr
     assert "Résumé des dépendances :" in second.stdout
 
 
