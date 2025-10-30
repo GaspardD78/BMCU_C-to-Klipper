@@ -125,28 +125,20 @@ ARCHIVED_FIRMWARE_STORED="false"
 INPUT_FINGERPRINT=""
 INPUT_LATEST_MTIME="0"
 
-if [[ -t 1 ]]; then
-    readonly COLOR_INFO="\e[34m"
-    readonly COLOR_SUCCESS="\e[32m"
-    readonly COLOR_ERROR="\e[31m"
-    readonly COLOR_RESET="\e[0m"
-else
-    readonly COLOR_INFO=""
-    readonly COLOR_SUCCESS=""
-    readonly COLOR_ERROR=""
-    readonly COLOR_RESET=""
-fi
+source "${FLASH_ROOT}/lib/ui.sh"
+configure_color_palette
 
+# Wrapper functions to match the old names used in this script
 print_info() {
-    printf "%s[INFO]%s %s\n" "${COLOR_INFO}" "${COLOR_RESET}" "$1"
+    info "$1"
 }
 
 print_success() {
-    printf "%s[OK]%s %s\n" "${COLOR_SUCCESS}" "${COLOR_RESET}" "$1"
+    success "$1"
 }
 
 print_error() {
-    printf "%s[ERREUR]%s %s\n" "${COLOR_ERROR}" "${COLOR_RESET}" "$1" >&2
+    error_msg "$1"
 }
 
 usage() {
@@ -870,11 +862,13 @@ report_python_cache_status() {
     esac
 }
 
+source "${FLASH_ROOT}/lib/common.sh"
+
 require_command() {
     local cmd="$1"
     local message="$2"
 
-    if ! command -v "${cmd}" >/dev/null 2>&1; then
+    if ! command_exists "${cmd}"; then
         print_error "${message}"
         exit 1
     fi
