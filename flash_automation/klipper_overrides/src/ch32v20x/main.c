@@ -7,7 +7,7 @@
 extern void SystemInit(void);
 
 void __attribute__((noreturn, used))
-riscv_main(void)
+main(void)
 {
     SystemInit();
     clock_init();
