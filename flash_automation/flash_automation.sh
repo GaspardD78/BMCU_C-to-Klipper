@@ -117,6 +117,7 @@ source "${FLASH_ROOT}/lib/permissions_cache.sh"
 source "${FLASH_ROOT}/lib/ui.sh"
 source "${FLASH_ROOT}/lib/wchisp.sh"
 source "${FLASH_ROOT}/lib/firmware.sh"
+source "${FLASH_ROOT}/lib/common.sh"
 
 ALLOW_UNVERIFIED_WCHISP=""
 readonly DFU_ALT_SETTING="${DFU_ALT_SETTING:-0}"
@@ -1102,14 +1103,6 @@ function restart_klipper_services() {
     SERVICES_RESTORED="true"
 }
 
-function command_exists() {
-    local cmd="$1"
-    if [[ "${cmd}" == */* ]]; then
-        [[ -x "${cmd}" ]]
-    else
-        command -v "${cmd}" >/dev/null 2>&1
-    fi
-}
 
 function command_install_hint() {
     local cmd="$1"
