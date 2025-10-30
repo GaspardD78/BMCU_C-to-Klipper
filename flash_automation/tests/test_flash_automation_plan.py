@@ -48,7 +48,13 @@ def test_build_manager_compiles_firmware(tmp_path, monkeypatch):
     git_stub.chmod(0o755)
 
     make_stub = bin_dir / "make"
-    make_stub.write_text("#!/bin/sh\necho 'make stub' >&2\n")
+    # Le stub doit recréer le binaire, car la logique de nettoyage le supprime.
+    # Utiliser le chemin absolu pour mkdir pour éviter les problèmes de PATH.
+    make_script = """#!/bin/sh
+/bin/mkdir -p out
+echo "fake firmware" > out/klipper.bin
+"""
+    make_stub.write_text(make_script)
     make_stub.chmod(0o755)
 
     # Crée un faux config.json
