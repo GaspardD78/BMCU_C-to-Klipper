@@ -100,7 +100,13 @@ class BuildManager:
         shutil.copy(config_src, config_dest)
 
         print("Nettoyage de l'environnement de compilation...")
-        self._run_command(["make", "clean"], cwd=self.klipper_dir)
+        # Remplacer 'make clean' par une suppression manuelle du répertoire 'out'
+        # pour forcer une reconstruction complète et éviter les erreurs de linker.
+        out_dir = self.klipper_dir / "out"
+        if out_dir.exists():
+            print(f"Suppression du répertoire de sortie : {out_dir}")
+            shutil.rmtree(out_dir)
+
         print("Lancement de la compilation...")
         self._run_command(["make"], cwd=self.klipper_dir)
 
