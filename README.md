@@ -115,7 +115,13 @@ La documentation complète d'intégration est disponible dans [`addon/docs/setup
 | `python3` ou `git` introuvable | Reprenez la section [Logiciels](#-logiciels). |
 | `Permission denied` sur le port série | `sudo usmod -aG dialout "$USER"` puis reconnectez-vous. |
 | `bmcu_tool.py` ne se lance pas | Activez l'environnement virtuel (`source .venv/bin/activate`). |
-| Le flash échoue | Vérifiez le câble USB et assurez-vous que le BMCU-C est bien alimenté. |
+| Le flash échoue | Vérifiez le câble USB et assurez-vous que le BMCU-C est bien alimenté. Si le problème persiste, consultez la **procédure de flashage manuel**. |
+
+### 💡 Le cas des différentes versions de cartes
+
+Il existe plusieurs variantes matérielles du BMCU-C (avec port série UART, avec port USB-C...). L'outil `bmcu_tool.py` tente de gérer la plupart des cas, mais si vous rencontrez des erreurs de flashage persistantes ou si votre carte ne répond plus, une procédure manuelle peut être nécessaire.
+
+➡️ **[Consulter le guide de flashage manuel](flash_automation/docs/flash_procedure.md)**
 
 ---
 

@@ -1,74 +1,104 @@
-# Procédure de flash du BMCU-C
+# Procédure de Flashage Manuel du BMCU-C
 
-Ce document détaille la procédure complète pour compiler et flasher le firmware Klipper sur le BMCU-C, y compris les indications disponibles pour les variantes dépourvues de bouton BOOT physique ou équipées uniquement d'un port USB-C.
+Ce document détaille la procédure de flashage manuel du firmware Klipper sur la carte BMCU-C.
 
-## 1. Préparation
+## Quand utiliser cette méthode ?
 
-1. Vérifiez que vous disposez des prérequis logiciels suivants :
-   - Une instance Klipper fonctionnelle avec accès SSH.
-   - Une interface d'administration (Mainsail ou Fluidd).
-   - Le module Happy Hare installé.
-  - Les toolchains `gcc-riscv32-unknown-elf`, `picolibc-riscv32-unknown-elf` et l'outil de flash `wchisp` installés sur la machine qui exécutera le flash. Le script `build.sh` peut télécharger automatiquement la toolchain RV32 officielle si nécessaire.
-2. Récupérez uniquement le dossier `flash_automation/` si vous ne souhaitez pas cloner tout le dépôt :
+L'outil automatisé `bmcu_tool.py` est la méthode recommandée pour flasher votre carte. Cependant, cette procédure manuelle est nécessaire dans les cas suivants :
 
-   ```bash
-   git clone --depth 1 --filter=blob:none --sparse \
-     https://github.com/GaspardD78/BMCU_C-to-Klipper.git bmcu-flash
-   cd bmcu-flash
-   git sparse-checkout set flash_automation
-   cd flash_automation
-   ```
+-   **Échec du flashage automatique :** Si l'outil `bmcu_tool.py` ne parvient pas à flasher la carte.
+-   **Dé-blocage ("Unbricking") :** Si la carte ne répond plus et n'est plus détectée correctement.
+-   **Anciennes versions matérielles :** Certaines versions plus anciennes du BMCU-C, notamment celles sans port USB-C dédié à la communication, peuvent nécessiter cette approche.
 
-   > 💡 Si vous disposez déjà d'une copie du dépôt complet, placez-vous simplement dans le dossier `flash_automation/` correspondant.
+---
 
-## 2. Compilation du firmware
+## ⚠️ Prérequis Essentiels
 
-1. Lancez la construction du firmware Klipper pour le BMCU-C :
-   ```bash
-   ./build.sh
-   ```
-2. Le script prépare l'environnement de compilation et produit un binaire `.cache/klipper/out/klipper.bin` (chemin par défaut). Sur un hôte disposant déjà d'une installation Klipper fonctionnelle, exportez `KLIPPER_SRC_DIR=/chemin/vers/klipper` avant d'exécuter `./build.sh` pour réutiliser cette arborescence.
+-   **Système d'exploitation :** Un ordinateur sous **Windows**. L'outil de flashage officiel (`WCHISPTool`) n'est disponible que pour cet OS.
+-   **Logiciel :** [WCHISPTool](https://www.wch-ic.com/downloads/WCHISPTool_Setup_exe.html).
+-   **Firmware :** Le fichier `klipper.bin` compilé. Vous pouvez l'obtenir en utilisant l'option "Compiler le firmware" de `bmcu_tool.py`. Le fichier se trouvera dans `flash_automation/.cache/klipper/out/klipper.bin`.
 
-## 3. Mise en mode bootloader et flash
+---
 
-1. Lancez l'outil interactif :
-   ```bash
-   python3 bmcu_tool.py
-   ```
-   Dans le menu, sélectionnez l'option **"Flasher le firmware (assistant)"**.
+## Méthode 1 : Flashage via UART (pour les cartes sans USB-C ou en cas de blocage)
 
-   Utilisez l'option `--dry-run` pour valider le parcours sans écrire sur la carte (`python3 bmcu_tool.py --dry-run`). L'assistant rappelle les prérequis (connexion réseau/USB, sauvegardes, checksum du firmware), calcule automatiquement l'empreinte SHA-256 de `klipper.bin` et la compare à la valeur de référence définie dans `klipper.sha256` (ou fournie via `--firmware-sha256[(-file)]`). En cas d'écart, le processus s'arrête immédiatement pour éviter un flash risqué.
-   > ℹ️ Les invites `O/n` acceptent `Entrée` pour sélectionner la valeur par défaut.
-2. Lorsque le programme vous le demande, placez manuellement le module en mode bootloader :
-   1. Maintenez le bouton **BOOT0** enfoncé.
-   2. Appuyez puis relâchez le bouton **RESET**.
-   3. Relâchez le bouton **BOOT0**.
-   4. Revenez dans le terminal et appuyez sur Entrée pour lancer `wchisp`.
-3. L'assistant exécute ensuite `wchisp` (commande par défaut : `wchisp -d 30 -c ch32v20x flash ${KLIPPER_FIRMWARE_PATH:-.cache/klipper/out/klipper.bin}`) et affiche un message de confirmation en fin d'opération. Si le firmware est stocké ailleurs, exportez `KLIPPER_FIRMWARE_PATH` avant de lancer `python3 bmcu_tool.py`.
+Cette méthode est la plus fiable, notamment pour récupérer une carte qui ne répond plus.
 
-> 💡 Besoin d'un mode totalement non interactif ? Le script `./flash_automation.sh` reste disponible ; il applique les mêmes vérifications mais sans guidage étape par étape.
+### Matériel requis
 
-## 4. Variantes sans bouton BOOT / connecteur USB-C
+-   Un adaptateur USB vers Série/TTL (type CH340, FT232, etc.).
+-   Des câbles Dupont pour la connexion.
 
-Certaines cartes BMCU-C récentes sont dépourvues de bouton **BOOT0** et **RESET** et ne proposent qu'un connecteur USB-C pour le flash. La procédure ci-dessous reprend les étapes recommandées pour utiliser l'outil graphique **WCHISPTool** depuis Windows :
+### 1. Connexion matérielle
 
-1. **Lancez WCHISPTool.**
-2. **Configurez les paramètres** comme suit :
-   - *Chip Model* : `CH32V203`
-   - *Download Type* : `Serial Port`
-   - *DI – Baud Rate* : `1M`
-   - *User File* : sélectionnez le firmware `${KLIPPER_FIRMWARE_PATH:-.cache/klipper/out/klipper.bin}` généré à l'étape précédente.
-   - Cochez l'option **Serial Auto DI**.
-3. **Enchaînez les actions dans l'ordre suivant** jusqu'à obtenir un flash réussi : `Remove Protect` → `Download` → `Remove Protect` → `Download`.
-   - Il est normal que la première itération échoue ; le second passage aboutit généralement.
-4. **Terminez le flash** en redémarrant la carte avec le bouton `R`. Une LED rouge sur la carte mère confirme que le firmware est chargé.
+**🔥 ATTENTION : Ne connectez PAS le BMCU-C à l'imprimante pendant toute la durée de l'opération.**
 
-### Astuces de dépannage
+1.  **Reliez l'adaptateur USB-Série à la carte BMCU-C** en suivant ce schéma :
 
-- Maintenez le bouton **B** enfoncé pendant que vous cliquez sur **Download** si le flash refuse de démarrer.
-- Essayez de réduire le débit à `115200` bauds en cas d'échec répété.
-- Inversez les connexions **TX/RX** (TX↔TX, RX↔RX) selon la configuration de votre interface USB-C ↔ UART si nécessaire.
+| Port sur BMCU-C | Port sur l'adaptateur USB-Série |
+| :-------------: | :-----------------------------: |
+|       `R`       |               `TXD`             |
+|       `T`       |               `RXD`             |
+|       `+`       |               `3V3`             |
+|       `-`       |               `GND`             |
 
-⚠️ Évitez de brancher ou débrancher la BMCU pendant que l'imprimante est sous tension. Pour les tests, suivez la séquence : éteindre l'imprimante, connecter la BMCU, allumer l'imprimante, vérifier la détection de l'AMS, éteindre l'imprimante, puis déconnecter la BMCU.
+2.  **Connectez l'adaptateur USB-Série à votre PC Windows.** Le port COM devrait être détecté automatiquement. Si ce n'est pas le cas, installez les pilotes de votre adaptateur (ex: CH340).
 
-Ces indications complètent la méthode de flash automatique (`flash_automation.sh`) et doivent être utilisées lorsque la mise en mode bootloader physique n'est pas possible.
+### 2. Configuration de WCHISPTool
+
+1.  Lancez `WCHISPTool`.
+2.  Configurez les paramètres comme suit :
+    -   **Chip Model :** `CH32V203`
+    -   **Download Type :** `SerialPort`
+    -   **DI – Baud Rate :** `1M` (ou 1000000)
+    -   **SerialPort :** Sélectionnez le port COM de votre adaptateur.
+    -   **User File :** Cliquez sur "..." et sélectionnez votre fichier `klipper.bin`.
+
+### 3. Déverrouillage de la Puce (Étape cruciale)
+
+1.  **Maintenez le bouton `B` (Boot) enfoncé** sur la carte BMCU-C. Ne le relâchez pas.
+2.  Tout en maintenant `B`, **appuyez brièvement une fois sur le bouton `R` (Reset)**.
+3.  Toujours en maintenant `B`, cliquez sur le bouton **"Remove Protect"** dans WCHISPTool.
+4.  Si l'opération réussit, un message "Unlocked" en rouge apparaîtra dans l'outil. Vous pouvez alors relâcher le bouton `B`.
+
+> **Si ça échoue :** Vérifiez vos connexions. Parfois, inverser les fils TX et RX (`TX-TX`, `RX-RX`) peut fonctionner.
+
+### 4. Flashage du Firmware
+
+1.  Cliquez sur le bouton **"Download"** dans WCHISPTool.
+2.  La barre de progression devrait avancer. Une fois terminé, un message de succès s'affichera.
+
+### 5. Redémarrage
+
+1.  Appuyez une fois sur le bouton `R` (Reset) de la carte.
+2.  La LED rouge devrait s'allumer. Le flashage est terminé !
+
+---
+
+## Méthode 2 : Flashage via le port USB-C
+
+Cette méthode s'applique aux versions plus récentes de la carte équipées d'un port USB-C pour la communication.
+
+### 1. Connexion
+
+1.  Connectez la carte BMCU-C à votre PC Windows via son port USB-C.
+
+### 2. Configuration de WCHISPTool
+
+1.  Lancez `WCHISPTool`.
+2.  Configurez les paramètres comme suit :
+    -   **Chip Model :** `CH32V203`
+    -   **Download Type :** `SerialPort` (Oui, même en USB-C)
+    -   **DI – Baud Rate :** `1M`
+    -   **User File :** Sélectionnez votre fichier `klipper.bin`.
+    -   **Cochez l'option "Serial Auto DI"**.
+
+### 3. Séquence de flashage
+
+Cette méthode est moins manuelle mais peut nécessiter plusieurs tentatives.
+
+1.  Cliquez sur **"Remove Protect"**.
+2.  Cliquez immédiatement après sur **"Download"**.
+3.  Il est probable que des erreurs apparaissent lors du premier cycle. **Répétez la séquence "Remove Protect" -> "Download"** jusqu'à ce que le flashage réussisse (généralement au deuxième essai).
+
+Une fois le firmware transféré avec succès, débranchez et rebranchez la carte pour la redémarrer.
