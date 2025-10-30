@@ -98,11 +98,37 @@ class BuildManager:
         except subprocess.CalledProcessError as e:
             raise BuildManagerError(f"La commande `{' '.join(command)}` a échoué.") from e
 
-    def launch_menuconfig(self) -> None:
-        """Lance l'interface de configuration interactive `menuconfig`."""
+    def launch_menuconfig(self) -> bool:
+        """Lance `menuconfig` et détecte si la configuration a été sauvegardée.
+
+        Returns:
+            True si la configuration a été modifiée, False sinon.
+        """
         self.ensure_klipper_repo()
+        config_file = self.klipper_dir / ".config"
+
+        # Obtenir l'état initial du fichier de configuration
+        try:
+            initial_mtime = config_file.stat().st_mtime
+        except FileNotFoundError:
+            initial_mtime = None
+
         print("Lancement de l'interface de configuration de Klipper (menuconfig)...")
         self._run_interactive_command(["make", "menuconfig"], cwd=self.klipper_dir)
+
+        # Obtenir l'état final et comparer
+        try:
+            final_mtime = config_file.stat().st_mtime
+        except FileNotFoundError:
+            # Si le fichier n'existe toujours pas, aucune sauvegarde n'a eu lieu.
+            return False
+
+        if initial_mtime is None:
+            # Le fichier a été créé, donc il y a eu une sauvegarde.
+            return True
+
+        # Comparer le temps de modification pour voir s'il y a eu un changement.
+        return final_mtime > initial_mtime
 
     def save_config(self, name: str) -> Path:
         """Sauvegarde la configuration actuelle sous un nom donné."""
