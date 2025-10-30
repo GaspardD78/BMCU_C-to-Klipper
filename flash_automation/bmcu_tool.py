@@ -655,7 +655,6 @@ def find_default_firmware() -> Path | None:
     base_dir = Path(__file__).resolve().parent
     candidates = [
         base_dir / ".cache/firmware/klipper.bin",
-        base_dir / ".cache/klipper/out/klipper.bin",
         base_dir / "klipper.bin",
     ]
     for candidate in candidates:

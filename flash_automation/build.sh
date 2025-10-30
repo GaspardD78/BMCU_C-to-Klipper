@@ -1494,9 +1494,9 @@ if start_step "finalize"; then
     restore_repo_if_dirty
 
     if [[ "${FINAL_BIN_REUSED}" == "true" ]]; then
-        print_success "Binaire Klipper réutilisé : ${FINAL_BIN_PATH} (SHA256 ${FINAL_BIN_SHA:0:12})."
+        print_success "Binaire Klipper réutilisé : ${FIRMWARE_ARCHIVE_PATH} (SHA256 ${FINAL_BIN_SHA:0:12})."
     else
-        print_success "Firmware disponible : ${FINAL_BIN_PATH} (SHA256 ${FINAL_BIN_SHA:0:12})."
+        print_success "Firmware disponible : ${FIRMWARE_ARCHIVE_PATH} (SHA256 ${FINAL_BIN_SHA:0:12})."
     fi
 
     report_python_cache_status
