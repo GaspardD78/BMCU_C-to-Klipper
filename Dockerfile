@@ -22,7 +22,7 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Télécharger et installer le toolchain RISC-V pré-compilé
-RUN wget https://github.com/stnolting/riscv-gcc-prebuilt/releases/download/rv32e-231223/riscv32-unknown-elf.gcc-13.2.0.picolibc-1.8.6.tar.gz -O /tmp/riscv-toolchain.tar.gz && \
+RUN wget https://github.com/stnolting/riscv-gcc-prebuilt/releases/download/rv32e-231223/riscv32-unknown-elf.gcc-rve-13.2.0.tar.gz -O /tmp/riscv-toolchain.tar.gz && \
     mkdir -p /opt/riscv-toolchain && \
     tar -xvf /tmp/riscv-toolchain.tar.gz -C /opt/riscv-toolchain --strip-components=1 && \
     rm /tmp/riscv-toolchain.tar.gz
