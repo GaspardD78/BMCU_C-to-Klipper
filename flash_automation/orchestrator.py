@@ -130,8 +130,19 @@ def find_default_firmware() -> Path | None:
     return None
 
 
+import sys
+from importlib.metadata import version, PackageNotFoundError
+
+
+class PipInstallError(Exception):
+    """Exception pour les erreurs d'installation pip."""
+
+
 from .build_manager import BuildManager, BuildManagerError
 from .flash_manager import FlashManager, FlashManagerError
+
+
+__all__ = ["BuildManagerError", "FlashManagerError", "PipInstallError", "Orchestrator"]
 
 
 class Orchestrator:
@@ -142,23 +153,15 @@ class Orchestrator:
 
     def run_build(self) -> bool:
         """Lance le script de build et retourne le succès."""
-        try:
-            manager = BuildManager(self.base_dir)
-            manager.compile_firmware()
-            return True
-        except BuildManagerError as e:
-            print(f"\n--- ERREUR DE COMPILATION ---\n{e}")
-            return False
+        manager = BuildManager(self.base_dir)
+        manager.compile_firmware()
+        return True
 
     def run_flash(self, firmware_path: Path, serial_device: str) -> bool:
         """Lance le flash et retourne le succès."""
-        try:
-            manager = FlashManager(self.base_dir)
-            manager.flash("serial", firmware_path, serial_device)
-            return True
-        except FlashManagerError as e:
-            print(f"\n--- ERREUR DE FLASHAGE ---\n{e}")
-            return False
+        manager = FlashManager(self.base_dir)
+        manager.flash("serial", firmware_path, serial_device)
+        return True
 
     def get_system_dependencies(self) -> tuple[str | None, list[str], list[str]]:
         """Détecte le gestionnaire de paquets et retourne les dépendances."""
@@ -213,3 +216,49 @@ class Orchestrator:
             print(f"\nL'installation a échoué (code de sortie {e.returncode}).")
             print("Veuillez consulter les messages d'erreur ci-dessus.")
             return False
+
+    def get_python_dependencies(self) -> tuple[list[str], list[str]]:
+        """Vérifie les dépendances Python depuis requirements.txt."""
+        req_file = self.base_dir / "requirements.txt"
+        if not req_file.is_file():
+            return [], []
+
+        missing = []
+        required = []
+        with req_file.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+
+                # Extrait le nom du paquet (ex: "pyserial>=3.5" -> "pyserial")
+                pkg_name = line.split("==")[0].split(">=")[0].split("<=")[0].split("!=")[0].strip()
+                required.append(pkg_name)
+                try:
+                    version(pkg_name)
+                except PackageNotFoundError:
+                    missing.append(pkg_name)
+        return required, missing
+
+    def install_python_dependencies(self) -> None:
+        """Installe les dépendances depuis requirements.txt."""
+        req_file = self.base_dir / "requirements.txt"
+        if not req_file.is_file():
+            print("Fichier requirements.txt introuvable.")
+            return
+
+        command = [sys.executable, "-m", "pip", "install", "-r", str(req_file)]
+        try:
+            subprocess.run(
+                command, check=True, capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
+            )
+        except FileNotFoundError as e:
+            raise PipInstallError("La commande 'pip' est introuvable. Assurez-vous que Python et pip sont correctement installés.") from e
+        except subprocess.CalledProcessError as e:
+            error_message = (
+                f"La commande `{' '.join(command)}` a échoué (code {e.returncode}).\n"
+                f"--- STDOUT ---\n{e.stdout}\n"
+                f"--- STDERR ---\n{e.stderr}"
+            )
+            raise PipInstallError(error_message) from e
