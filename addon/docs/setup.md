@@ -9,7 +9,7 @@ Ce document décrit **l'unique procédure** nécessaire pour mettre en service l
 - Happy Hare installé sur l'imprimante. Si besoin, suivez la documentation officielle :
   - Klipper : <https://www.klipper3d.org/Installation.html>
   - Happy Hare : <https://github.com/moggieuk/Happy-Hare>
-- Un BMCU-C déjà flashé avec Klipper. Si nécessaire, suivez la procédure décrite dans [`flash_automation/docs/flash_procedure.md`](../../flash_automation/docs/flash_procedure.md).
+- Un BMCU-C déjà flashé avec Klipper. Si nécessaire, suivez la procédure décrite dans le **[guide de flashage principal](../../flash_automation/docs/flash_procedure.md)**.
 
 ## 2. Récupérer les fichiers de l'addon
 
