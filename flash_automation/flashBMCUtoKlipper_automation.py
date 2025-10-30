@@ -464,7 +464,16 @@ def step_initialisation(args: argparse.Namespace, context: ExecutionContext) -> 
 
     context.stop_controller.raise_if_requested()
 
-    for command in args.required_commands:
+    required_commands = list(args.required_commands)
+    if context.dry_run:
+        # En mode dry-run, on ignore les dépendances liées à l'exécution distante.
+        dry_run_skippable = ["ipmitool", "sshpass", "scp", "ping"]
+        for cmd_to_skip in dry_run_skippable:
+            if cmd_to_skip in required_commands:
+                logging.debug("Mode test à blanc : la vérification de '%s' est ignorée", cmd_to_skip)
+                required_commands.remove(cmd_to_skip)
+
+    for command in required_commands:
         ensure_command_available(step_label, command)
 
     for module in args.required_modules:
