@@ -262,7 +262,20 @@ def run_build_flow(orchestrator: Orchestrator):
 
         if selection == 0:
             try:
-                build_manager.launch_menuconfig()
+                if build_manager.launch_menuconfig():
+                    print(colorize("Configuration sauvegardée avec succès.", Colors.OKGREEN))
+                else:
+                    warning_message = """
+                    /!\\ La configuration n'a pas été sauvegardée.
+
+                    Pour sauvegarder vos changements dans menuconfig, vous devez :
+                      1. Appuyer sur la touche 'S' pour sauvegarder.
+                      2. Confirmer le nom du fichier (.config).
+                      3. Appuyer sur 'Q' ou 'Echap' pour quitter.
+                    """
+                    print_block(colorize(warning_message, Colors.WARNING))
+                    input("Appuyez sur Entrée pour continuer...")
+
             except BuildManagerError as e:
                 print(colorize(f"Erreur: {e}", Colors.FAIL))
         elif selection == 1:
