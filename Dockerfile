@@ -30,6 +30,10 @@ RUN wget https://github.com/stnolting/riscv-gcc-prebuilt/releases/download/rv32e
 # Ajouter le toolchain au PATH
 ENV PATH="/opt/riscv-toolchain/bin:${PATH}"
 
+# Débogage : Afficher le PATH et le contenu du répertoire bin
+RUN echo "PATH is: $PATH"
+RUN ls -la /opt/riscv-toolchain/bin
+
 # Créer un répertoire de travail pour l'application
 WORKDIR /app
 
