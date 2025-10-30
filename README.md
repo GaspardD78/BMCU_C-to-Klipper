@@ -154,6 +154,11 @@ Un script unique `run_tests.sh` gère tout le processus pour vous.
     ./run_tests.sh
     ```
 
+    > **⚠️ Note pour les utilisateurs Windows :**
+    > Le script `run_tests.sh` doit être exécuté dans un terminal qui interprète les commandes `bash`. Si vous double-cliquez dessus ou l'exécutez depuis une invite de commande standard (`cmd.exe`), Windows pourrait essayer de l'ouvrir avec Python, ce qui causerait une `SyntaxError`.
+    >
+    > **Solution :** Lancez le script depuis un terminal comme **Git Bash** (inclus avec Git pour Windows) ou depuis le **Sous-système Windows pour Linux (WSL)**.
+
 Le script va automatiquement :
 - Construire une image Docker contenant toutes les dépendances (compilateur, Klipper, etc.).
 - Lancer un conteneur temporaire.
