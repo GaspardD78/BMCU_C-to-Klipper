@@ -232,8 +232,9 @@ def run_python_dependency_check(orchestrator: Orchestrator):
                     orchestrator.install_python_dependencies()
                 print(colorize("Installation terminée avec succès !", Colors.OKGREEN))
             except PipInstallError as e:
+                error_title = colorize("Erreur d'installation pip", Colors.FAIL)
                 print_block(
-                    f'{colorize("Erreur d\'installation pip", Colors.FAIL)}\n'
+                    f"{error_title}\n"
                     "L'installation a échoué. Voici les détails :\n"
                     f"--------------------------------------------------\n{e}\n"
                     "--------------------------------------------------"
@@ -255,8 +256,9 @@ def run_build_flow(orchestrator: Orchestrator):
             orchestrator.run_build()
         print(colorize("Build terminé.", Colors.OKGREEN))
     except BuildManagerError as e:
+        error_title = colorize("Rapport d'erreur de compilation", Colors.FAIL)
         print_block(
-            f'{colorize("Rapport d\'erreur de compilation", Colors.FAIL)}\n'
+            f"{error_title}\n"
             "La compilation a échoué. Voici les détails de l'erreur :\n"
             f"--------------------------------------------------\n{e}\n"
             "--------------------------------------------------"
@@ -304,8 +306,9 @@ def run_flash_flow(orchestrator: Orchestrator, profile: QuickProfile):
             orchestrator.run_flash(firmware_path, serial_device)
         print(colorize("\nFlash terminé avec succès !", f"{Colors.BOLD}{Colors.OKGREEN}"))
     except FlashManagerError as e:
+        error_title = colorize("Rapport d'erreur de flashage", Colors.FAIL)
         print_block(
-            f'{colorize("Rapport d\'erreur de flashage", Colors.FAIL)}\n'
+            f"{error_title}\n"
             "Le flashage a échoué. Voici les détails de l'erreur :\n"
             f"--------------------------------------------------\n{e}\n"
             "--------------------------------------------------"
