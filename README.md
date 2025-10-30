@@ -125,17 +125,40 @@ Il existe plusieurs variantes matérielles du BMCU-C (avec port série UART, ave
 
 ---
 
-## 🧪 Tests automatisés
+## 🧪 Tests automatisés (avec Docker)
 
-Le projet inclut une suite de tests pour garantir la qualité du code. Pour les lancer :
+Pour garantir que les tests s'exécutent dans un environnement propre, reproductible et proche de la configuration cible (Linux, Klipper, dépendances système), le projet utilise **Docker**.
 
-```bash
-# Installez pytest
-pip install pytest
+Cette approche assure que les résultats des tests sont fiables, que vous soyez sur Windows, macOS ou Linux.
 
-# Lancez les tests
-python3 -m pytest
-```
+### Prérequis
+
+1.  **Installez Docker** : Suivez les instructions officielles pour votre système d'exploitation.
+    - [Docker Desktop pour Windows](https://docs.docker.com/desktop/install/windows-install/)
+    - [Docker Desktop pour macOS](https://docs.docker.com/desktop/install/mac-install/)
+    - [Docker Engine pour Linux](https://docs.docker.com/engine/install/)
+
+2.  **Assurez-vous que le service Docker est en cours d'exécution** avant de lancer les tests.
+
+### Lancer la suite de tests
+
+Un script unique `run_tests.sh` gère tout le processus pour vous.
+
+1.  **Assurez-vous que le script est exécutable :**
+    ```bash
+    chmod +x run_tests.sh
+    ```
+
+2.  **Lancez le script depuis la racine du projet :**
+    ```bash
+    ./run_tests.sh
+    ```
+
+Le script va automatiquement :
+- Construire une image Docker contenant toutes les dépendances (compilateur, Klipper, etc.).
+- Lancer un conteneur temporaire.
+- Y exécuter la suite de tests `pytest`.
+- Afficher les résultats et se nettoyer.
 
 ---
 
