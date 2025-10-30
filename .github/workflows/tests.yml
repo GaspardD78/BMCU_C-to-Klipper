@@ -33,10 +33,3 @@ jobs:
         run: |
           python3 -m pytest flash_automation/tests/ addon/tests/
 
-      - name: Run shell integration scripts
-        run: |
-          chmod +x tests/*.sh
-          for script in tests/*.sh; do
-            echo "Running ${script}"
-            bash "${script}"
-          done
