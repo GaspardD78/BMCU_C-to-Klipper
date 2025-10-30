@@ -99,6 +99,15 @@ class BuildManager:
         except subprocess.CalledProcessError as e:
             raise BuildManagerError(f"La commande `{' '.join(command)}` a échoué.") from e
 
+    def _apply_klipper_overrides(self) -> None:
+        """Applique les fichiers spécifiques au projet sur le dépôt Klipper."""
+        print("Application des surcharges Klipper pour le CH32V20X...")
+        overrides_src = self.base_dir / "klipper_overrides"
+        if not overrides_src.exists():
+            print("Avertissement : Le répertoire des surcharges Klipper n'a pas été trouvé.")
+            return
+        shutil.copytree(overrides_src, self.klipper_dir, dirs_exist_ok=True)
+
     def launch_menuconfig(self) -> bool:
         """Lance `menuconfig` et détecte si la configuration a été sauvegardée.
 
@@ -160,6 +169,7 @@ class BuildManager:
         """Compile le firmware et retourne le chemin vers le binaire."""
         print("Compilation du firmware Klipper...")
         self.ensure_klipper_repo()
+        self._apply_klipper_overrides()
 
         if use_default_config:
             config_src = self.base_dir / "klipper.config"
