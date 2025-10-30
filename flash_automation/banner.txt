@@ -1,12 +1,8 @@
-# --- Définition des codes de couleur ANSI ---
-# Vous pouvez les réutiliser ailleurs dans votre script.
 M = '\033[95m' # Magenta vif
 C = '\033[96m' # Cyan vif
 W = '\033[1;97m' # Blanc (Gras)
 R = '\033[0m'  # Reset (pour revenir à la couleur par défaut)
 
-# --- Le logo en ASCII Art ---
-# Utilisation d'une f-string multiligne pour une lecture facile
 logo_art = f"""
 {M}╔══════════════════════════════════════════════════════════╗{R}
 {M}║ {C}=={M}({C}O{M})={C}.. {M}.-{C}/\{M}.{C}\/{M}-. {C}..={M}({C}O{M})=={C} ║{R}
