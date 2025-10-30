@@ -82,9 +82,12 @@ def test_run_build_failure(mock_build_manager_class, orchestrator: Orchestrator)
         orchestrator.run_build()
 
 
+@patch("subprocess.run")
 @patch("flash_automation.orchestrator.FlashManager")
-def test_run_flash_success(mock_flash_manager_class, orchestrator: Orchestrator, tmp_path: Path):
-    """Vérifie que run_flash appelle correctement le FlashManager."""
+def test_run_flash_success_manages_service(
+    mock_flash_manager_class, mock_run, orchestrator: Orchestrator, tmp_path: Path
+):
+    """Vérifie que run_flash arrête et redémarre le service Klipper en cas de succès."""
     firmware_path = tmp_path / "klipper.bin"
     firmware_path.touch()
     serial_device = "/dev/ttyACM0"
@@ -98,10 +101,19 @@ def test_run_flash_success(mock_flash_manager_class, orchestrator: Orchestrator,
     mock_flash_manager_class.assert_called_once_with(orchestrator.base_dir)
     mock_manager.flash.assert_called_once_with("serial", firmware_path, serial_device)
 
+    # Vérifie les appels à systemctl
+    call_args_list = mock_run.call_args_list
+    assert len(call_args_list) == 2
+    assert call_args_list[0].args[0] == ["sudo", "systemctl", "stop", "klipper.service"]
+    assert call_args_list[1].args[0] == ["sudo", "systemctl", "start", "klipper.service"]
 
+
+@patch("subprocess.run")
 @patch("flash_automation.orchestrator.FlashManager")
-def test_run_flash_failure(mock_flash_manager_class, orchestrator: Orchestrator, tmp_path: Path):
-    """Vérifie la gestion d'erreur si le flash échoue."""
+def test_run_flash_failure_still_restarts_service(
+    mock_flash_manager_class, mock_run, orchestrator: Orchestrator, tmp_path: Path
+):
+    """Vérifie que le service Klipper est redémarré même si le flashage échoue."""
     firmware_path = tmp_path / "klipper.bin"
     firmware_path.touch()
     serial_device = "/dev/ttyACM0"
@@ -112,6 +124,12 @@ def test_run_flash_failure(mock_flash_manager_class, orchestrator: Orchestrator,
 
     with pytest.raises(FlashManagerError, match="Flash failed"):
         orchestrator.run_flash(firmware_path, serial_device)
+
+    # Vérifie que les appels à systemctl ont bien eu lieu
+    call_args_list = mock_run.call_args_list
+    assert len(call_args_list) == 2
+    assert call_args_list[0].args[0] == ["sudo", "systemctl", "stop", "klipper.service"]
+    assert call_args_list[1].args[0] == ["sudo", "systemctl", "start", "klipper.service"]
 
 
 @patch("flash_automation.orchestrator.read_os_release", return_value={"ID": "debian"})
@@ -186,3 +204,32 @@ def test_install_python_dependencies(mock_subprocess_run, orchestrator: Orchestr
     mock_subprocess_run.assert_called_once()
     called_cmd = mock_subprocess_run.call_args[0][0]
     assert called_cmd == expected_cmd
+
+
+@patch("flash_automation.orchestrator.FlashManager")
+def test_get_system_status(mock_flash_manager_class, orchestrator: Orchestrator, tmp_path: Path):
+    """Vérifie que get_system_status collecte correctement l'état du système."""
+    # Scénario 1: Tout est présent
+    orchestrator.klipper_dir.mkdir(parents=True)
+    (orchestrator.klipper_dir / "out").mkdir()
+    orchestrator.firmware_path.touch()
+    mock_flash_manager = MagicMock()
+    mock_flash_manager.detect_serial_devices.return_value = ["/dev/ttyACM0"]
+    mock_flash_manager_class.return_value = mock_flash_manager
+
+    status1 = orchestrator.get_system_status()
+    assert status1.klipper_repo_exists is True
+    assert status1.firmware_exists is True
+    assert status1.detected_devices == ["/dev/ttyACM0"]
+
+    # Scénario 2: Firmware manquant
+    orchestrator.firmware_path.unlink()
+    status2 = orchestrator.get_system_status()
+    assert status2.firmware_exists is False
+
+    # Scénario 3: Dépôt manquant (implique firmware manquant)
+    import shutil
+    shutil.rmtree(orchestrator.klipper_dir)
+    status3 = orchestrator.get_system_status()
+    assert status3.klipper_repo_exists is False
+    assert status3.firmware_exists is False
