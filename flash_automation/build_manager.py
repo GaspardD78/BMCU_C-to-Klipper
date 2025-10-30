@@ -100,13 +100,32 @@ class BuildManager:
             raise BuildManagerError(f"La commande `{' '.join(command)}` a échoué.") from e
 
     def _apply_klipper_overrides(self) -> None:
-        """Applique les fichiers spécifiques au projet sur le dépôt Klipper."""
+        """Applique les fichiers et patchs spécifiques au projet sur le dépôt Klipper."""
         print("Application des surcharges Klipper pour le CH32V20X...")
         overrides_src = self.base_dir / "klipper_overrides"
         if not overrides_src.exists():
             print("Avertissement : Le répertoire des surcharges Klipper n'a pas été trouvé.")
             return
+
+        # Copier les fichiers sources (écrase les fichiers existants)
         shutil.copytree(overrides_src, self.klipper_dir, dirs_exist_ok=True)
+
+        # Appliquer les patchs nécessaires
+        patches = ["Makefile.patch", "src/Kconfig.patch"]
+        for patch_name in patches:
+            patch_path = overrides_src / patch_name
+            if patch_path.exists():
+                print(f"Application du patch : {patch_name}...")
+                try:
+                    self._run_command(["git", "apply", str(patch_path)], cwd=self.klipper_dir)
+                except BuildManagerError as e:
+                    # Ignorer l'erreur si le patch a déjà été appliqué
+                    if "patch has already been applied" in e.args[0]:
+                        print(f"Le patch {patch_name} a déjà été appliqué.")
+                    else:
+                        raise
+            else:
+                print(f"Avertissement : Patch '{patch_path}' non trouvé.")
 
     def launch_menuconfig(self) -> bool:
         """Lance `menuconfig` et détecte si la configuration a été sauvegardée.
@@ -180,9 +199,12 @@ class BuildManager:
             shutil.copy(config_src, config_dest)
 
         print("Nettoyage de l'environnement de compilation...")
+        self._run_command(["make", "clean"], cwd=self.klipper_dir)
+        # Forcer la suppression du répertoire 'out' au cas où 'make clean'
+        # ne serait pas suffisant, en ignorant les erreurs de permission.
         out_dir = self.klipper_dir / "out"
         if out_dir.exists():
-            shutil.rmtree(out_dir)
+            shutil.rmtree(out_dir, ignore_errors=True)
 
         print("Préparation de la configuration Klipper...")
         self._run_command(["make", "olddefconfig"], cwd=self.klipper_dir)
