@@ -18,6 +18,21 @@ EXIT_COMMAND = b"exit-audit"
 # Nom du répertoire du projet à nettoyer
 PROJECT_DIR_NAME = "BMCU_C-to-Klipper"
 
+def run_command(command):
+    """Exécute une commande shell et retourne sa sortie ou un message d'erreur."""
+    try:
+        result = subprocess.check_output(
+            command,
+            shell=True,
+            text=True,
+            stderr=subprocess.PIPE
+        )
+        return result.strip()
+    except subprocess.CalledProcessError as e:
+        return f"Erreur lors de l'exécution de '{command}':\\n{e.stderr.strip()}"
+    except FileNotFoundError:
+        return f"Erreur: La commande '{command.split()[0]}' n'a pas été trouvée."
+
 def get_system_info():
     """
     Collecte les informations système et d'environnement.
@@ -26,19 +41,26 @@ def get_system_info():
     info.append("=" * 20 + " RAPPORT D'AUDIT DE SESSION " + "=" * 20)
     info.append(f"Début de la session: {datetime.datetime.now().isoformat()}")
     info.append(f"Système d'exploitation: {platform.platform()}")
+    info.append(f"Architecture CPU: {platform.machine()}")
     info.append(f"Version de Python: {sys.version.replace(os.linesep, ' ')}")
 
+    # --- Informations système étendues ---
+    info.append("\n--- Informations CPU ---")
+    info.append(run_command("lscpu"))
+
+    info.append("\n--- Utilisation de la Mémoire ---")
+    info.append(run_command("free -h"))
+
+    info.append("\n--- Utilisation du Disque ---")
+    info.append(run_command("df -h"))
+
+    info.append("\n--- État du Dépôt Git ---")
+    info.append(run_command("git status --short"))
+    info.append(run_command("git log -n 1 --pretty=format:'%H (%an, %ar): %s'"))
+
     # Collecte des paquets pip installés
-    try:
-        pip_list = subprocess.check_output(
-            [sys.executable, "-m", "pip", "list", "--format=freeze"],
-            text=True,
-            stderr=subprocess.PIPE
-        )
-        info.append("\n--- Paquets Pip Installés ---")
-        info.append(pip_list)
-    except subprocess.CalledProcessError as e:
-        info.append(f"\n--- Erreur lors de la récupération des paquets pip ---\n{e.stderr}")
+    info.append("\n--- Paquets Pip Installés ---")
+    info.append(run_command(f"{sys.executable} -m pip list --format=freeze"))
 
     # Collecte des variables d'environnement
     info.append("\n--- Variables d'Environnement ---")
@@ -171,13 +193,27 @@ def start_audit():
             print(f"\nSession d'audit terminée.")
             print(f"Rapport sauvegardé dans : {final_log_path}")
 
-            # Suppression du répertoire du projet
-            print(f"Nettoyage du répertoire du projet : {project_path}...")
-            try:
-                shutil.rmtree(project_path)
-                print("Répertoire du projet supprimé avec succès.")
-            except Exception as e:
-                print(f"Une erreur est survenue lors du nettoyage : {e}", file=sys.stderr)
+            # Rendre le nettoyage optionnel
+            while True:
+                try:
+                    answer = input(f"\\nSouhaitez-vous supprimer le répertoire du projet '{project_path}'? [oui/non]: ").lower()
+                    if answer in ["oui", "o"]:
+                        print("Suppression du répertoire du projet...")
+                        shutil.rmtree(project_path)
+                        print("Répertoire du projet supprimé avec succès.")
+                        break
+                    elif answer in ["non", "n"]:
+                        print("Le nettoyage a été annulé. Le répertoire du projet est conservé.")
+                        break
+                    else:
+                        print("Réponse non valide. Veuillez entrer 'oui' ou 'non'.")
+                except EOFError:
+                    # Gère le cas où le script est exécuté dans un contexte non interactif
+                    print("\\nImpossible de lire l'entrée. Le nettoyage est annulé par défaut.")
+                    break
+                except Exception as e:
+                    print(f"Une erreur est survenue lors de la tentative de nettoyage : {e}", file=sys.stderr)
+                    break
 
 if __name__ == "__main__":
     start_audit()
