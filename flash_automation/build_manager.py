@@ -52,14 +52,15 @@ class BuildManager:
                 f"Le fichier de configuration '{config_path}' est manquant, invalide ou incomplet."
             ) from e
 
-    def _run_command(self, command: list[str], *, cwd: Path) -> None:
+    def _run_command(self, command: list[str], *, cwd: Path) -> subprocess.CompletedProcess:
         """Exécute une commande et lève une exception détaillée en cas d'échec."""
         try:
-            subprocess.run(
+            return subprocess.run(
                 command,
                 cwd=cwd,
                 check=True,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
@@ -174,11 +175,18 @@ class BuildManager:
             shutil.rmtree(out_dir)
 
         print("Lancement de la compilation...")
-        self._run_command(["make"], cwd=self.klipper_dir)
+        make_process = self._run_command(["make"], cwd=self.klipper_dir)
 
         firmware_path = self.klipper_dir / "out/klipper.bin"
         if not firmware_path.exists():
-            raise FileNotFoundError("Le binaire du firmware n'a pas été trouvé après la compilation.")
+            error_details = (
+                "Le binaire du firmware n'a pas été trouvé après la compilation, "
+                "même si la commande 'make' s'est terminée sans erreur.\n"
+                "Ceci indique un problème probable avec la chaîne de compilation (cross-compiler).\n\n"
+                f"--- STDOUT ---\n{make_process.stdout}\n"
+                f"--- STDERR ---\n{make_process.stderr}"
+            )
+            raise BuildManagerError(error_details)
 
         print(f"Firmware compilé avec succès : {firmware_path}")
         return firmware_path
