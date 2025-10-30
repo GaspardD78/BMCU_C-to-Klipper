@@ -27,11 +27,36 @@ import glob
 import subprocess
 from pathlib import Path
 
+class FlashManagerError(Exception):
+    """Exception spécifique pour les erreurs de flashage."""
+
+
 class FlashManager:
     """Orchestre le flashage du firmware Klipper."""
 
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir
+
+    def _run_command(self, command: list[str]) -> None:
+        """Exécute une commande et lève une exception détaillée en cas d'échec."""
+        try:
+            subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except FileNotFoundError as e:
+            raise FlashManagerError(f"La commande '{command[0]}' est introuvable. Est-elle installée et dans le PATH ?") from e
+        except subprocess.CalledProcessError as e:
+            error_message = (
+                f"La commande `{' '.join(command)}` a échoué (code {e.returncode}).\n"
+                f"--- STDOUT ---\n{e.stdout}\n"
+                f"--- STDERR ---\n{e.stderr}"
+            )
+            raise FlashManagerError(error_message) from e
 
     def detect_serial_devices(self) -> list[str]:
         """Détecte les périphériques série disponibles."""
@@ -58,17 +83,20 @@ class FlashManager:
     def flash_serial(self, firmware_path: Path, device: str | None) -> None:
         """Flashe le firmware en utilisant la méthode série (flash_usb.py)."""
         if not device:
-            raise ValueError("Un périphérique série est requis pour la méthode de flash série.")
+            raise FlashManagerError("Un périphérique série est requis pour la méthode de flash série.")
 
-        flash_script = self.base_dir / ".cache/scripts/flash_usb.py"
+        # Le script flash_usb.py est un artefact généré par la compilation de Klipper.
+        flash_script = self.base_dir / ".cache/klipper/lib/flash_usb.py"
         if not flash_script.exists():
-            raise FileNotFoundError(f"Le script de flash {flash_script} est introuvable. Veuillez d'abord compiler le firmware.")
+            raise FlashManagerError(
+                f"Le script de flash '{flash_script}' est introuvable.\n"
+                "Ce fichier est généré lors de la compilation de Klipper. "
+                "Veuillez compiler le firmware avant de tenter de flasher."
+            )
 
-        print(f"Flashage de {firmware_path} sur {device} en utilisant {flash_script}...")
-        subprocess.run(
-            ["python3", str(flash_script), "-d", device, "-f", str(firmware_path)],
-            check=True
-        )
+        print(f"Flashage de '{firmware_path.name}' sur '{device}'...")
+        command = ["python3", str(flash_script), "-d", device, "-f", str(firmware_path)]
+        self._run_command(command)
 
 if __name__ == "__main__":
     manager = FlashManager(Path(__file__).resolve().parent)

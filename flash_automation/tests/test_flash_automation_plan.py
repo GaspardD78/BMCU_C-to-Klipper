@@ -51,6 +51,9 @@ def test_build_manager_compiles_firmware(tmp_path, monkeypatch):
     make_stub.write_text("#!/bin/sh\necho 'make stub' >&2\n")
     make_stub.chmod(0o755)
 
+    # Crée un faux config.json
+    (tmp_path / "config.json").write_text('{"klipper": {"repository_url": "dummy", "git_ref": "dummy"}}')
+
     manager = BuildManager(tmp_path)
     manager.klipper_dir = tmp_path / "klipper"
     manager.klipper_dir.mkdir()
@@ -80,10 +83,10 @@ def test_flash_manager_flashes_serial(tmp_path, monkeypatch):
 
     manager = FlashManager(tmp_path)
 
-    # Crée un faux script flash_usb.py
-    scripts_dir = tmp_path / ".cache/scripts"
-    scripts_dir.mkdir(parents=True)
-    flash_script = scripts_dir / "flash_usb.py"
+    # Crée un faux script flash_usb.py au nouvel emplacement attendu
+    klipper_lib_dir = tmp_path / ".cache/klipper/lib"
+    klipper_lib_dir.mkdir(parents=True)
+    flash_script = klipper_lib_dir / "flash_usb.py"
     flash_script.write_text("#!/bin/sh\necho 'flash_usb stub' >&2\n")
 
     firmware = tmp_path / "klipper.bin"

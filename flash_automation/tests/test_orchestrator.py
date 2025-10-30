@@ -46,11 +46,34 @@ def test_run_build_success(mock_build_manager_class, orchestrator: Orchestrator)
     mock_manager.compile_firmware.assert_called_once()
 
 
+from flash_automation.orchestrator import Orchestrator, BuildManagerError, FlashManagerError
+
+
+@pytest.fixture
+def orchestrator(tmp_path: Path) -> Orchestrator:
+    """Crée une instance de l'Orchestrator pour les tests."""
+    (tmp_path / "config.json").write_text('{"klipper": {"repository_url": "dummy", "git_ref": "dummy"}}')
+    return Orchestrator(tmp_path)
+
+
+@patch("flash_automation.orchestrator.BuildManager")
+def test_run_build_success(mock_build_manager_class, orchestrator: Orchestrator):
+    """Vérifie que run_build appelle correctement le BuildManager."""
+    mock_manager = MagicMock()
+    mock_build_manager_class.return_value = mock_manager
+
+    result = orchestrator.run_build()
+
+    assert result is True
+    mock_build_manager_class.assert_called_once_with(orchestrator.base_dir)
+    mock_manager.compile_firmware.assert_called_once()
+
+
 @patch("flash_automation.orchestrator.BuildManager")
 def test_run_build_failure(mock_build_manager_class, orchestrator: Orchestrator):
     """Vérifie la gestion d'erreur si le build échoue."""
     mock_manager = MagicMock()
-    mock_manager.compile_firmware.side_effect = subprocess.CalledProcessError(1, "cmd")
+    mock_manager.compile_firmware.side_effect = BuildManagerError("Build failed")
     mock_build_manager_class.return_value = mock_manager
 
     result = orchestrator.run_build()
@@ -83,7 +106,7 @@ def test_run_flash_failure(mock_flash_manager_class, orchestrator: Orchestrator,
     serial_device = "/dev/ttyACM0"
 
     mock_manager = MagicMock()
-    mock_manager.flash.side_effect = ValueError("Flash failed")
+    mock_manager.flash.side_effect = FlashManagerError("Flash failed")
     mock_flash_manager_class.return_value = mock_manager
 
     result = orchestrator.run_flash(firmware_path, serial_device)
@@ -95,17 +118,20 @@ def test_run_flash_failure(mock_flash_manager_class, orchestrator: Orchestrator,
 @patch("subprocess.run")
 def test_get_system_dependencies(mock_subprocess_run, mock_read_os, orchestrator: Orchestrator):
     """Vérifie la détection des dépendances manquantes."""
-    # Simule que 'git' est installé (code 0) et 'make' est manquant (code 1)
-    def side_effect(*args, **kwargs):
-        cmd = args[0]
-        if "dpkg -s git" in " ".join(cmd):
+    def side_effect(cmd, **kwargs):
+        # La commande est une liste, ex: ['dpkg', '-s', 'git']
+        pkg = cmd[2]
+        if pkg == 'git':
+            # Simule que 'git' est installé
             return MagicMock(returncode=0)
+        # Simule que tous les autres paquets sont manquants
         return MagicMock(returncode=1)
 
     mock_subprocess_run.side_effect = side_effect
 
-    _, missing = orchestrator.get_system_dependencies()
+    pm, _, missing = orchestrator.get_system_dependencies()
 
+    assert pm == "apt"
     assert "git" not in missing
     assert "make" in missing
     assert "ipmitool" in missing
@@ -117,7 +143,7 @@ def test_install_system_dependencies_success(mock_subprocess_run, orchestrator: 
     mock_subprocess_run.return_value = MagicMock(returncode=0)
     packages = ["git", "make"]
 
-    result = orchestrator.install_system_dependencies(packages)
+    result = orchestrator.install_system_dependencies("apt", packages)
 
     assert result is True
     mock_subprocess_run.assert_called_once_with(
