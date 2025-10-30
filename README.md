@@ -44,22 +44,22 @@ L'outil `bmcu_tool.py` est le **point d'entrée unique** pour toutes les opérat
 
 ### Lancement rapide
 
-1.  **Clonez le dépôt et naviguez dans le bon dossier :**
+1.  **Clonez le dépôt et placez-vous à la racine :**
     ```bash
     git clone https://github.com/GaspardD78/BMCU_C-to-Klipper.git
-    cd BMCU_C-to-Klipper/flash_automation
+    cd BMCU_C-to-Klipper
     ```
 
 2.  **Préparez l'environnement Python (une seule fois) :**
     ```bash
     python3 -m venv .venv
     source .venv/bin/activate
-    pip install -r requirements.txt
+    pip install -r flash_automation/requirements.txt
     ```
 
-3.  **Lancez l'outil principal :**
+3.  **Lancez l'outil principal (en tant que module) :**
     ```bash
-    python3 bmcu_tool.py
+    python3 -m flash_automation.bmcu_tool
     ```
 
 ### Utilisation du menu
