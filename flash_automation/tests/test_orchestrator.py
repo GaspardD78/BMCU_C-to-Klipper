@@ -19,8 +19,10 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from importlib.metadata import PackageNotFoundError
 
 import pytest
 
@@ -76,9 +78,8 @@ def test_run_build_failure(mock_build_manager_class, orchestrator: Orchestrator)
     mock_manager.compile_firmware.side_effect = BuildManagerError("Build failed")
     mock_build_manager_class.return_value = mock_manager
 
-    result = orchestrator.run_build()
-
-    assert result is False
+    with pytest.raises(BuildManagerError, match="Build failed"):
+        orchestrator.run_build()
 
 
 @patch("flash_automation.orchestrator.FlashManager")
@@ -109,9 +110,8 @@ def test_run_flash_failure(mock_flash_manager_class, orchestrator: Orchestrator,
     mock_manager.flash.side_effect = FlashManagerError("Flash failed")
     mock_flash_manager_class.return_value = mock_manager
 
-    result = orchestrator.run_flash(firmware_path, serial_device)
-
-    assert result is False
+    with pytest.raises(FlashManagerError, match="Flash failed"):
+        orchestrator.run_flash(firmware_path, serial_device)
 
 
 @patch("flash_automation.orchestrator.read_os_release", return_value={"ID": "debian"})
@@ -149,3 +149,40 @@ def test_install_system_dependencies_success(mock_subprocess_run, orchestrator: 
     mock_subprocess_run.assert_called_once_with(
         "sudo apt install -y git make", shell=True, check=True
     )
+
+
+def test_get_python_dependencies(orchestrator: Orchestrator, tmp_path: Path):
+    """Vérifie la détection des dépendances Python."""
+    req_file = tmp_path / "requirements.txt"
+    req_file.write_text("pyserial>=3.5\n# Commentaire\ninvalid-package-name\n")
+
+    # On simule que 'pyserial' est installé mais pas 'invalid-package-name'
+    with patch("flash_automation.orchestrator.version") as mock_version:
+        def side_effect(pkg):
+            if pkg == "pyserial":
+                return "3.5"
+            raise PackageNotFoundError
+        mock_version.side_effect = side_effect
+
+        _, missing = orchestrator.get_python_dependencies()
+
+        assert "pyserial" not in missing
+        assert "invalid-package-name" in missing
+
+
+@patch("subprocess.run")
+def test_install_python_dependencies(mock_subprocess_run, orchestrator: Orchestrator, tmp_path: Path):
+    """Vérifie que `pip install` est appelé correctement."""
+    # Crée un faux fichier requirements.txt
+    (tmp_path / "requirements.txt").write_text("pyserial>=3.5\n")
+    mock_subprocess_run.return_value = MagicMock(returncode=0)
+
+    orchestrator.install_python_dependencies()
+
+    expected_cmd = [
+        sys.executable, "-m", "pip", "install", "-r",
+        str(orchestrator.base_dir / "requirements.txt")
+    ]
+    mock_subprocess_run.assert_called_once()
+    called_cmd = mock_subprocess_run.call_args[0][0]
+    assert called_cmd == expected_cmd

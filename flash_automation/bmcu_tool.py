@@ -33,6 +33,9 @@ from .orchestrator import (
     EnvironmentDefaults,
     find_default_firmware,
     Orchestrator,
+    BuildManagerError,
+    FlashManagerError,
+    PipInstallError,
 )
 from .flash_manager import FlashManager
 
@@ -211,6 +214,35 @@ def run_dependency_check(orchestrator: Orchestrator):
 
     input("\nAppuyez sur Entrée pour continuer...")
 
+def run_python_dependency_check(orchestrator: Orchestrator):
+    """Vérifie et propose d'installer les dépendances Python."""
+    print_block(colorize("Vérification des dépendances Python (pip)...", Colors.HEADER))
+    _, missing = orchestrator.get_python_dependencies()
+
+    if not missing:
+        print(colorize("Toutes les dépendances Python semblent déjà installées.", Colors.OKGREEN))
+    else:
+        print(colorize("Dépendances Python manquantes détectées :", Colors.WARNING))
+        for pkg in missing:
+            print(f"  - {pkg}")
+
+        if ask_yes_no("Voulez-vous les installer avec pip maintenant ?", default=True):
+            try:
+                with progress_step("Installation des dépendances Python"):
+                    orchestrator.install_python_dependencies()
+                print(colorize("Installation terminée avec succès !", Colors.OKGREEN))
+            except PipInstallError as e:
+                print_block(
+                    f'{colorize("Erreur d\'installation pip", Colors.FAIL)}\n'
+                    "L'installation a échoué. Voici les détails :\n"
+                    f"--------------------------------------------------\n{e}\n"
+                    "--------------------------------------------------"
+                )
+        else:
+            print(colorize("Installation annulée.", Colors.WARNING))
+
+    input("\nAppuyez sur Entrée pour continuer...")
+
 def run_build_flow(orchestrator: Orchestrator):
     """Gère le processus de compilation du firmware."""
     existing_firmware = find_default_firmware()
@@ -218,21 +250,31 @@ def run_build_flow(orchestrator: Orchestrator):
         print(colorize("Compilation annulée.", Colors.WARNING))
         return
 
-    with progress_step("Compilation du firmware Klipper"):
-        if orchestrator.run_build():
-            print(colorize("Build terminé.", Colors.OKGREEN))
-        else:
-            print(colorize("Le build a échoué.", Colors.FAIL))
+    try:
+        with progress_step("Compilation du firmware Klipper"):
+            orchestrator.run_build()
+        print(colorize("Build terminé.", Colors.OKGREEN))
+    except BuildManagerError as e:
+        print_block(
+            f'{colorize("Rapport d\'erreur de compilation", Colors.FAIL)}\n'
+            "La compilation a échoué. Voici les détails de l'erreur :\n"
+            f"--------------------------------------------------\n{e}\n"
+            "--------------------------------------------------"
+        )
 
 def run_flash_flow(orchestrator: Orchestrator, profile: QuickProfile):
     """Gère le processus de flashage."""
     firmware_path = find_default_firmware()
-    if not firmware_path or not ask_yes_no(f"Utiliser le firmware {firmware_path} ?", default=True):
-        path_str = ask_text("Chemin du firmware", required=True)
-        firmware_path = Path(path_str).expanduser().resolve()
-        if not firmware_path.is_file():
-            print(colorize(f"Fichier '{firmware_path}' introuvable.", Colors.FAIL))
-            return
+    if firmware_path and ask_yes_no(f"Utiliser le firmware {firmware_path} ?", default=True):
+        pass  # On utilise le firmware par défaut
+    else:
+        while True:
+            path_str = ask_text("Chemin du firmware", required=True)
+            candidate_path = Path(path_str).expanduser().resolve()
+            if candidate_path.is_file():
+                firmware_path = candidate_path
+                break
+            print(colorize(f"Fichier '{candidate_path}' introuvable. Veuillez réessayer.", Colors.FAIL))
 
     flash_manager = FlashManager(Path(__file__).resolve().parent)
     detected_devices = flash_manager.detect_serial_devices()
@@ -257,11 +299,17 @@ def run_flash_flow(orchestrator: Orchestrator, profile: QuickProfile):
         print(colorize("Opération annulée.", Colors.WARNING))
         return
 
-    with progress_step("Flashage du firmware"):
-        if orchestrator.run_flash(firmware_path, serial_device):
-             print(colorize("\nFlash terminé avec succès !", f"{Colors.BOLD}{Colors.OKGREEN}"))
-        else:
-            print(colorize("\nLe flashage a échoué.", f"{Colors.BOLD}{Colors.FAIL}"))
+    try:
+        with progress_step("Flashage du firmware"):
+            orchestrator.run_flash(firmware_path, serial_device)
+        print(colorize("\nFlash terminé avec succès !", f"{Colors.BOLD}{Colors.OKGREEN}"))
+    except FlashManagerError as e:
+        print_block(
+            f'{colorize("Rapport d\'erreur de flashage", Colors.FAIL)}\n'
+            "Le flashage a échoué. Voici les détails de l'erreur :\n"
+            f"--------------------------------------------------\n{e}\n"
+            "--------------------------------------------------"
+        )
 
 def main(argv: list[str] | None = None) -> int:
     """Point d'entrée CLI."""
@@ -284,21 +332,24 @@ def main(argv: list[str] | None = None) -> int:
 
         selection = ask_menu(
             [
-                "Vérifier et installer les dépendances",
+                "Vérifier les dépendances système",
+                "Vérifier les dépendances Python (pip)",
                 "Compiler le firmware",
                 "Flasher le firmware (assistant)",
                 "Quitter",
             ],
-            default_index=2,
+            default_index=3,
         )
 
         if selection == 0:
             run_dependency_check(orchestrator)
         elif selection == 1:
-            run_build_flow(orchestrator)
+            run_python_dependency_check(orchestrator)
         elif selection == 2:
-            run_flash_flow(orchestrator, profile)
+            run_build_flow(orchestrator)
         elif selection == 3:
+            run_flash_flow(orchestrator, profile)
+        elif selection == 4:
             print(colorize("À bientôt !", Colors.OKBLUE))
             return 0
 

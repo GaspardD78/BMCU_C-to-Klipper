@@ -36,14 +36,16 @@ def test_menu_build_flow(mock_find_firmware, mock_orchestrator_class, monkeypatc
     # Arrange
     mock_orchestrator = mock_orchestrator_class.return_value
     mock_orchestrator.run_build.return_value = True
+    mock_orchestrator.get_system_dependencies.return_value = ("apt", [], [])
+    mock_orchestrator.get_python_dependencies.return_value = ([], [])
 
     # Simule un firmware existant
     mock_firmware_path = MagicMock()
     mock_firmware_path.name = "klipper.bin"
     mock_find_firmware.return_value = mock_firmware_path
 
-    # Simule les entrées utilisateur : '2' (Build), 'o' (oui), '4' (Quitter)
-    user_input = "2\no\n4\n"
+    # Simule les entrées utilisateur : '3' (Build), 'o' (oui), '5' (Quitter)
+    user_input = "3\no\n5\n"
     monkeypatch.setattr("sys.stdin", io.StringIO(user_input))
 
     # Act
@@ -68,6 +70,8 @@ def test_menu_flash_flow(mock_find_firmware, mock_orchestrator_class, mock_flash
     # Arrange
     mock_orchestrator = mock_orchestrator_class.return_value
     mock_orchestrator.run_flash.return_value = True
+    mock_orchestrator.get_system_dependencies.return_value = ("apt", [], [])
+    mock_orchestrator.get_python_dependencies.return_value = ([], [])
 
     mock_flash_manager = mock_flash_manager_class.return_value
     mock_flash_manager.detect_serial_devices.return_value = ["/dev/ttyACM0"]
@@ -76,8 +80,8 @@ def test_menu_flash_flow(mock_find_firmware, mock_orchestrator_class, mock_flash
     mock_firmware_path.__str__.return_value = "/path/to/klipper.bin"
     mock_find_firmware.return_value = mock_firmware_path
 
-    # Simule les entrées : '3' (Flash), 'o' (oui), '1' (port), 'o' (confirmer), '4' (quitter)
-    user_input = "3\no\n1\no\n4\n"
+    # Simule les entrées : '4' (Flash), 'o' (oui), '1' (port), 'o' (confirmer), '5' (quitter)
+    user_input = "4\no\n1\no\n5\n"
     monkeypatch.setattr("sys.stdin", io.StringIO(user_input))
 
     # Act
