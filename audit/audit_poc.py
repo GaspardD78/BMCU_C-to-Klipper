@@ -58,6 +58,13 @@ def get_system_info():
     info.append(run_command("git status --short"))
     info.append(run_command("git log -n 1 --pretty=format:'%H (%an, %ar): %s'"))
 
+    info.append("\n--- Arborescence du Projet ---")
+    if shutil.which("tree"):
+        info.append(run_command("tree -L 3 -a"))
+    else:
+        info.append("Commande 'tree' non trouvée. Utilisation de 'ls -laR' en alternative.")
+        info.append(run_command("ls -laR"))
+
     # Collecte des paquets pip installés
     info.append("\n--- Paquets Pip Installés ---")
     info.append(run_command(f"{sys.executable} -m pip list --format=freeze"))
