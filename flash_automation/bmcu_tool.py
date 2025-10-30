@@ -14,41 +14,27 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-"""Interface interactive simplifiée pour la préparation et le flash.
-
-Ce module fournit une CLI légère autour de
-``flashBMCUtoKlipper_automation.py`` et ``build.sh``. L'objectif est de
-proposer, dès le clonage du dépôt, un point d'entrée unique pour :
-
-* préparer le firmware Klipper ;
-* lancer le flash via l'hôte passerelle (Raspberry Pi ou CB2) ;
-* limiter au maximum les questions longues ou répétitives.
-
-Les réglages essentiels sont mémorisés pour les exécutions suivantes et
-une assistance reste disponible en cas d'échec.
-"""
+"""Interface interactive simplifiée pour la préparation et le flash."""
 
 from __future__ import annotations
 
 import argparse
-import getpass
-import hashlib
 import json
-import platform
-import shlex
-import shutil
-import string
 import subprocess
 import sys
 import textwrap
-import threading
-import time
 from contextlib import contextmanager
 from dataclasses import dataclass, asdict
-from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+import time
 
+from .orchestrator import (
+    detect_environment_defaults,
+    EnvironmentDefaults,
+    find_default_firmware,
+    Orchestrator,
+)
+from .flash_manager import FlashManager
 
 # ---------------------------------------------------------------------------
 # Constantes de couleurs
@@ -72,223 +58,107 @@ def colorize(text: str, color: str) -> str:
         return text
     return f"{color}{text}{Colors.ENDC}"
 
-
-# ---------------------------------------------------------------------------
-# Structures pour les vérifications
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class CheckResult:
-    """Résultat d'une vérification de prérequis."""
-
-    label: str
-    success: bool
-    detail: str = ""
-
-
 # ---------------------------------------------------------------------------
 # Bannière de démarrage
 # ---------------------------------------------------------------------------
 
-
 def display_logo() -> None:
     """Affiche le logo ASCII si disponible."""
-
     logo_path = Path(__file__).resolve().parent / "banner.txt"
     try:
         logo = logo_path.read_text(encoding="utf-8").rstrip()
     except FileNotFoundError:
         return
-
     if logo:
         print(logo)
         print()
 
-
 # ---------------------------------------------------------------------------
-# Structures de données
+# Gestion du profil utilisateur
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class UserChoices:
-    """Paramètres collectés auprès de l'utilisateur."""
-
-    bmc_host: str
-    bmc_user: str
-    bmc_password: str
-    firmware_file: Path
-    remote_firmware_path: str
-    ssh_port: int
-    pre_update_command: str
-    flash_command: str
-    flash_timeout: int
-    wait_for_reboot: bool
-    reboot_timeout: int
-    reboot_check_interval: int
-    allow_same_version: bool
-    expected_final_version: str
-    firmware_sha256: str
-    dry_run: bool
-    log_root: Path
-    serial_device: str
-    firmware_checksum_file: Path | None = None
-
 
 CONFIG_FILE = Path(__file__).resolve().with_name("flash_profile.json")
-DEFAULT_CHECKSUM_FILE = Path(__file__).resolve().with_name("klipper.sha256")
-
 
 @dataclass
 class QuickProfile:
     """Préférences simplifiées mémorisées entre deux exécutions."""
-
-    gateway_host: str = ""
-    gateway_user: str = "pi"
-    remote_firmware_path: str = "/tmp/klipper_firmware.bin"
-    log_root: str = "logs"
-    wait_for_reboot: bool = True
     serial_device: str = ""
-
-
-@dataclass(frozen=True)
-class SystemInfo:
-    """Informations système utiles pour l'auto-configuration."""
-
-    model: str
-    os_release: dict[str, str]
-    machine: str
-
-
-@dataclass(frozen=True)
-class EnvironmentDefaults:
-    """Valeurs par défaut déterminées à partir de l'environnement."""
-
-    label: str = "Environnement générique"
-    host: str = ""
-    user: str = getpass.getuser()
-    remote_path: str = "/tmp/klipper_firmware.bin"
-    serial_device: str = ""
-    log_root: str = "logs"
-
 
 def load_profile() -> QuickProfile:
     """Charge le profil utilisateur si disponible."""
-
     if not CONFIG_FILE.exists():
         return QuickProfile()
     try:
         data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return QuickProfile()
-
     return QuickProfile(**{**asdict(QuickProfile()), **data})
-
 
 def save_profile(profile: QuickProfile) -> None:
     """Sauvegarde le profil utilisateur."""
-
     try:
         CONFIG_FILE.write_text(json.dumps(asdict(profile), indent=2), encoding="utf-8")
     except OSError as err:
         print(colorize(f"Impossible d'enregistrer le profil : {err}", Colors.WARNING))
 
-
 # ---------------------------------------------------------------------------
-# Détection d'environnement
-# ---------------------------------------------------------------------------
-
-
-def read_os_release() -> dict[str, str]:
-    """Parse le fichier /etc/os-release si disponible."""
-
-    path = Path("/etc/os-release")
-    if not path.exists():
-        return {}
-    try:
-        data = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return {}
-
-    result: dict[str, str] = {}
-    for line in data.splitlines():
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        result[key.strip()] = value.strip().strip('"')
-    return result
-
-
-def read_system_info() -> SystemInfo:
-    """Collecte des informations système pour la détection de plateforme."""
-
-    model_path = Path("/sys/firmware/devicetree/base/model")
-    try:
-        model = model_path.read_text(encoding="utf-8", errors="replace").strip()
-    except OSError:
-        model = platform.platform()
-
-    return SystemInfo(model=model, os_release=read_os_release(), machine=platform.machine())
-
-
-def detect_environment_defaults(info: SystemInfo | None = None) -> EnvironmentDefaults:
-    """Déduit des valeurs par défaut en fonction de la plateforme courante."""
-
-    info = info or read_system_info()
-    model = info.model.lower()
-    os_id = info.os_release.get("ID", "").lower()
-    os_like = info.os_release.get("ID_LIKE", "").lower()
-
-    if "raspberry pi" in model or "raspbian" in os_id or "raspbian" in os_like:
-        return EnvironmentDefaults(label="Raspberry Pi", host="localhost", user="pi")
-
-    if "bambu" in model or "cb2" in model or "bambu" in os_id:
-        return EnvironmentDefaults(label="Bambu Lab CB2", host="localhost", user=getpass.getuser())
-
-    if info.machine.startswith("arm") or info.machine.startswith("aarch"):
-        return EnvironmentDefaults(label="Plateforme ARM", host="localhost", user=getpass.getuser())
-
-    return EnvironmentDefaults()
-
-
-def apply_environment_defaults(profile: QuickProfile, defaults: EnvironmentDefaults) -> None:
-    """Complète le profil avec les valeurs détectées lorsqu'elles manquent."""
-
-    if not profile.gateway_host:
-        profile.gateway_host = defaults.host
-    if not profile.gateway_user:
-        profile.gateway_user = defaults.user
-    if not profile.remote_firmware_path:
-        profile.remote_firmware_path = defaults.remote_path
-    if not profile.serial_device and defaults.serial_device:
-        profile.serial_device = defaults.serial_device
-    if not profile.log_root:
-        profile.log_root = defaults.log_root
-
-
-# ---------------------------------------------------------------------------
-# Vérifications automatisées
+# Fonctions d'interaction utilisateur
 # ---------------------------------------------------------------------------
 
-
-def display_check_results(title: str, results: Iterable[CheckResult]) -> None:
-    """Affiche un bloc synthétique avec le résultat des vérifications."""
-
-    print(colorize(title, Colors.HEADER))
-    for result in results:
-        status = colorize("OK", Colors.OKGREEN) if result.success else colorize("KO", Colors.FAIL)
-        print(f"  • {result.label}: {status}")
-        if result.detail:
-            detail = textwrap.indent(result.detail.strip(), "      ")
-            print(detail)
+def print_block(message: str) -> None:
+    """Affiche un bloc de texte avec indentation homogène."""
+    formatted = textwrap.dedent(message).strip()
+    print()
+    print(formatted)
     print()
 
+def ask_yes_no(question: str, *, default: bool | None = None) -> bool:
+    """Demande une confirmation oui/non à l'utilisateur."""
+    suffix = " [O/n] " if default is True else " [o/N] " if default is False else " [o/n] "
+    while True:
+        prompt = colorize(question, Colors.OKCYAN) + suffix
+        answer = input(prompt).strip().lower()
+        if not answer and default is not None:
+            return default
+        if answer in {"o", "oui", "y", "yes"}:
+            return True
+        if answer in {"n", "non", "no"}:
+            return False
+        print(colorize("Réponse invalide.", Colors.WARNING))
+
+def ask_text(question: str, *, default: str | None = None, required: bool = True) -> str:
+    """Récupère une chaîne de caractères."""
+    while True:
+        prompt = colorize(f"{question}", Colors.OKCYAN)
+        if default:
+            prompt += f" [{default}]"
+        prompt += " : "
+        value = input(prompt).strip()
+        if not value:
+            if default is not None:
+                return default
+            if not required:
+                return ""
+            print(colorize("Ce champ est obligatoire.", Colors.WARNING))
+            continue
+        return value
+
+def ask_menu(options: list[str], *, default_index: int = 0) -> int:
+    """Propose un menu numéroté simple."""
+    for index, option in enumerate(options, start=1):
+        print(f"  {index}. {option}")
+    prompt = colorize("Choix", Colors.OKCYAN) + f" [{default_index + 1}] : "
+    while True:
+        answer = input(prompt).strip()
+        if not answer:
+            return default_index
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            return int(answer) - 1
+        print(colorize("Merci d'entrer un numéro valide.", Colors.WARNING))
 
 @contextmanager
 def progress_step(title: str):
     """Affiche un indicateur simple de progression."""
-
     print(colorize(f"⏳ {title}...", Colors.OKBLUE))
     start = time.monotonic()
     try:
@@ -301,1214 +171,125 @@ def progress_step(title: str):
         duration = time.monotonic() - start
         print(colorize(f"✅ {title} ({duration:.1f}s)", Colors.OKGREEN))
 
-
-def check_command_available(command: str) -> CheckResult:
-    """Vérifie la présence d'une commande système locale."""
-
-    location = shutil.which(command)
-    if location:
-        return CheckResult(label=f"Commande '{command}'", success=True, detail=location)
-    return CheckResult(
-        label=f"Commande '{command}'",
-        success=False,
-        detail="Introuvable dans le PATH. Installez la dépendance avant de poursuivre.",
-    )
-
-
-def check_required_file(path: Path) -> CheckResult:
-    """Confirme la présence d'un fichier requis."""
-
-    if path.exists():
-        return CheckResult(label=f"Fichier '{path.name}'", success=True, detail=str(path))
-    return CheckResult(
-        label=f"Fichier '{path.name}'",
-        success=False,
-        detail="Le fichier est introuvable. Vérifiez votre clone du dépôt.",
-    )
-
-
-def run_local_prerequisite_checks() -> list[CheckResult]:
-    """Exécute les vérifications locales avant toute interaction distante."""
-
-    flash_dir = Path(__file__).resolve().parent
-    results = [
-        check_command_available("sshpass"),
-        check_command_available("scp"),
-        check_command_available("ping"),
-        check_required_file(flash_dir / "flashBMCUtoKlipper_automation.py"),
-    ]
-    return results
-
-
-def run_remote_command(
-    host: str,
-    user: str,
-    password: str,
-    port: int,
-    command: str,
-    *,
-    timeout: int = 15,
-) -> subprocess.CompletedProcess[str]:
-    """Exécute une commande distante via SSH en capturant la sortie."""
-
-    ssh_command = [
-        "sshpass",
-        "-p",
-        password,
-        "ssh",
-        "-p",
-        str(port),
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "BatchMode=no",
-        f"{user}@{host}",
-        command,
-    ]
-
-    return subprocess.run(
-        ssh_command,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-
-
-def prioritize_serial_devices(devices: list[str]) -> list[str]:
-    """Trie les périphériques détectés par pertinence."""
-
-    def priority(path: str) -> tuple[int, str]:
-        lowered = path.lower()
-        if "1a86" in lowered:
-            return (0, path)
-        if "wch" in lowered or "ch32" in lowered:
-            return (1, path)
-        if "/dev/serial/by-id/" in path:
-            return (2, path)
-        return (3, path)
-
-    unique: list[str] = []
-    seen: set[str] = set()
-    for device in devices:
-        if device not in seen:
-            seen.add(device)
-            unique.append(device)
-
-    return [device for _, device in sorted((priority(dev), dev) for dev in unique)]
-
-
-def detect_remote_serial_devices(
-    host: str,
-    user: str,
-    password: str,
-    port: int,
-) -> tuple[list[str], str]:
-    """Récupère la liste des périphériques série/USB visibles depuis la passerelle."""
-
-    remote_script = (
-        "sh -c 'for path in /dev/serial/by-id/* /dev/ttyUSB* /dev/ttyACM* "
-        "/dev/ttyAMA* /dev/ttyS* /dev/ttyCH*; do "
-        '[ -e "$path" ] && printf "%s\\n" "$path"; '
-        "done'"
-    )
-    result = run_remote_command(host, user, password, port, remote_script)
-
-    if result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip() or f"Code retour {result.returncode}"
-        return [], detail
-
-    devices = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    return prioritize_serial_devices(devices), result.stdout.strip()
-
-
-def run_remote_prerequisite_checks(
-    host: str,
-    user: str,
-    password: str,
-    port: int,
-) -> tuple[list[CheckResult], list[str]]:
-    """Effectue les vérifications dépendant de la passerelle BMCU."""
-
-    results: list[CheckResult] = []
-
-    try:
-        probe = run_remote_command(host, user, password, port, "printf '__bmcu__'")
-    except FileNotFoundError as err:
-        return (
-            [
-                CheckResult(
-                    label="Connexion SSH",
-                    success=False,
-                    detail=f"sshpass introuvable : {err}",
-                )
-            ],
-            [],
-        )
-    except subprocess.TimeoutExpired:
-        return (
-            [
-                CheckResult(
-                    label="Connexion SSH",
-                    success=False,
-                    detail="Timeout atteint lors de la tentative de connexion SSH.",
-                )
-            ],
-            [],
-        )
-
-    if probe.returncode != 0 or "__bmcu__" not in probe.stdout:
-        detail = probe.stderr.strip() or probe.stdout.strip() or f"Code retour {probe.returncode}"
-        results.append(CheckResult(label="Connexion SSH", success=False, detail=detail))
-        return results, []
-
-    results.append(
-        CheckResult(
-            label="Connexion SSH",
-            success=True,
-            detail="Authentification réussie.",
-        )
-    )
-
-    devices: list[str]
-    detection_detail: str
-    try:
-        devices, detection_detail = detect_remote_serial_devices(host, user, password, port)
-    except subprocess.TimeoutExpired:
-        results.append(
-            CheckResult(
-                label="Détection USB",
-                success=False,
-                detail="Timeout pendant l'énumération des périphériques USB.",
-            )
-        )
-        return results, []
-
-    if devices:
-        formatted = "\n".join(devices)
-        results.append(
-            CheckResult(
-                label="Détection USB",
-                success=True,
-                detail=formatted,
-            )
-        )
-        return results, devices
-
-    detail = detection_detail or "Aucun périphérique série détecté sur la passerelle."
-    results.append(
-        CheckResult(
-            label="Détection USB",
-            success=False,
-            detail=detail,
-        )
-    )
-    return results, []
-
-
 # ---------------------------------------------------------------------------
-# Fonctions d'interaction utilisateur
+# Logique de l'interface principale
 # ---------------------------------------------------------------------------
 
-
-def print_block(message: str) -> None:
-    """Affiche un bloc de texte avec indentation homogène."""
-    formatted = textwrap.dedent(message).strip()
-    print()
-    print(formatted)
-    print()
-
-
-class PromptTimer:
-    """Affiche périodiquement un message d'aide pendant une saisie."""
-
-    def __init__(self, prompt: str, message: str | None, *, interval: float = 15.0):
-        self.prompt = prompt
-        self.message = message
-        self.interval = interval
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-
-    def _worker(self) -> None:
-        if not self.message:
-            return
-        elapsed = 0.0
-        while not self._stop.wait(self.interval):
-            elapsed += self.interval
-            print()
-            print(
-                colorize(
-                    f"⌛ En attente ({int(elapsed)}s) : {self.message}",
-                    Colors.WARNING,
-                )
-            )
-            if self.prompt:
-                print(self.prompt, end="", flush=True)
-
-    def __enter__(self):
-        if self.message:
-            self._thread = threading.Thread(target=self._worker, daemon=True)
-            self._thread.start()
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=self.interval)
-        return False
-
-
-def ask_yes_no(question: str, *, default: bool | None = None, help_message: str | None = None) -> bool:
-    """Demande une confirmation oui/non à l'utilisateur."""
-    if default is True:
-        suffix = " [O/n] "
-    elif default is False:
-        suffix = " [o/N] "
-    else:
-        suffix = " [o/n] "
-
-    while True:
-        prompt = colorize(question, Colors.OKCYAN) + suffix
-        with PromptTimer(prompt, help_message):
-            answer = input(prompt).strip().lower()
-        if not answer and default is not None:
-            return default
-        if answer in {"o", "oui", "y", "yes"}:
-            return True
-        if answer in {"n", "non", "no"}:
-            return False
-        print(colorize("Réponse invalide. Merci d'indiquer 'o' pour oui ou 'n' pour non.", Colors.WARNING))
-
-
-def ask_text(
-    question: str,
-    *,
-    default: str | None = None,
-    required: bool = True,
-    help_message: str | None = None,
-) -> str:
-    """Récupère une chaîne de caractères en respectant un défaut éventuel."""
-    while True:
-        prompt = colorize(f"{question}", Colors.OKCYAN)
-        if default:
-            prompt += f" [{default}]"
-        prompt += " : "
-
-        with PromptTimer(prompt, help_message):
-            value = input(prompt).strip()
-        if not value:
-            if default is not None:
-                return default
-            if not required:
-                return ""
-            print(colorize("Ce champ est obligatoire.", Colors.WARNING))
-            continue
-        return value
-
-
-def ask_password(question: str, *, help_message: str | None = None) -> str:
-    """Demande un mot de passe sans l'afficher."""
-    while True:
-        prompt = colorize(f"{question} : ", Colors.OKCYAN)
-        with PromptTimer(prompt, help_message):
-            password = getpass.getpass(prompt=prompt)
-        if password:
-            return password
-        print(colorize("Le mot de passe ne peut pas être vide.", Colors.WARNING))
-
-
-def prompt_serial_device(detected_devices: list[str], previous: str) -> str:
-    """Propose une sélection de périphérique USB ou un champ libre."""
-
-    if detected_devices:
-        print(colorize("Périphériques USB détectés :", Colors.HEADER))
-        for index, device in enumerate(detected_devices, start=1):
-            print(f"  {index}. {device}")
-
-        options = [f"Utiliser {device}" for device in detected_devices]
-        options.append("Saisir un autre chemin")
-        options.append("Ignorer pour l'instant")
-
-        choice = ask_menu(options, default_index=0)
-        if choice < len(detected_devices):
-            return detected_devices[choice]
-        if choice == len(detected_devices):
-            manual_default = previous or detected_devices[0]
-            return ask_text("Chemin du périphérique USB", default=manual_default, required=False)
-        return ""
-
-    manual_default = previous or ""
-    return ask_text("Chemin du périphérique USB", default=manual_default, required=False)
-
-
-def ensure_firmware_path(path_str: str) -> Path:
-    """Valide l'existence du fichier firmware fourni."""
-    firmware_path = Path(path_str).expanduser().resolve()
-    if not firmware_path.is_file():
-        raise FileNotFoundError(colorize(f"Le fichier '{firmware_path}' est introuvable.", Colors.FAIL))
-    return firmware_path
-
-
-def find_default_firmware() -> Path | None:
-    """Tente de localiser automatiquement le firmware généré."""
-
-    base_dir = Path(__file__).resolve().parent
-    candidates = [
-        base_dir / ".cache/firmware/klipper.bin",
-        base_dir / "klipper.bin",
-    ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _normalize_checksum(value: str) -> str:
-    """Valide et normalise une empreinte SHA-256."""
-
-    candidate = value.strip().lower()
-    if len(candidate) != 64 or any(char not in string.hexdigits for char in candidate):
-        raise ValueError(f"Empreinte SHA-256 invalide : {value!r}")
-    return candidate
-
-
-def compute_sha256(path: Path) -> str:
-    """Calcule l'empreinte SHA-256 d'un fichier."""
-
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def read_checksum_file(path: Path) -> str:
-    """Extrait la première empreinte valide d'un fichier de type sha256sum."""
-
-    try:
-        content = path.read_text(encoding="utf-8")
-    except OSError as err:
-        raise FileNotFoundError(f"Impossible de lire le fichier de checksum {path}: {err}") from err
-
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        candidate = line.split()[0]
-        try:
-            return _normalize_checksum(candidate)
-        except ValueError:
-            continue
-
-    raise ValueError(f"Aucun checksum SHA-256 valide trouvé dans {path}.")
-
-
-class ChecksumMismatchError(RuntimeError):
-    """Erreur levée lorsque l'empreinte calculée diffère de la référence."""
-
-
-def verify_firmware_checksum(
-    firmware_path: Path,
-    *,
-    explicit_checksum: str | None = None,
-    checksum_file: Path | None = None,
-) -> tuple[str, str | None, str | None]:
-    """Valide l'empreinte du firmware et retourne les valeurs utilisées."""
-
-    source_label: str | None = None
-    expected: str | None = None
-
-    if explicit_checksum:
-        expected = _normalize_checksum(explicit_checksum)
-        source_label = "option --firmware-sha256"
-    else:
-        candidate_file = checksum_file
-        if candidate_file is None and DEFAULT_CHECKSUM_FILE.exists():
-            candidate_file = DEFAULT_CHECKSUM_FILE
-        if candidate_file is not None:
-            if not candidate_file.exists():
-                raise FileNotFoundError(f"Fichier de checksum introuvable : {candidate_file}")
-            expected = read_checksum_file(candidate_file)
-            source_label = f"fichier {candidate_file}"
-
-    computed = compute_sha256(firmware_path)
-
-    if expected and computed != expected:
-        raise ChecksumMismatchError(
-            textwrap.dedent(
-                f"""
-                Le firmware {firmware_path} ne correspond pas au checksum attendu.
-                  • Calculé : {computed}
-                  • Attendu : {expected} ({source_label})
-                """
-            ).strip()
-        )
-
-    return computed, expected, source_label
-
-
-def ask_menu(options: list[str], *, default_index: int = 0) -> int:
-    """Propose un menu numéroté simple."""
-
-    for index, option in enumerate(options, start=1):
-        print(f"  {index}. {option}")
-
-    prompt = colorize("Choix", Colors.OKCYAN) + f" [{default_index + 1}] : "
-    while True:
-        answer = input(prompt).strip()
-        if not answer:
-            return default_index
-        if answer.isdigit():
-            value = int(answer)
-            if 1 <= value <= len(options):
-                return value - 1
-        print(colorize("Merci d'entrer un numéro valide.", Colors.WARNING))
-
-
-from flash_manager import FlashManager
-
-def gather_user_choices(profile: QuickProfile, environment: EnvironmentDefaults) -> UserChoices:
-    """Collecte les informations essentielles en mode simplifié."""
-    flash_manager = FlashManager(Path(__file__).resolve().parent)
-
-    intro_text = f"""
-{colorize("Assistant BMCU → Klipper", f"{Colors.BOLD}{Colors.OKBLUE}")}
-
-1. Sélection du firmware.
-2. Sélection du périphérique série.
-3. Lancement du flash.
-"""
-    print_block(intro_text)
-
-    # Sélection du firmware
-    print(colorize("Firmware :", Colors.HEADER))
-    detected_firmware = find_default_firmware()
-    firmware_file: Path
-    if detected_firmware and ask_yes_no(
-        f"Utiliser {detected_firmware}?",
-        default=True,
-        help_message="Merci de confirmer si vous souhaitez réutiliser le firmware déjà détecté.",
-    ):
-        firmware_file = detected_firmware
-    else:
-        while True:
-            firmware_input = ask_text(
-                "Chemin du firmware",
-                required=True,
-                help_message="Utilisez ./klipper.bin ou un chemin absolu vers le firmware.",
-            )
-            try:
-                firmware_file = ensure_firmware_path(firmware_input)
-                break
-            except FileNotFoundError as err:
-                print(err)
-
-    # Sélection du périphérique série
-    detected_devices = flash_manager.detect_serial_devices()
-    serial_device = prompt_serial_device(detected_devices, profile.serial_device)
-    profile.serial_device = serial_device
-
-    return UserChoices(
-        bmc_host="", # Plus utilisé pour le flash local
-        bmc_user="", # Plus utilisé pour le flash local
-        bmc_password="", # Plus utilisé pour le flash local
-        firmware_file=firmware_file,
-        remote_firmware_path="", # Plus utilisé pour le flash local
-        ssh_port=22,
-        pre_update_command="",
-        flash_command="", # Géré par le FlashManager
-        flash_timeout=1800,
-        wait_for_reboot=False,
-        reboot_timeout=600,
-        reboot_check_interval=10,
-        allow_same_version=False,
-        expected_final_version="",
-        firmware_sha256="",
-        dry_run=False,
-        log_root=Path("logs"),
-        serial_device=serial_device,
-        firmware_checksum_file=None,
-    )
-
-
-def summarize_choices(choices: UserChoices) -> None:
-    """Affiche un résumé compact des paramètres retenus."""
-
-    if choices.firmware_sha256:
-        checksum_display = f"{choices.firmware_sha256} (option CLI)"
-    elif choices.firmware_checksum_file:
-        checksum_display = f"via {choices.firmware_checksum_file}"
-    else:
-        checksum_display = "non configurée"
-
-    summary = f"""
-    {colorize('Récapitulatif rapide :', f'{Colors.BOLD}{Colors.OKBLUE}')}
-
-      • {colorize('Passerelle', Colors.BOLD)}     : {choices.bmc_user}@{choices.bmc_host}:{choices.ssh_port}
-      • {colorize('Firmware', Colors.BOLD)}       : {choices.firmware_file}
-      • {colorize('Copie distante', Colors.BOLD)} : {choices.remote_firmware_path}
-      • {colorize('Périphérique USB', Colors.BOLD)} : {choices.serial_device or 'non défini'}
-      • {colorize('Commande', Colors.BOLD)}       : {choices.flash_command}
-      • {colorize('Timeout', Colors.BOLD)}        : {choices.flash_timeout} s
-      • {colorize('Attendre reboot', Colors.BOLD)}: {colorize('oui' if choices.wait_for_reboot else 'non', Colors.OKGREEN if choices.wait_for_reboot else Colors.WARNING)}
-      • {colorize('Logs', Colors.BOLD)}           : {choices.log_root}
-      • {colorize('SHA-256', Colors.BOLD)}        : {checksum_display}
-    """
-    print_block(summary)
-
-
-def update_profile_from_choices(profile: QuickProfile, choices: UserChoices) -> None:
-    """Met à jour le profil simplifié avec les dernières informations."""
-
-    profile.gateway_host = choices.bmc_host
-    profile.gateway_user = choices.bmc_user
-    profile.remote_firmware_path = choices.remote_firmware_path
-    profile.wait_for_reboot = choices.wait_for_reboot
-    profile.serial_device = choices.serial_device
-    profile.log_root = str(choices.log_root)
-
-
-def gather_choices_from_args(
-    args: argparse.Namespace,
-    profile: QuickProfile,
-    environment: EnvironmentDefaults,
-) -> UserChoices:
-    """Construit les choix utilisateur à partir des arguments CLI."""
-
-    missing: list[str] = []
-
-    bmc_host = (
-        args.bmc_host
-        or profile.gateway_host
-        or environment.host
-        or "localhost"
-    )
-    if not bmc_host:
-        missing.append("--bmc-host")
-
-    bmc_user = args.bmc_user or profile.gateway_user or environment.user or "pi"
-    if not bmc_user:
-        missing.append("--bmc-user")
-
-    bmc_password = args.bmc_password
-    if not bmc_password:
-        missing.append("--bmc-password")
-
-    firmware_path: Path | None = None
-    if args.firmware_file:
-        try:
-            firmware_path = ensure_firmware_path(args.firmware_file)
-        except FileNotFoundError as err:
-            raise ValueError(str(err)) from err
-    else:
-        firmware_path = find_default_firmware()
-        if firmware_path is None:
-            missing.append("--firmware-file")
-
-    if missing:
-        missing_args = ", ".join(missing)
-        raise ValueError(
-            "Mode non interactif : paramètres obligatoires manquants "
-            f"({missing_args})."
-        )
-
-    remote_firmware_path = (
-        args.remote_firmware_path
-        or profile.remote_firmware_path
-        or environment.remote_path
-    )
-
-    ssh_port = args.ssh_port if args.ssh_port is not None else 22
-    flash_command = args.flash_command or "socflash -s {firmware}"
-    flash_timeout = args.flash_timeout if args.flash_timeout is not None else 1800
-    wait_for_reboot = (
-        profile.wait_for_reboot if args.wait_for_reboot is None else args.wait_for_reboot
-    )
-    reboot_timeout = args.reboot_timeout if args.reboot_timeout is not None else 600
-    reboot_check_interval = (
-        args.reboot_check_interval if args.reboot_check_interval is not None else 10
-    )
-    log_root_str = (
-        args.log_root
-        or profile.log_root
-        or environment.log_root
-        or "logs"
-    )
-    log_root = Path(log_root_str).expanduser().resolve()
-    serial_device = args.serial_device or profile.serial_device or environment.serial_device
-    pre_update_command = args.pre_update_command or ""
-    allow_same_version = args.allow_same_version
-    expected_final_version = args.expected_final_version or ""
-    firmware_sha256 = args.firmware_sha256 or ""
-    checksum_file = None
-    if args.firmware_sha256_file:
-        checksum_file = Path(args.firmware_sha256_file).expanduser().resolve()
-    elif not firmware_sha256 and DEFAULT_CHECKSUM_FILE.exists():
-        checksum_file = DEFAULT_CHECKSUM_FILE
-    dry_run = args.dry_run
-
-    return UserChoices(
-        bmc_host=bmc_host,
-        bmc_user=bmc_user,
-        bmc_password=bmc_password,
-        firmware_file=firmware_path,
-        remote_firmware_path=remote_firmware_path,
-        ssh_port=ssh_port,
-        pre_update_command=pre_update_command,
-        flash_command=flash_command,
-        flash_timeout=flash_timeout,
-        wait_for_reboot=wait_for_reboot,
-        reboot_timeout=reboot_timeout,
-        reboot_check_interval=reboot_check_interval,
-        allow_same_version=allow_same_version,
-        expected_final_version=expected_final_version,
-        firmware_sha256=firmware_sha256,
-        dry_run=dry_run,
-        log_root=log_root,
-        serial_device=serial_device or "",
-        firmware_checksum_file=checksum_file,
-    )
-
-
-def build_command(choices: UserChoices) -> list[str]:
-    """Construit la commande d'invocation du script d'automatisation."""
-    script_path = Path(__file__).resolve().with_name("flashBMCUtoKlipper_automation.py")
-    command: list[str] = [
-        sys.executable,
-        str(script_path),
-        "--bmc-host", choices.bmc_host,
-        "--bmc-user", choices.bmc_user,
-        "--bmc-password", choices.bmc_password,
-        "--firmware-file", str(choices.firmware_file),
-        "--remote-firmware-path", choices.remote_firmware_path,
-        "--ssh-port", str(choices.ssh_port),
-        "--flash-command", choices.flash_command,
-        "--flash-timeout", str(choices.flash_timeout),
-        "--log-root", str(choices.log_root),
-    ]
-
-    if choices.pre_update_command:
-        command.extend(["--pre-update-command", choices.pre_update_command])
-    if choices.wait_for_reboot:
-        command.append("--wait-for-reboot")
-        command.extend(["--reboot-timeout", str(choices.reboot_timeout)])
-        command.extend(["--reboot-check-interval", str(choices.reboot_check_interval)])
-    if choices.serial_device:
-        command.extend(["--serial-device", choices.serial_device])
-    if choices.allow_same_version:
-        command.append("--allow-same-version")
-    if choices.expected_final_version:
-        command.extend(["--expected-final-version", choices.expected_final_version])
-    if choices.firmware_sha256:
-        command.extend(["--firmware-sha256", choices.firmware_sha256])
-    if choices.dry_run:
-        command.append("--dry-run")
-
-    return command
-
-
-def run_build() -> bool:
-    """Lance le script de build et retourne le succès."""
-    from build_manager import BuildManager
-
-    existing_firmware = find_default_firmware()
-    if existing_firmware:
-        if not ask_yes_no(
-            f"Un firmware existe déjà ({existing_firmware.name}). Voulez-vous le recompiler ?",
-            default=False
-        ):
-            print(colorize("Compilation annulée.", Colors.WARNING))
-            return True
-
-    try:
-        with progress_step("Compilation du firmware Klipper"):
-            manager = BuildManager(Path(__file__).resolve().parent)
-            manager.compile_firmware()
-    except (subprocess.CalledProcessError, FileNotFoundError) as err:
-        print(colorize(f"La compilation a échoué : {err}", Colors.FAIL))
-        return False
-
-    print(colorize("✅ Build terminé.", Colors.OKGREEN))
-    return True
-
-
-def run_flash_flow(
-    profile: QuickProfile,
-    environment: EnvironmentDefaults,
-    *,
-    preset_choices: UserChoices | None = None,
-    ask_confirmation: bool = True,
-) -> int:
-    """Enchaîne la collecte d'infos puis le flash."""
-    from flash_manager import FlashManager
-
-    if preset_choices is None:
-        try:
-            choices = gather_user_choices(profile, environment)
-        except KeyboardInterrupt:
-            print(colorize("\nInterruption utilisateur.", Colors.WARNING))
-            return 1
-    else:
-        choices = preset_choices
-
-    update_profile_from_choices(profile, choices)
-    save_profile(profile)
-    summarize_choices(choices)
-
-    try:
-        computed_checksum, expected_checksum, checksum_source = verify_firmware_checksum(
-            choices.firmware_file,
-            explicit_checksum=choices.firmware_sha256 or None,
-            checksum_file=choices.firmware_checksum_file,
-        )
-    except ChecksumMismatchError as err:
-        print(colorize(str(err), Colors.FAIL))
-        return 1
-    except (FileNotFoundError, ValueError) as err:
-        print(colorize(str(err), Colors.FAIL))
-        return 1
-    else:
-        if expected_checksum:
-            choices.firmware_sha256 = expected_checksum
-            success_block = textwrap.dedent(
-                f"""
-                {colorize('Empreinte SHA-256 validée', Colors.OKGREEN)} ({checksum_source})
-                  {computed_checksum}
-                """
-            ).strip()
-            print_block(success_block)
-        else:
-            warning_block = textwrap.dedent(
-                f"""
-                {colorize('Empreinte SHA-256 calculée', Colors.WARNING)} : {computed_checksum}
-                Fournissez une valeur attendue via --firmware-sha256 ou créez {DEFAULT_CHECKSUM_FILE.name}
-                pour activer la vérification automatique.
-                """
-            ).strip()
-            print_block(warning_block)
-
-    if ask_confirmation:
-        if not ask_yes_no(
-            "On lance le flash ?",
-            default=True,
-            help_message="Validez pour démarrer immédiatement le processus de flash.",
-        ):
-            print(colorize("Opération annulée.", Colors.WARNING))
-            return 0
-
-    try:
-        with progress_step("Flashage du firmware"):
-            manager = FlashManager(Path(__file__).resolve().parent)
-            # Pour l'instant, on ne gère que le flash série local
-            manager.flash("serial", choices.firmware_file, choices.serial_device)
-    except (subprocess.CalledProcessError, FileNotFoundError, ValueError) as err:
-        print(colorize(f"Le flashage a échoué : {err}", Colors.FAIL))
-        return 1
-
-    print(colorize("\n✅ Flash terminé avec succès !", f"{Colors.BOLD}{Colors.OKGREEN}"))
-    return 0
-
-
-def run_automation(command: list[str]) -> subprocess.CompletedProcess[None]:
-    """Lance le script d'automatisation et retourne le résultat."""
-    print(colorize("Lancement du processus d'automatisation...", Colors.OKBLUE) + "\n")
-    print(colorize("Commande exécutée :", Colors.HEADER))
-    print("  " + format_command(command))
-    print()
-
-    # Utilise Popen pour un affichage en temps réel
-    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace') as process:
-        if process.stdout:
-            for line in process.stdout:
-                print(line, end='')
-        process.wait()
-        return subprocess.CompletedProcess(process.args, process.returncode)
-
-
-def format_command(command: Iterable[str]) -> str:
-    """Formate une commande sous forme de chaîne safe."""
-    return " ".join(shlex.quote(part) for part in command)
-
-
-def find_latest_log_dir(log_root: Path) -> Path | None:
-    """Retourne le dernier dossier de log généré dans le répertoire cible."""
-    if not log_root.exists():
-        return None
-    candidates = [entry for entry in log_root.iterdir() if entry.is_dir()]
-    if not candidates:
-        return None
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return candidates[0]
-
-
-def extract_log_tail(log_dir: Path, *, limit: int = 40) -> str:
-    """Lit les dernières lignes du fichier de log principal."""
-    log_file = log_dir / "debug.log"
-    if not log_file.exists():
-        return "(journal introuvable)"
-    try:
-        lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
-        return "\n".join(lines[-limit:])
-    except OSError as err:
-        return f"Impossible de lire le fichier de log : {err}"
-
-
-def generate_assistance_prompt(
-    choices: UserChoices,
-    command: list[str],
-    log_dir: Path | None,
-    exit_code: int,
-) -> str:
-    """Construit un prompt d'assistance à partir du contexte."""
-    log_tail = ""
-    log_path_display = "(indisponible)"
-    if log_dir is not None:
-        log_tail = extract_log_tail(log_dir)
-        log_path_display = str(log_dir / "debug.log")
-
-    timestamp = datetime.now().isoformat(timespec="seconds")
-    return textwrap.dedent(
-        f"""
-        J'ai exécuté le script d'automatisation du flash BMCU-C via l'interface
-        interactive le {timestamp}. Voici le contexte :
-
-        - Commande : {format_command(command)}
-        - Hôte BMC : {choices.bmc_host}
-        - Utilisateur : {choices.bmc_user}
-        - Périphérique USB : {choices.serial_device or '(non défini)'}
-        - Chemin firmware local : {choices.firmware_file}
-        - Chemin distant : {choices.remote_firmware_path}
-        - Mode test à blanc : {'oui' if choices.dry_run else 'non'}
-        - Code de sortie : {exit_code}
-        - Journal détaillé : {log_path_display}
-
-        Dernières lignes du journal :
-        ```
-        {log_tail or '(aucune sortie disponible)'}
-        ```
-
-        Merci de m'aider à diagnostiquer et corriger le problème rencontré.
-        """
-    ).strip()
-
-
-def build_home_summary(profile: QuickProfile, environment: EnvironmentDefaults) -> str:
-    """Construit le bloc récapitulatif affiché au démarrage."""
-
-    firmware = find_default_firmware()
-    firmware_display = str(firmware) if firmware else "à générer (build.sh)"
-    host_display = profile.gateway_host or environment.host or "(à définir)"
-    user_display = profile.gateway_user or environment.user or "(à définir)"
-    remote_display = profile.remote_firmware_path or environment.remote_path
-    serial_display = profile.serial_device or "(auto)"
-    log_display = profile.log_root or environment.log_root
-
-    return f"""
-    {colorize('Assistant BMCU → Klipper', f'{Colors.BOLD}{Colors.OKBLUE}')}
-
-      • Environnement détecté : {environment.label}
-      • Passerelle suggérée   : {user_display}@{host_display}
-      • Firmware local        : {firmware_display}
-      • Copie distante        : {remote_display}
-      • Périphérique USB      : {serial_display}
-      • Dossier de logs       : {log_display}
-    """
-
-
-def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
-    """Analyse les paramètres en ligne de commande."""
-
-    parser = argparse.ArgumentParser(
-        description="Assistant interactif pour flasher le BMCU vers Klipper",
-    )
-    parser.add_argument(
-        "--non-interactif",
-        action="store_true",
-        help="Exécute le flash directement avec les options passées en paramètres.",
-    )
-    parser.add_argument(
-        "--auto-confirm",
-        action="store_true",
-        help="Skippe la confirmation finale avant de lancer le flash.",
-    )
-    parser.add_argument("--bmc-host", help="Adresse IP ou nom DNS de la passerelle.")
-    parser.add_argument("--bmc-user", help="Utilisateur SSH sur la passerelle.")
-    parser.add_argument(
-        "--bmc-password",
-        help="Mot de passe SSH correspondant (requis en mode non interactif).",
-    )
-    parser.add_argument(
-        "--ssh-port",
-        type=int,
-        help="Port SSH utilisé pour joindre la passerelle.",
-    )
-    parser.add_argument(
-        "--firmware-file",
-        help="Chemin vers le firmware Klipper à flasher.",
-    )
-    parser.add_argument(
-        "--remote-firmware-path",
-        help="Chemin distant de dépôt du firmware sur la passerelle.",
-    )
-    parser.add_argument(
-        "--serial-device",
-        help="Chemin du périphérique série sur la passerelle (ex. /dev/ttyUSB0).",
-    )
-    parser.add_argument(
-        "--log-root",
-        help="Répertoire local où stocker les journaux de flash.",
-    )
-    parser.add_argument(
-        "--flash-command",
-        help="Commande de flash exécutée côté passerelle.",
-    )
-    parser.add_argument(
-        "--flash-timeout",
-        type=int,
-        help="Durée maximale (en secondes) autorisée pour l'étape de flash.",
-    )
-    wait_group = parser.add_mutually_exclusive_group()
-    wait_group.add_argument(
-        "--wait-for-reboot",
-        dest="wait_for_reboot",
-        action="store_true",
-        help="Force l'attente du redémarrage automatique.",
-    )
-    wait_group.add_argument(
-        "--no-wait-for-reboot",
-        dest="wait_for_reboot",
-        action="store_false",
-        help="Désactive l'attente automatique du redémarrage.",
-    )
-    parser.set_defaults(wait_for_reboot=None)
-    parser.add_argument(
-        "--reboot-timeout",
-        type=int,
-        help="Temps maximal (en secondes) pour attendre le retour en ligne.",
-    )
-    parser.add_argument(
-        "--reboot-check-interval",
-        type=int,
-        help="Intervalle entre deux vérifications du reboot.",
-    )
-    parser.add_argument(
-        "--pre-update-command",
-        help="Commande préliminaire à exécuter sur la passerelle avant le flash.",
-    )
-    parser.add_argument(
-        "--allow-same-version",
-        action="store_true",
-        help="Autorise le flash même si la version cible semble identique.",
-    )
-    parser.add_argument(
-        "--expected-final-version",
-        help="Version attendue après flash pour validation.",
-    )
-    parser.add_argument(
-        "--firmware-sha256",
-        help="Empreinte SHA-256 attendue du firmware (sécurité supplémentaire).",
-    )
-    parser.add_argument(
-        "--firmware-sha256-file",
-        help="Fichier contenant l'empreinte SHA-256 attendue (format sha256sum).",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Active le mode test à blanc sans exécuter de commande distante.",
-    )
-
-    return parser.parse_args(argv)
-
-
-def show_main_menu(profile: QuickProfile, environment: EnvironmentDefaults) -> int:
-    """Affiche l'écran d'accueil unique avec les options principales."""
-
-    print_block(build_home_summary(profile, environment))
-    print(colorize("Choisissez une action :", Colors.HEADER))
-    return ask_menu(
-        [
-            "Vérifier et installer les dépendances",
-            "Compiler le firmware",
-            "Flasher le firmware (assistant)",
-            "Aide à la configuration post-flash",
-            "Quitter",
-        ],
-        default_index=2,  # Default to flashing
-    )
-
-
-def run_dependency_installation():
-    """Detects OS and offers to install required system packages."""
+def run_dependency_check(orchestrator: Orchestrator):
+    """Vérifie et propose d'installer les dépendances."""
     print_block(colorize("Vérification des dépendances système...", Colors.HEADER))
-    os_info = read_os_release()
-    os_id = os_info.get("ID", "").lower()
-    os_like = os_info.get("ID_LIKE", "").lower()
-
-    if not any(dist in ("debian", "ubuntu", "raspbian", "armbian") for dist in [os_id, os_like]):
-        print(colorize(f"Votre distribution ({os_id}) n'est pas supportée pour l'installation automatique.", Colors.WARNING))
-        print("Veuillez installer manuellement les paquets listés dans le README.md.")
-        input("\nAppuyez sur Entrée pour continuer...")
-        return
-
-    arch = platform.machine()
-    is_arm = arch.startswith("arm") or arch.startswith("aarch")
-
-    toolchain_packages = []
-
-    base_packages = ["git", "python3", "python3-venv", "python3-pip", "make", "curl", "tar", "build-essential", "sshpass", "ipmitool"]
-    required_packages = base_packages + toolchain_packages
-
-    print("Vérification des paquets requis...")
-    missing_packages = []
-    for pkg in required_packages:
-        status = subprocess.run(["dpkg", "-s", pkg], capture_output=True, text=True).returncode
-        if status != 0:
-            missing_packages.append(pkg)
-
-    if not missing_packages:
-        print(colorize("\nToutes les dépendances système semblent déjà installées.", Colors.OKGREEN))
+    _, missing = orchestrator.get_system_dependencies()
+    if not missing:
+        print(colorize("Toutes les dépendances système semblent déjà installées.", Colors.OKGREEN))
         input("Appuyez sur Entrée pour continuer...")
         return
 
-    print(colorize("\nDépendances manquantes détectées :", Colors.WARNING))
-    for pkg in missing_packages:
+    print(colorize("Dépendances manquantes détectées :", Colors.WARNING))
+    for pkg in missing:
         print(f"  - {pkg}")
 
-    install_command = f"sudo apt install -y {' '.join(missing_packages)}"
-    print("\nLa commande suivante sera exécutée pour les installer :")
-    print(colorize(f"  {install_command}", Colors.BOLD))
-
-    if not ask_yes_no("\nVoulez-vous lancer cette commande maintenant ?", default=True):
+    install_command = f"sudo apt install -y {' '.join(missing)}"
+    print(f"\nLa commande suivante sera exécutée : {colorize(install_command, Colors.BOLD)}")
+    if ask_yes_no("Voulez-vous lancer cette commande maintenant ?", default=True):
+        with progress_step("Installation des dépendances"):
+            if orchestrator.install_system_dependencies(missing):
+                print(colorize("Installation terminée avec succès !", Colors.OKGREEN))
+            else:
+                print(colorize("L'installation a échoué.", Colors.FAIL))
+    else:
         print(colorize("Installation annulée.", Colors.WARNING))
-        input("Appuyez sur Entrée pour continuer...")
-        return
-
-    try:
-        print("Lancement de l'installation (cela peut prendre quelques minutes)...")
-        process = subprocess.run(install_command, shell=True, check=True)
-        if process.returncode == 0:
-            print(colorize("\nInstallation des dépendances terminée avec succès !", Colors.OKGREEN))
-    except subprocess.CalledProcessError as e:
-        print(colorize(f"\nErreur lors de l'installation des dépendances (code {e.returncode}).", Colors.FAIL))
-        print("Veuillez vérifier les messages d'erreur ci-dessus et réessayer manuellement.")
-    except Exception as e:
-        print(colorize(f"\nUne erreur inattendue est survenue : {e}", Colors.FAIL))
-
     input("Appuyez sur Entrée pour continuer...")
 
-
-def run_post_flash_help():
-    """Guides the user to find the serial port and generate the Klipper config."""
-    print_block(colorize("Aide à la configuration Klipper", Colors.HEADER))
-    print(
-        "Cet assistant va vous aider à trouver le port série de votre BMCU-C\n"
-        "et à générer la configuration Klipper nécessaire."
-    )
-
-    if not ask_yes_no(
-        "\nExécutez-vous ce script sur la machine qui héberge Klipper (votre Raspberry Pi, CB1, etc.) ?",
-        default=True,
-    ):
-        print(colorize("\nAction requise :", Colors.WARNING))
-        print("Connectez-vous en SSH à votre machine Klipper et exécutez la commande suivante :")
-        print(colorize("  ls /dev/serial/by-id/*", Colors.BOLD))
-        print("Repérez la ligne contenant '1a86_USB_Serial' et utilisez-la dans votre configuration.")
-        input("\nAppuyez sur Entrée pour continuer...")
+def run_build_flow(orchestrator: Orchestrator):
+    """Gère le processus de compilation du firmware."""
+    existing_firmware = find_default_firmware()
+    if existing_firmware and not ask_yes_no(f"Un firmware existe ({existing_firmware.name}). Recompiler ?", default=False):
+        print(colorize("Compilation annulée.", Colors.WARNING))
         return
 
-    print("\nRecherche des périphériques série...")
-    try:
-        result = subprocess.run(
-            "ls /dev/serial/by-id/*",
-            shell=True,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        devices = result.stdout.strip().splitlines()
-    except subprocess.CalledProcessError:
-        print(colorize("\nImpossible de lister les périphériques dans /dev/serial/by-id/.", Colors.FAIL))
-        print("Assurez-vous que votre BMCU-C est bien branché et reconnu par le système.")
-        input("\nAppuyez sur Entrée pour continuer...")
-        return
+    with progress_step("Compilation du firmware Klipper"):
+        if orchestrator.run_build():
+            print(colorize("Build terminé.", Colors.OKGREEN))
+        else:
+            print(colorize("Le build a échoué.", Colors.FAIL))
 
-    bmcu_devices = [dev for dev in devices if "1a86_USB_Serial" in dev or "wch" in dev.lower()]
+def run_flash_flow(orchestrator: Orchestrator, profile: QuickProfile):
+    """Gère le processus de flashage."""
+    firmware_path = find_default_firmware()
+    if not firmware_path or not ask_yes_no(f"Utiliser le firmware {firmware_path} ?", default=True):
+        path_str = ask_text("Chemin du firmware", required=True)
+        firmware_path = Path(path_str).expanduser().resolve()
+        if not firmware_path.is_file():
+            print(colorize(f"Fichier '{firmware_path}' introuvable.", Colors.FAIL))
+            return
 
-    serial_port = ""
-    if len(bmcu_devices) == 1:
-        serial_port = bmcu_devices[0]
-        print(colorize(f"\nPériphérique BMCU-C détecté : {serial_port}", Colors.OKGREEN))
-    elif len(bmcu_devices) > 1:
-        print(colorize("\nPlusieurs périphériques correspondants trouvés :", Colors.WARNING))
-        for i, dev in enumerate(bmcu_devices, 1):
+    flash_manager = FlashManager(Path(__file__).resolve().parent)
+    detected_devices = flash_manager.detect_serial_devices()
+
+    serial_device = ""
+    if detected_devices:
+        print(colorize("Périphériques USB détectés :", Colors.HEADER))
+        for i, dev in enumerate(detected_devices, 1):
             print(f"  {i}. {dev}")
-        choice = ask_menu([f"Utiliser {dev}" for dev in bmcu_devices], default_index=0)
-        serial_port = bmcu_devices[choice]
+        choice = ask_menu([f"Utiliser {dev}" for dev in detected_devices] + ["Saisir un autre chemin"], default_index=0)
+        if choice < len(detected_devices):
+            serial_device = detected_devices[choice]
+        else:
+            serial_device = ask_text("Chemin du périphérique USB", default=profile.serial_device)
     else:
-        print(colorize("\nImpossible de détecter automatiquement le BMCU-C.", Colors.FAIL))
-        print("Voici la liste de tous les périphériques série trouvés :")
-        for dev in devices:
-            print(f"  - {dev}")
-        serial_port = ask_text(
-            "\nEntrez manuellement le chemin du port série pour le BMCU-C", required=False
-        )
+        serial_device = ask_text("Chemin du périphérique USB", default=profile.serial_device)
 
-    if not serial_port:
-        print(colorize("\nAucun port série sélectionné. Opération annulée.", Colors.WARNING))
-        input("\nAppuyez sur Entrée pour continuer...")
+    profile.serial_device = serial_device
+    save_profile(profile)
+
+    if not ask_yes_no("Lancer le flash ?", default=True):
+        print(colorize("Opération annulée.", Colors.WARNING))
         return
 
-    config_block = f"""
-[bmcu]
-serial: {serial_port}
-baud: 1250000
-# Décommentez la ligne suivante si vous utilisez une version patchée de pyserial
-# pour supporter ce baud rate non standard.
-# use_custom_baudrate: true
-"""
-    print(colorize("\nVoici le bloc de configuration à ajouter à votre fichier printer.cfg :", Colors.OKGREEN))
-    print_block(colorize(textwrap.dedent(config_block).strip(), Colors.BOLD))
-    input("Appuyez sur Entrée pour revenir au menu principal...")
-
+    with progress_step("Flashage du firmware"):
+        if orchestrator.run_flash(firmware_path, serial_device):
+             print(colorize("\nFlash terminé avec succès !", f"{Colors.BOLD}{Colors.OKGREEN}"))
+        else:
+            print(colorize("\nLe flashage a échoué.", f"{Colors.BOLD}{Colors.FAIL}"))
 
 def main(argv: list[str] | None = None) -> int:
     """Point d'entrée CLI."""
+    parser = argparse.ArgumentParser(description="Assistant interactif pour flasher le BMCU vers Klipper")
+    parser.parse_args(argv)
 
-    args = parse_arguments(argv)
     display_logo()
     profile = load_profile()
-    environment = detect_environment_defaults()
-    apply_environment_defaults(profile, environment)
-
-    if args.non_interactif:
-        try:
-            choices = gather_choices_from_args(args, profile, environment)
-        except ValueError as err:
-            print(colorize(str(err), Colors.FAIL))
-            return 2
-        return run_flash_flow(
-            profile,
-            environment,
-            preset_choices=choices,
-            ask_confirmation=not (args.auto_confirm or args.non_interactif),
-        )
+    orchestrator = Orchestrator(Path(__file__).resolve().parent)
 
     while True:
-        selection = show_main_menu(profile, environment)
+        firmware = find_default_firmware()
+        firmware_display = str(firmware) if firmware else "à générer"
+        summary = f"""
+        {colorize('Assistant BMCU → Klipper', f'{Colors.BOLD}{Colors.OKBLUE}')}
+          • Firmware local   : {firmware_display}
+          • Périphérique USB : {profile.serial_device or '(auto)'}
+        """
+        print_block(summary)
 
-        if selection == 0:  # Install dependencies
-            run_dependency_installation()
-        elif selection == 1:  # Build firmware
-            run_build()
-        elif selection == 2:  # Flash firmware
-            return run_flash_flow(profile, environment, ask_confirmation=not args.auto_confirm)
-        elif selection == 3:  # Post-flash help
-            run_post_flash_help()
-        elif selection == 4:  # Quit
+        selection = ask_menu(
+            [
+                "Vérifier et installer les dépendances",
+                "Compiler le firmware",
+                "Flasher le firmware (assistant)",
+                "Quitter",
+            ],
+            default_index=2,
+        )
+
+        if selection == 0:
+            run_dependency_check(orchestrator)
+        elif selection == 1:
+            run_build_flow(orchestrator)
+        elif selection == 2:
+            run_flash_flow(orchestrator, profile)
+        elif selection == 3:
             print(colorize("À bientôt !", Colors.OKBLUE))
             return 0
 
-
-if __name__ == "__main__":  # pragma: no cover - point d'entrée CLI
+if __name__ == "__main__":
     sys.exit(main())
