@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+# --- Définition des couleurs ANSI ---
+# Vous pouvez les réutiliser dans votre script si besoin
+PINK = "\033[95m"
+CYAN = "\033[96m"
+WHITE = "\033[1;97m"
+GREY = "\033[90m"
+RESET = "\033[0m" # Réinitialise la couleur
+
+# --- En-tête ASCII "MatrixFlow" ---
+# L'utilisation d'un f-string (f"...") permet d'insérer 
+# facilement les variables de couleur.
+header = f"""
+{PINK}███████████████████████████████████████████████████████{RESET}
+{PINK}█ {CYAN}( (O) ){PINK} ------ {CYAN}◇{PINK}.--.{CYAN}◇{PINK} ------ {CYAN}( (O) ){PINK} █{RESET}
+{PINK}█{CYAN}                                                 {PINK}█{RESET}
+{PINK}█         {WHITE}M A T R I X F L O W{PINK}         █{RESET}
+{PINK}█             {GREY}[ KLPTR_AMS ]{PINK}             █{RESET}
+{PINK}█{CYAN}                                                 {PINK}█{RESET}
+{PINK}█ {CYAN}( (O) ){PINK} ------ {CYAN}◇{PINK}'--'{CYAN}◇{PINK} ------ {CYAN}( (O) ){PINK} █{RESET}
+{PINK}███████████████████████████████████████████████████████{RESET}
+"""
+
+# --- Affichage de l'en-tête au lancement ---
+print(header)
+
+# --- Le reste de votre script commence ici ---
+print(f"{WHITE}Initialisation du script...{RESET}")
+# ...
