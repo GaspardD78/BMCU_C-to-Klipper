@@ -1,175 +1,114 @@
-# Guide simplifié : Flasher un BMCU-C avec Klipper
+# MatrixFlow : Flashez votre BMCU-C avec Klipper
 
 <p align="center">
   <img src="assets/bmcu_logo.svg" alt="Logo BMCU-C to Klipper" width="220" />
 </p>
 
-Ce dépôt rassemble **tout le nécessaire pour transformer un BMCU-C en module Klipper**. Ce guide a été conçu pour un public **débutant, pressé et prudent** : chaque commande est prête à copier-coller, des vérifications automatiques sont prévues, et des solutions sont listées si quelque chose coince.
+**MatrixFlow** est un workflow automatisé et scripté pour compiler et flasher le firmware [Klipper](https://www.klipper3d.org/) sur une carte **BMCU-C**. Conçu pour être robuste, simple et transparent, il vous guide à travers chaque étape, de la préparation de l'environnement au flashage final.
 
-> 🛟 **En cas de doute** : exécutez exactement ce qui est indiqué et ne sautez pas les étapes de vérification.
+Ce projet se concentre exclusivement sur la méthode MatrixFlow, qui utilise une série de scripts Python non interactifs pour une automatisation complète et fiable.
 
 ---
 
 ## 🗺️ Vue d'ensemble
 
-1. [Ce qu'il vous faut](#-ce-quil-vous-faut)
-2. [Procédure guidée (bmcu_tool.py)](#-procédure-guidée-bmcu_toolpy)
-3. [Et après le flash ?](#-et-après-le-flash-)
-4. [Dépanner sans paniquer](#-dépanner-sans-paniquer)
-5. [Contribuer & licence](#-contribuer--licence)
+1.  [Principe de fonctionnement](#-principe-de-fonctionnement)
+2.  [Prérequis](#-prérequis)
+3.  [Installation et Utilisation](#-installation-et-utilisation)
+4.  [Détail du Workflow](#-détail-du-workflow)
+5.  [Dépannage](#-dépannage)
+6.  [Licence](#-licence)
 
 ---
 
-## 📦 Ce qu'il vous faut
+## ⚙️ Principe de fonctionnement
+
+MatrixFlow est un ensemble de scripts Python qui s'exécutent séquentiellement. Chaque script a une seule responsabilité :
+
+1.  **Préparer l'environnement** : Télécharge Klipper et la toolchain de compilation.
+2.  **Compiler le firmware** : Applique les patchs nécessaires et compile Klipper pour la BMCU-C.
+3.  **Flasher le firmware** : Téléverse le firmware compilé sur la carte.
+4.  **Aider à la configuration** : Génère le bloc de configuration Klipper à ajouter à votre `printer.cfg`.
+
+Cette approche modulaire rend le processus facile à comprendre, à déboguer et à maintenir.
+
+---
+
+## 📦 Prérequis
 
 ### Matériel
 
-- Un BMCU-C (avec son câble USB-C).
-- Un PC ou un SBC sous Linux (Ubuntu 22.04+, Debian 12+, Raspberry Pi OS 64 bits...) avec accès administrateur.
+-   Une carte BMCU-C (avec son câble USB-C).
+-   Un ordinateur ou un SBC (Single-Board Computer) sous Linux (par ex. Raspberry Pi, BTT CB1/Pi, etc.) avec un accès `sudo`. Les distributions basées sur Debian (Debian, Ubuntu, Armbian) sont recommandées.
 
 ### Logiciels
 
-L'outil principal `bmcu_tool.py` peut installer la plupart des dépendances pour vous. Si vous préférez une installation manuelle, voici les paquets nécessaires pour un système Debian/Ubuntu :
+-   **git**
+-   **python3**
+-   **make**
 
+Vous pouvez les installer sur un système Debian/Ubuntu avec la commande suivante :
 ```bash
-sudo apt update
-sudo apt install -y git python3 python3-venv python3-pip make curl tar build-essential sshpass ipmitool
+sudo apt update && sudo apt install -y git python3 make
 ```
 
 ---
 
-## 🤖 Procédure guidée (bmcu_tool.py)
+## 🚀 Installation et Utilisation
 
-L'outil `bmcu_tool.py` est le **point d'entrée unique** pour toutes les opérations. Il vous guide à travers un menu interactif.
+### Étape 1 : Cloner le dépôt
 
-### Lancement rapide
-
-1.  **Clonez le dépôt et placez-vous à la racine :**
-    ```bash
-    git clone https://github.com/GaspardD78/BMCU_C-to-Klipper.git
-    cd BMCU_C-to-Klipper
-    ```
-
-2.  **Préparez l'environnement Python (une seule fois) :**
-    ```bash
-    python3 -m venv .venv
-    source .venv/bin/activate
-    pip install -r flash_automation/requirements.txt
-    ```
-
-3.  **Lancez l'outil principal (en tant que module) :**
-    ```bash
-    python3 -m flash_automation.bmcu_tool
-    ```
-
-### Utilisation du menu
-
-L'outil vous présente un **tableau de bord** qui résume l'état de votre système. Les options du menu vous permettent d'agir sur cet état.
-
-```
-    Assistant BMCU → Klipper
-    /-------------------------------------------------------\
-    | ÉTAT DU SYSTÈME :                                      |
-    |-------------------------------------------------------|
-    | 1. Dépôt Klipper : [✓] Cloné                          |
-    | 2. Firmware BMCU-C : [✗] Non compilé                  |
-    | 3. Carte connectée : [!] Aucune carte détectée        |
-    \-------------------------------------------------------/
-
-      1. Gestion du firmware
-      2. Flasher le firmware
-      3. Vérifier les dépendances (avancé)
-      4. Quitter
+Clonez ce dépôt sur votre machine hôte Klipper (votre Raspberry Pi ou équivalent) :
+```bash
+git clone https://github.com/GaspardD78/BMCU_C-to-Klipper.git
+cd BMCU_C-to-Klipper
 ```
 
-Le flux de travail typique est :
-1.  **Gestion du firmware** → **Compiler le firmware** : Prépare le binaire Klipper. Vous pouvez aussi utiliser ce menu pour configurer des options avancées (`menuconfig`).
-2.  **Flasher le firmware** : Vous guide pour sélectionner le port série de votre BMCU-C et y transférer le firmware.
-3.  **Vérifier les dépendances (avancé)** : Utile lors de la première utilisation pour installer les paquets système et Python nécessaires.
+### Étape 2 : Lancer le workflow
+
+Le workflow complet est géré par un seul script. Exécutez-le depuis la racine du projet :
+```bash
+python3 -m matrix_flow.run_workflow
+```
+
+Le script va maintenant exécuter les quatre étapes les unes après les autres. Suivez les instructions affichées à l'écran.
+
+-   Le script va s'arrêter pour vous demander de mettre la carte en **mode bootloader** avant le flashage. Pour cela :
+    1.  Débranchez la carte.
+    2.  Maintenez le bouton `BOOT` appuyé.
+    3.  Branchez la carte via USB-C.
+    4.  Relâchez le bouton `BOOT`.
+
+Une fois le flashage terminé, le script affichera le bloc de configuration à ajouter à votre `printer.cfg`.
 
 ---
 
-## ✅ Et après le flash ?
+## 🔬 Détail du Workflow
 
-Intégrez le module avec Klipper :
+Le workflow est composé de quatre scripts principaux, situés dans le dossier `matrix_flow/`. Pour les utilisateurs avancés, il est possible de les exécuter individuellement.
 
-1. Copiez `addon/bmcu.py` dans `klippy/extras/`.
-2. Ajoutez la section suivante à votre `printer.cfg`, en adaptant le port série si nécessaire :
+| Script | Description |
+| :--- | :--- |
+| `step_01_environment.py` | **Prépare l'environnement.** Clone Klipper et télécharge la toolchain RISC-V dans un dossier `.cache/`. |
+| `step_02_build.py` | **Compile le firmware.** Applique les patchs spécifiques au CH32V20X, configure Klipper et lance la compilation pour générer `klipper.bin`. |
+| `step_03_flash.py` | **Flashe la carte.** Utilise l'outil `wchisp` pour téléverser `klipper.bin` sur la BMCU-C via USB. |
+| `step_04_configure.py` | **Aide à la configuration.** Détecte le port série de la carte et génère le bloc `[mcu bmcu]` à ajouter à `printer.cfg`. |
 
-   ```ini
-   [bmcu]
-   serial: /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
-   baud: 1250000
-   ```
-
-3. Redémarrez Klipper.
-
-La documentation complète d'intégration est disponible dans [`addon/docs/setup.md`](addon/docs/setup.md).
+Pour une documentation technique détaillée de chaque script, consultez le dossier [`matrix_flow/docs/`](./matrix_flow/docs/).
 
 ---
 
-## 🆘 Dépanner sans paniquer
+## 🆘 Dépannage
 
-| Problème | Solution rapide |
-| --- | --- |
-| `python3` ou `git` introuvable | Reprenez la section [Logiciels](#-logiciels). |
-| `Permission denied` sur le port série | `sudo usmod -aG dialout "$USER"` puis reconnectez-vous. |
-| `bmcu_tool.py` ne se lance pas | Activez l'environnement virtuel (`source .venv/bin/activate`). |
-| Le flash échoue | Vérifiez le câble USB et assurez-vous que le BMCU-C est bien alimenté. Si le problème persiste, consultez la **procédure de flashage manuel**. |
-
-### 💡 Le cas des différentes versions de cartes
-
-Il existe plusieurs variantes matérielles du BMCU-C (avec port série UART, avec port USB-C...). L'outil `bmcu_tool.py` tente de gérer la plupart des cas, mais si vous rencontrez des erreurs de flashage persistantes ou si votre carte ne répond plus, une procédure manuelle peut être nécessaire.
-
-➡️ **[Consulter le guide de flashage manuel](flash_automation/docs/flash_procedure.md)**
+| Problème | Solution |
+| :--- | :--- |
+| **Commande `git`, `python3` ou `make` introuvable** | Assurez-vous d'avoir installé les [prérequis logiciels](#-prérequis). |
+| **Échec du flashage (`wchisp` échoue)** | - Vérifiez que la carte est bien en **mode bootloader**.<br>- Assurez-vous que le câble USB est bien connecté et fonctionnel.<br>- Si le service Klipper est en cours, le script tente de l'arrêter. Si cela échoue, arrêtez Klipper manuellement (`sudo systemctl stop klipper`) avant de relancer. |
+| **"Permission denied" sur le port série** | Votre utilisateur n'a pas les droits pour accéder aux ports série. Ajoutez-le au groupe `dialout` : `sudo usermod -aG dialout $USER`, puis déconnectez-vous et reconnectez-vous. |
+| **Aucun port série détecté** | Après le flashage, la carte peut prendre quelques secondes à s'initialiser. Débranchez et rebranchez-la. Vous pouvez aussi trouver le port manuellement avec `ls /dev/serial/by-id/*` et l'ajouter dans la configuration. |
 
 ---
 
-## 🧪 Tests automatisés (avec Docker)
+## 🤝 Licence
 
-Pour garantir que les tests s'exécutent dans un environnement propre, reproductible et proche de la configuration cible (Linux, Klipper, dépendances système), le projet utilise **Docker**.
-
-Cette approche assure que les résultats des tests sont fiables, que vous soyez sur Windows, macOS ou Linux.
-
-### Prérequis
-
-1.  **Installez Docker** : Suivez les instructions officielles pour votre système d'exploitation.
-    - [Docker Desktop pour Windows](https://docs.docker.com/desktop/install/windows-install/)
-    - [Docker Desktop pour macOS](https://docs.docker.com/desktop/install/mac-install/)
-    - [Docker Engine pour Linux](https://docs.docker.com/engine/install/)
-
-2.  **Assurez-vous que le service Docker est en cours d'exécution** avant de lancer les tests.
-
-### Lancer la suite de tests
-
-Un script unique `run_tests.sh` gère tout le processus pour vous.
-
-1.  **Assurez-vous que le script est exécutable :**
-    ```bash
-    chmod +x run_tests.sh
-    ```
-
-2.  **Lancez le script depuis la racine du projet :**
-    ```bash
-    ./run_tests.sh
-    ```
-
-    > **⚠️ Note pour les utilisateurs Windows :**
-    > Le script `run_tests.sh` doit être exécuté dans un terminal qui interprète les commandes `bash`. Si vous double-cliquez dessus ou l'exécutez depuis une invite de commande standard (`cmd.exe`), Windows pourrait essayer de l'ouvrir avec Python, ce qui causerait une `SyntaxError`.
-    >
-    > **Solution :** Lancez le script depuis un terminal comme **Git Bash** (inclus avec Git pour Windows) ou depuis le **Sous-système Windows pour Linux (WSL)**.
-
-Le script va automatiquement :
-- Construire une image Docker contenant toutes les dépendances (compilateur, Klipper, etc.).
-- Lancer un conteneur temporaire.
-- Y exécuter la suite de tests `pytest`.
-- Afficher les résultats et se nettoyer.
-
----
-
-## 🤝 Contribuer & licence
-
-- Suivez la convention [Conventional Commits](https://www.conventionalcommits.org/fr/v1.0.0/).
-- Lisez [AGENTS.md](AGENTS.md) avant toute modification importante.
-
-Le projet est distribué sous licence **GPLv3** – voir [LICENSE](LICENSE).
+Ce projet est distribué sous licence **GPLv3**. Voir le fichier [LICENSE](./LICENSE) pour plus de détails.
