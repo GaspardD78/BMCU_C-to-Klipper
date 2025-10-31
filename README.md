@@ -73,11 +73,17 @@ python3 -m matrix_flow.run_workflow
 
 Le script va maintenant exécuter les quatre étapes les unes après les autres. Suivez les instructions affichées à l'écran.
 
--   Le script va s'arrêter pour vous demander de mettre la carte en **mode bootloader** avant le flashage. Pour cela :
-    1.  Débranchez la carte.
-    2.  Maintenez le bouton `BOOT` appuyé.
-    3.  Branchez la carte via USB-C.
-    4.  Relâchez le bouton `BOOT`.
+-   Le script va s'arrêter avant le flashage pour vous permettre de préparer la carte. Selon la version de votre BMCU-C, la procédure diffère :
+
+    -   **Pour les cartes récentes (sans bouton `BOOT` visible)** :
+        Le passage en mode bootloader est **automatique**. Le script de flashage `wchisp` s'en occupe pour vous. Il vous suffit de vous assurer que la carte est bien connectée en USB-C lorsque le script vous y invite.
+
+    -   **Pour les cartes plus anciennes (avec un bouton `BOOT`)** :
+        Vous devez la mettre manuellement en mode bootloader :
+        1.  Débranchez la carte.
+        2.  Maintenez le bouton `BOOT` appuyé.
+        3.  Branchez la carte via son port USB.
+        4.  Relâchez le bouton `BOOT`.
 
 Une fois le flashage terminé, le script affichera le bloc de configuration à ajouter à votre `printer.cfg`.
 
