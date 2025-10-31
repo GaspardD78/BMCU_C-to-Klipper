@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+import ui
 
 class FlashError(Exception):
     """Exception personnalisée pour les erreurs de cette étape."""
@@ -45,20 +46,20 @@ class FlashManager:
             if not ignore_errors:
                 error_message = (
                     f"La commande `{' '.join(command)}` a échoué.\n"
-                    f"--- STDOUT ---\n{e.stdout}\n"
-                    f"--- STDERR ---\n{e.stderr}"
+                    f"--- STDOUT ---\n{e.stdout if isinstance(e, subprocess.CalledProcessError) else ''}\n"
+                    f"--- STDERR ---\n{e.stderr if isinstance(e, subprocess.CalledProcessError) else ''}"
                 )
                 raise FlashError(error_message) from e
             else:
-                print(f"Avertissement : La commande `{' '.join(command)}` a échoué, mais l'erreur est ignorée.")
+                ui.print_warning(f"La commande `{' '.join(command)}` a échoué, mais l'erreur est ignorée.")
 
     def _manage_klipper_service(self, action: str):
         """Démarre ou arrête le service Klipper."""
         if not shutil.which("sudo"):
-            print("Avertissement : 'sudo' n'est pas installé. Impossible de gérer le service Klipper.")
+            ui.print_warning("'sudo' n'est pas installé. Impossible de gérer le service Klipper.")
             return
 
-        print(f"{action.capitalize()} du service Klipper...")
+        ui.print_info(f"{action.capitalize()} du service Klipper...")
         self._run_command(["sudo", "systemctl", action, "klipper.service"], ignore_errors=True)
 
     def detect_serial_devices(self) -> list[str]:
@@ -71,8 +72,6 @@ class FlashManager:
 
     def run(self, serial_device: str | None):
         """Exécute toutes les étapes du flashage."""
-        print("--- Étape 3: Flashage du firmware ---")
-
         if not self.firmware_path.is_file():
             raise FlashError(f"Le firmware '{self.firmware_path}' est introuvable. Avez-vous exécuté l'étape 2 ?")
 
@@ -82,17 +81,17 @@ class FlashManager:
             raise FlashError("L'outil 'wchisp' est introuvable. Assurez-vous qu'il est installé et dans le PATH.")
 
         if not serial_device:
-            print("Aucun port série spécifié. Tentative de détection automatique...")
+            ui.print_info("Aucun port série spécifié. Tentative de détection automatique...")
             available_devices = self.detect_serial_devices()
             if not available_devices:
                 raise FlashError("Aucun port série détecté. Veuillez en spécifier un avec l'argument --device.")
             elif len(available_devices) == 1:
                 serial_device = available_devices[0]
-                print(f"Un seul port série détecté : {serial_device}")
+                ui.print_info(f"Un seul port série détecté : {serial_device}")
             else:
-                print("Plusieurs ports série détectés. Veuillez choisir lequel utiliser :")
-                for i, device in enumerate(available_devices):
-                    print(f"  {i + 1}: {device}")
+                ui.print_info("Plusieurs ports série détectés. Veuillez choisir lequel utiliser :")
+                table_data = [[str(i + 1), device] for i, device in enumerate(available_devices)]
+                ui.print_table(["#", "Périphérique"], table_data)
 
                 while True:
                     try:
@@ -100,23 +99,25 @@ class FlashManager:
                         choice_index = int(choice) - 1
                         if 0 <= choice_index < len(available_devices):
                             serial_device = available_devices[choice_index]
-                            print(f"Port série sélectionné : {serial_device}")
+                            ui.print_info(f"Port série sélectionné : {serial_device}")
                             break
                         else:
-                            print("Choix invalide. Veuillez réessayer.")
+                            ui.print_error("Choix invalide. Veuillez réessayer.")
                     except (ValueError, IndexError):
-                        print("Entrée invalide. Veuillez entrer un numéro de la liste.")
+                        ui.print_error("Entrée invalide. Veuillez entrer un numéro de la liste.")
+
+        if not ui.ask_confirmation(f"Prêt à flasher '{self.firmware_path.name}' sur '{serial_device}' ?"):
+            ui.print_warning("Flashage annulé par l'utilisateur.")
+            return
 
         self._manage_klipper_service("stop")
         try:
-            print(f"Flashage de '{self.firmware_path.name}' sur '{serial_device}' avec wchisp...")
+            ui.print_info(f"Flashage de '{self.firmware_path.name}' sur '{serial_device}' avec wchisp...")
             command = ["wchisp", "--serial", "--port", serial_device, "flash", str(self.firmware_path)]
             self._run_command(command)
-            print("Flashage réussi !")
+            ui.print_success("Flashage réussi !")
         finally:
             self._manage_klipper_service("start")
-
-        print("------------------------------------")
 
 def main():
     """Point d'entrée du script."""
@@ -130,7 +131,7 @@ def main():
         manager = FlashManager(base_dir)
         manager.run(args.device)
     except FlashError as e:
-        print(f"\nERREUR : {e}", file=sys.stderr)
+        ui.print_error(str(e))
         exit(1)
 
 if __name__ == "__main__":

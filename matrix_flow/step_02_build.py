@@ -12,7 +12,11 @@ import json
 import os
 import shutil
 import subprocess
+import threading
+import itertools
+import time
 from pathlib import Path
+import ui
 
 class BuildError(Exception):
     """Exception personnalisée pour les erreurs de cette étape."""
@@ -40,13 +44,29 @@ class BuildManager:
         except (FileNotFoundError, json.JSONDecodeError) as e:
             raise BuildError(f"Le fichier de configuration '{self.config_path}' est manquant ou invalide.") from e
 
-    def _run_command(self, command: list[str], cwd: Path):
-        """Exécute une commande avec la toolchain et lève une exception en cas d'échec."""
+    def _run_command_with_spinner(self, command: list[str], cwd: Path, title: str):
+        """Exécute une commande avec un spinner et lève une exception en cas d'échec."""
         env = os.environ.copy()
         toolchain_bin = self.toolchain_dir.resolve() / "bin"
         if not toolchain_bin.is_dir():
             raise BuildError(f"Le répertoire bin de la toolchain '{toolchain_bin}' est introuvable. Avez-vous exécuté l'étape 1 ?")
         env["PATH"] = f"{str(toolchain_bin)}{os.pathsep}{env['PATH']}"
+
+        spinner = itertools.cycle(['-', '/', '|', '\\'])
+        done = threading.Event()
+
+        process = None
+
+        def spin():
+            while not done.is_set():
+                sys.stdout.write(f'\r{title} {next(spinner)}')
+                sys.stdout.flush()
+                time.sleep(0.1)
+            sys.stdout.write(f'\r{" " * (len(title) + 2)}\r')
+            sys.stdout.flush()
+
+        spinner_thread = threading.Thread(target=spin)
+        spinner_thread.start()
 
         try:
             process = subprocess.run(
@@ -69,39 +89,40 @@ class BuildManager:
                 f"--- STDERR ---\n{e.stderr}"
             )
             raise BuildError(error_message) from e
+        finally:
+            done.set()
+            spinner_thread.join()
+
 
     def _apply_overrides(self):
         """Applique les fichiers et patchs spécifiques au projet."""
-        print("Application des surcharges pour le CH32V20X...")
+        ui.print_info("Application des surcharges pour le CH32V20X...")
         if not self.overrides_dir.is_dir():
-            print("Avertissement : Le répertoire des surcharges n'a pas été trouvé.")
+            ui.print_warning("Le répertoire des surcharges n'a pas été trouvé.")
             return
 
-        # Copie des fichiers sources (écrase les fichiers existants)
         shutil.copytree(self.overrides_dir, self.klipper_dir, dirs_exist_ok=True)
+        ui.print_success("Surcharges appliquées.")
 
     def run(self):
         """Exécute toutes les étapes de la compilation."""
-        print("--- Étape 2: Compilation du firmware ---")
-
         if not self.klipper_dir.is_dir():
             raise BuildError("Le répertoire de Klipper est introuvable. Avez-vous exécuté l'étape 1 ?")
 
         self._apply_overrides()
 
-        print(f"Utilisation de la configuration : {self.default_kconfig_path}")
+        ui.print_info(f"Utilisation de la configuration : {self.default_kconfig_path}")
         if not self.default_kconfig_path.is_file():
             raise BuildError(f"Le fichier de configuration '{self.default_kconfig_path}' est introuvable.")
         shutil.copy(self.default_kconfig_path, self.klipper_dir / ".config")
 
-        print("Préparation de la configuration Klipper...")
-        self._run_command(["make", "olddefconfig"], cwd=self.klipper_dir)
+        self._run_command_with_spinner(["make", "olddefconfig"], cwd=self.klipper_dir, title="Préparation de la configuration Klipper...")
+        ui.print_success("Configuration Klipper préparée.")
 
-        print("Nettoyage de l'environnement de compilation...")
-        self._run_command(["make", "clean"], cwd=self.klipper_dir)
+        self._run_command_with_spinner(["make", "clean"], cwd=self.klipper_dir, title="Nettoyage de l'environnement de compilation...")
+        ui.print_success("Environnement de compilation nettoyé.")
 
-        print("Lancement de la compilation...")
-        make_process = self._run_command(["make"], cwd=self.klipper_dir)
+        make_process = self._run_command_with_spinner(["make"], cwd=self.klipper_dir, title="Compilation du firmware...")
 
         if not self.firmware_path.is_file():
             error_details = (
@@ -111,8 +132,7 @@ class BuildManager:
             )
             raise BuildError(error_details)
 
-        print("-----------------------------------------")
-        print(f"Firmware compilé avec succès : {self.firmware_path}")
+        ui.print_success(f"Firmware compilé avec succès : {self.firmware_path}")
         return self.firmware_path
 
 def main():
@@ -122,7 +142,7 @@ def main():
         manager = BuildManager(base_dir)
         manager.run()
     except BuildError as e:
-        print(f"\nERREUR : {e}", file=os.sys.stderr)
+        ui.print_error(str(e))
         exit(1)
 
 if __name__ == "__main__":

@@ -15,10 +15,19 @@ import subprocess
 import tarfile
 import urllib.request
 from pathlib import Path
+from tqdm import tqdm
+import ui
 
 class EnvironmentError(Exception):
     """Exception personnalisée pour les erreurs de cette étape."""
     pass
+
+class TqdmUpTo(tqdm):
+    """Provides `update_to(block_num, block_size, total_size)`."""
+    def update_to(self, b=1, bsize=1, tsize=None):
+        if tsize is not None:
+            self.total = tsize
+        self.update(b * bsize - self.n)
 
 class EnvironmentManager:
     """Gère la préparation de l'environnement."""
@@ -63,12 +72,12 @@ class EnvironmentManager:
 
     def check_system_dependencies(self):
         """Vérifie la présence des dépendances système de base."""
-        print("Vérification des dépendances système...")
+        ui.print_info("Vérification des dépendances système...")
         dependencies = ["git", "make", "python3"]
         missing = [dep for dep in dependencies if not shutil.which(dep)]
         if missing:
             raise EnvironmentError(f"Dépendances système manquantes : {', '.join(missing)}. Veuillez les installer.")
-        print("Dépendances système OK.")
+        ui.print_success("Dépendances système OK.")
 
     def ensure_klipper_repo(self):
         """S'assure que le dépôt Klipper est cloné et à la bonne version."""
@@ -77,33 +86,34 @@ class EnvironmentManager:
         git_ref = klipper_config["git_ref"]
 
         if not self.klipper_dir.is_dir() or not (self.klipper_dir / ".git").is_dir():
-            print(f"Clonage de Klipper (version {git_ref})...")
+            ui.print_info(f"Clonage de Klipper (version {git_ref})...")
             self.cache_dir.mkdir(exist_ok=True)
             self._run_command(["git", "clone", "--branch", git_ref, repo_url, str(self.klipper_dir)], cwd=self.cache_dir)
         else:
-            print(f"Vérification du dépôt Klipper (cible: {git_ref})...")
+            ui.print_info(f"Vérification du dépôt Klipper (cible: {git_ref})...")
             self._run_command(["git", "fetch", "origin", "--tags"], cwd=self.klipper_dir)
             self._run_command(["git", "checkout", git_ref], cwd=self.klipper_dir)
-        print("Dépôt Klipper OK.")
+        ui.print_success("Dépôt Klipper OK.")
 
     def ensure_toolchain(self):
         """S'assure que la toolchain RISC-V est téléchargée et extraite."""
         if self.toolchain_dir.is_dir():
-            print("La toolchain RISC-V est déjà présente.")
+            ui.print_info("La toolchain RISC-V est déjà présente.")
             return
 
-        print("Téléchargement de la toolchain RISC-V...")
+        ui.print_info("Téléchargement de la toolchain RISC-V...")
         self.cache_dir.mkdir(exist_ok=True)
         archive_path = self.cache_dir / "riscv-toolchain.tar.gz"
         toolchain_url = self.config["toolchain"]["url"]
 
         try:
-            with urllib.request.urlopen(toolchain_url) as response, open(archive_path, 'wb') as out_file:
-                shutil.copyfileobj(response, out_file)
+            with TqdmUpTo(unit='B', unit_scale=True, unit_divisor=1024, miniters=1,
+                          desc=archive_path.name) as t:
+                urllib.request.urlretrieve(toolchain_url, filename=archive_path, reporthook=t.update_to)
         except Exception as e:
             raise EnvironmentError(f"Échec du téléchargement de la toolchain : {e}") from e
 
-        print(f"Extraction de l'archive vers {self.toolchain_dir}...")
+        ui.print_info(f"Extraction de l'archive vers {self.toolchain_dir}...")
         try:
             with tarfile.open(archive_path, "r:gz") as tar:
                 temp_extract_dir = self.cache_dir / "temp_toolchain_extract"
@@ -122,27 +132,23 @@ class EnvironmentManager:
             if archive_path.exists():
                 archive_path.unlink()
 
-        print("Toolchain RISC-V OK.")
+        ui.print_success("Toolchain RISC-V OK.")
 
     def run(self):
         """Exécute toutes les étapes de préparation."""
-        print("--- Étape 1: Préparation de l'environnement ---")
         self.check_system_dependencies()
         self.ensure_klipper_repo()
         self.ensure_toolchain()
-        print("-------------------------------------------------")
-        print("Environnement prêt.")
 
 
 def main():
     """Point d'entrée du script."""
-    # Le script est exécuté depuis la racine du projet, donc le base_dir est matrix_flow
     base_dir = Path(__file__).parent.resolve()
     try:
         manager = EnvironmentManager(base_dir)
         manager.run()
     except EnvironmentError as e:
-        print(f"\nERREUR : {e}", file=os.sys.stderr)
+        ui.print_error(str(e))
         exit(1)
 
 if __name__ == "__main__":
