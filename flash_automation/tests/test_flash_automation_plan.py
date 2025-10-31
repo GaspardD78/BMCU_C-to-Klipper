@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import textwrap
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -58,7 +59,19 @@ echo "fake firmware" > out/klipper.bin
     make_stub.chmod(0o755)
 
     # Crée un faux config.json
-    (tmp_path / "config.json").write_text('{"klipper": {"repository_url": "dummy", "git_ref": "dummy"}}')
+    config_data = """
+    {
+        "klipper": {
+            "repository_url": "dummy",
+            "git_ref": "dummy"
+        },
+        "toolchain": {
+            "url": "dummy_toolchain_url",
+            "subdirectory": "dummy_toolchain_dir"
+        }
+    }
+    """
+    (tmp_path / "config.json").write_text(config_data)
 
     manager = BuildManager(tmp_path)
     manager.klipper_dir = tmp_path / "klipper"
@@ -73,7 +86,11 @@ echo "fake firmware" > out/klipper.bin
     out_dir.mkdir()
     (out_dir / "klipper.bin").write_text("firmware")
 
-    firmware_path = manager.compile_firmware()
+    # Crée un faux répertoire pour la toolchain pour satisfaire la vérification dans _run_command
+    (manager.toolchain_dir / "bin").mkdir(parents=True)
+
+    with patch.object(BuildManager, "ensure_toolchain"):
+        firmware_path = manager.compile_firmware()
     assert firmware_path.exists()
     assert firmware_path.name == "klipper.bin"
 

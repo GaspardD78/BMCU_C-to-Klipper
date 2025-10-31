@@ -14,6 +14,13 @@
 #include "pins_bmcu_c.h"
 #include "sched.h" // sched_shutdown
 
+// Missing I2C status codes
+#define I2C_BUS_SUCCESS 0
+#define I2C_BUS_NACK -1
+#define I2C_BUS_TIMEOUT -2
+#define I2C_BUS_START_NACK -3
+#define I2C_BUS_START_READ_NACK -4
+
 DECL_ENUMERATION_RANGE("pin", "PA0", GPIO('A', 0), 16);
 DECL_ENUMERATION_RANGE("pin", "PB0", GPIO('B', 0), 16);
 DECL_ENUMERATION_RANGE("pin", "PC0", GPIO('C', 0), 16);
@@ -677,4 +684,42 @@ i2c_read(struct i2c_config config, uint8_t reg_len, uint8_t *reg,
 out:
     i2c_stop(i2c, timeout);
     return ret;
+}
+
+// ADC functions (stubs for linking)
+struct gpio_adc
+gpio_adc_setup(uint32_t pin)
+{
+    shutdown("ADC not supported on this MCU");
+    return (struct gpio_adc){0};
+}
+
+uint32_t
+gpio_adc_sample(struct gpio_adc g)
+{
+    return 0;
+}
+
+uint16_t
+gpio_adc_read(struct gpio_adc g)
+{
+    return 0;
+}
+
+void
+gpio_adc_cancel_sample(struct gpio_adc g)
+{
+}
+
+// PWM functions (stubs for linking)
+struct gpio_pwm
+gpio_pwm_setup(uint8_t pin, uint32_t cycle_time, uint32_t val)
+{
+    shutdown("PWM not supported on this MCU");
+    return (struct gpio_pwm){0};
+}
+
+void
+gpio_pwm_write(struct gpio_pwm g, uint32_t val)
+{
 }
