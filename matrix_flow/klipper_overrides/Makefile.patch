@@ -1,0 +1,45 @@
+diff --git a/Makefile b/Makefile
+index 735d18633..0f0a5cfc2 100644
+--- a/Makefile
++++ b/Makefile
+@@ -35,10 +35,17 @@ CFLAGS := -iquote $(OUT) -iquote src -iquote $(OUT)board-generic/ \
+     -ffunction-sections -fdata-sections -fno-delete-null-pointer-checks
+ CFLAGS += -flto=auto -fwhole-program -fno-use-linker-plugin -ggdb3
+
+-OBJS_klipper.elf = $(patsubst %.c, $(OUT)src/%.o,$(src-y))
++SRC_C = $(sort $(filter %.c,$(src-y)))
++SRC_S_ALL = $(sort $(filter %.S,$(src-y)))
++SRC_S = $(filter-out %.lds.S,$(SRC_S_ALL))
++
++OBJS_klipper.elf = $(patsubst %.c, $(OUT)src/%.o,$(SRC_C))
++OBJS_klipper.elf += $(patsubst %.S, $(OUT)src/%.o,$(SRC_S))
+ OBJS_klipper.elf += $(OUT)compile_time_request.o
+ CFLAGS_klipper.elf = $(CFLAGS) -Wl,--gc-sections
+
++ASFLAGS = $(filter-out -std=%,$(CFLAGS))
++
+ CPPFLAGS = -I$(OUT) -P -MD -MT $@
+
+ # Default targets
+@@ -64,6 +71,10 @@ $(OUT)%.o: %.c $(OUT)autoconf.h
+	@echo "  Compiling $@"
+	$(Q)$(CC) $(CFLAGS) -c $< -o $@
+
++$(OUT)%.o: %.S $(OUT)autoconf.h
++	@echo "  Assembling $@"
++	$(Q)$(CC) $(ASFLAGS) -c $< -o $@
++
+ $(OUT)%.ld: %.lds.S $(OUT)autoconf.h
+	@echo "  Preprocessing $@"
+	$(Q)$(CPP) -I$(OUT) -P -MD -MT $@ $< -o $@
+@@ -78,9 +89,9 @@ $(OUT)klipper.elf: $(OBJS_klipper.elf)
+ $(OUT)%.o.ctr: $(OUT)%.o
+	$(Q)$(OBJCOPY) -j '.compile_time_request' -O binary $^ $@
+
+-$(OUT)compile_time_request.o: $(patsubst %.c, $(OUT)src/%.o.ctr,$(src-y)) ./scripts/buildcommands.py
++$(OUT)compile_time_request.o: $(patsubst %.c, $(OUT)src/%.o.ctr,$(SRC_C)) ./scripts/buildcommands.py
+	@echo "  Building $@"
+-	$(Q)cat $(patsubst %.c, $(OUT)src/%.o.ctr,$(src-y)) | tr -s '\0' '\n' > $(OUT)compile_time_request.txt
++	$(Q)cat $(patsubst %.c, $(OUT)src/%.o.ctr,$(SRC_C)) | tr -s '\0' '\n' > $(OUT)compile_time_request.txt
+	$(Q)$(PYTHON) ./scripts/buildcommands.py -d $(OUT)klipper.dict -t "$(CC);$(AS);$(LD);$(OBJCOPY);$(OBJDUMP);$(STRIP)" $(OUT)compile_time_request.txt $(OUT)compile_time_request.c
+	$(Q)$(CC) $(CFLAGS) -c $(OUT)compile_time_request.c -o $@
