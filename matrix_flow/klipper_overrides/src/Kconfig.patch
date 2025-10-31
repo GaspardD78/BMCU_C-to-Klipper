@@ -1,0 +1,21 @@
+diff --git a/src/Kconfig b/src/Kconfig
+index e1ecbdf9b..e696f5aaf 100644
+--- a/src/Kconfig
++++ b/src/Kconfig
+@@ -32,6 +32,8 @@ choice
+         bool "Linux process"
+     config MACH_SIMU
+         bool "Host simulator"
++    config MACH_CH32V20X
++        bool "WCH CH32V20x (RISC-V)"
+ endchoice
+
+ source "src/avr/Kconfig"
+@@ -45,6 +47,7 @@ source "src/pru/Kconfig"
+ source "src/ar100/Kconfig"
+ source "src/linux/Kconfig"
+ source "src/simulator/Kconfig"
++source "src/ch32v20x/Kconfig"
+
+ # Generic configuration options for serial ports
+ config SERIAL

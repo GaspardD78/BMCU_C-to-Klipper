@@ -1,0 +1,65 @@
+if MACH_CH32V20X
+
+config CH32V20X_SELECT
+    bool
+    default y
+    select HAVE_GPIO
+    select HAVE_GPIO_ADC
+    select WANT_ADC
+    select HAVE_GPIO_SPI
+    select HAVE_GPIO_I2C
+    select HAVE_GPIO_HARD_PWM
+    select HAVE_STRICT_TIMING
+    select HAVE_CHIPID
+
+config BOARD_DIRECTORY
+    string
+    default "ch32v20x"
+
+config MCU
+    string "Modèle exact"
+    default "ch32v203"
+
+config CLOCK_FREQ
+    int
+    default 144000000
+
+config FLASH_SIZE
+    hex
+    default 0x10000
+
+config RAM_SIZE
+    hex
+    default 0x5000
+
+choice
+    prompt "Interface de communication"
+config CH32V20X_SERIAL1
+    bool "USART1 (PA9/PA10)"
+    select SERIAL
+config SERIAL_BAUD
+    int "Baud rate for serial port"
+    default 250000
+    depends on CH32V20X_SERIAL1
+config CH32V20X_USB
+    bool "USB FS (PA11/PA12)" if LOW_LEVEL_OPTIONS
+    select USBSERIAL
+    select SERIAL
+endchoice
+
+config HAVE_PWM_TIM1
+    bool "Exposer les sorties PWM basées sur TIM1" if LOW_LEVEL_OPTIONS
+    default y
+    help
+        Active les définitions de broches utilisant le timer avancé TIM1.
+        Désactivez cette option si le design matériel ne câble aucune sortie
+        sur TIM1 afin de réduire la consommation et le code généré.
+
+config HAVE_PWM_TIM4
+    bool "Exposer les sorties PWM basées sur TIM4" if LOW_LEVEL_OPTIONS
+    default y
+    help
+        Active les définitions de broches utilisant TIM4. Désactivez cette
+        option pour les cartes qui n'acheminent pas de PWM sur ce timer.
+
+endif
