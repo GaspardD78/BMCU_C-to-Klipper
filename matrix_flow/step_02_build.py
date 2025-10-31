@@ -80,28 +80,6 @@ class BuildManager:
         # Copie des fichiers sources (écrase les fichiers existants)
         shutil.copytree(self.overrides_dir, self.klipper_dir, dirs_exist_ok=True)
 
-        # Application des patchs
-        print("Recherche et application des patchs...")
-        patch_files = list(self.overrides_dir.glob("**/*.patch"))
-        if not patch_files:
-            print("Avertissement: Aucun fichier de patch trouvé.")
-            return
-
-        for patch_file in patch_files:
-            relative_path = patch_file.relative_to(self.overrides_dir)
-            print(f"Application du patch : {relative_path}...")
-            try:
-                # Utiliser --check pour voir si le patch peut être appliqué
-                self._run_command(["git", "apply", "--check", str(patch_file)], cwd=self.klipper_dir)
-                # Appliquer le patch
-                self._run_command(["git", "apply", str(patch_file)], cwd=self.klipper_dir)
-            except BuildError as e:
-                if "patch has already been applied" in str(e):
-                    print(f"Le patch {relative_path} a déjà été appliqué.")
-                else:
-                    print(f"Erreur lors de l'application du patch {relative_path}. Tentative de continuer...")
-                    # On peut choisir d'arrêter ici ou de continuer. Pour le moment, on continue.
-
     def run(self):
         """Exécute toutes les étapes de la compilation."""
         print("--- Étape 2: Compilation du firmware ---")
