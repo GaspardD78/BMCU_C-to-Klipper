@@ -28,7 +28,18 @@ from flash_automation.build_manager import BuildManager, BuildManagerError
 @pytest.fixture
 def manager(tmp_path: Path) -> BuildManager:
     """Crée une instance du BuildManager avec une configuration factice."""
-    config_data = '{"klipper": {"repository_url": "dummy_url", "git_ref": "dummy_ref"}}'
+    config_data = """
+    {
+        "klipper": {
+            "repository_url": "dummy_url",
+            "git_ref": "dummy_ref"
+        },
+        "toolchain": {
+            "url": "dummy_toolchain_url",
+            "subdirectory": "dummy_toolchain_dir"
+        }
+    }
+    """
     (tmp_path / "config.json").write_text(config_data)
     bm = BuildManager(tmp_path)
     # On simule l'existence du dépôt klipper
@@ -41,7 +52,7 @@ def test_launch_menuconfig(mock_ensure_repo, mock_run_interactive, manager: Buil
     """Vérifie que menuconfig est lancé correctement."""
     manager.launch_menuconfig()
     mock_ensure_repo.assert_called_once()
-    mock_run_interactive.assert_called_once_with(["make", "menuconfig"], cwd=manager.klipper_dir)
+    mock_run_interactive.assert_called_once_with(["make", "menuconfig"], cwd=manager.klipper_dir, use_toolchain=True)
 
 @patch.object(BuildManager, "ensure_klipper_repo")
 def test_save_config(mock_ensure_repo, manager: BuildManager):
@@ -72,10 +83,11 @@ def test_load_config(mock_ensure_repo, manager: BuildManager):
     assert loaded_file.exists()
     assert loaded_file.read_text() == config_content
 
+@patch.object(BuildManager, "ensure_toolchain")
 @patch.object(BuildManager, "_run_command")
 @patch.object(BuildManager, "ensure_klipper_repo")
 @patch("shutil.copy")
-def test_compile_firmware_with_default_config(mock_copy, mock_ensure_repo, mock_run, manager: BuildManager):
+def test_compile_firmware_with_default_config(mock_copy, mock_ensure_repo, mock_run, mock_ensure_toolchain, manager: BuildManager):
     """Vérifie la compilation avec la configuration par défaut."""
     (manager.base_dir / "klipper.config").touch()
 
@@ -89,15 +101,16 @@ def test_compile_firmware_with_default_config(mock_copy, mock_ensure_repo, mock_
     mock_ensure_repo.assert_called_once()
     mock_copy.assert_called_once()
     expected_calls = [
-        call(["make", "olddefconfig"], cwd=manager.klipper_dir),
-        call(["make"], cwd=manager.klipper_dir)
+        call(["make", "olddefconfig"], cwd=manager.klipper_dir, use_toolchain=True),
+        call(["make"], cwd=manager.klipper_dir, use_toolchain=True)
     ]
     mock_run.assert_has_calls(expected_calls)
 
+@patch.object(BuildManager, "ensure_toolchain")
 @patch.object(BuildManager, "_run_command")
 @patch.object(BuildManager, "ensure_klipper_repo")
 @patch("shutil.copy")
-def test_compile_firmware_without_default_config(mock_copy, mock_ensure_repo, mock_run, manager: BuildManager):
+def test_compile_firmware_without_default_config(mock_copy, mock_ensure_repo, mock_run, mock_ensure_toolchain, manager: BuildManager):
     """Vérifie que la config par défaut n'est pas copiée si demandé."""
     def fake_make(*args, **kwargs):
         (manager.klipper_dir / "out").mkdir(exist_ok=True)
@@ -109,7 +122,7 @@ def test_compile_firmware_without_default_config(mock_copy, mock_ensure_repo, mo
     mock_ensure_repo.assert_called_once()
     mock_copy.assert_not_called()
     expected_calls = [
-        call(["make", "olddefconfig"], cwd=manager.klipper_dir),
-        call(["make"], cwd=manager.klipper_dir)
+        call(["make", "olddefconfig"], cwd=manager.klipper_dir, use_toolchain=True),
+        call(["make"], cwd=manager.klipper_dir, use_toolchain=True)
     ]
     mock_run.assert_has_calls(expected_calls)

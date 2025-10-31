@@ -24,8 +24,11 @@ maintenance.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import tarfile
+import urllib.request
 from pathlib import Path
 
 class BuildManagerError(Exception):
@@ -39,6 +42,7 @@ class BuildManager:
         self.cache_root = self.base_dir / ".cache"
         self.klipper_dir = self.cache_root / "klipper"
         self._load_config()
+        self.toolchain_dir = self.cache_root / self.toolchain_subdirectory
 
     def _load_config(self) -> None:
         """Charge la configuration depuis le fichier config.json."""
@@ -47,13 +51,22 @@ class BuildManager:
             data = json.loads(config_path.read_text(encoding="utf-8"))
             self.klipper_repo_url = data["klipper"]["repository_url"]
             self.klipper_ref = data["klipper"]["git_ref"]
+            self.toolchain_url = data["toolchain"]["url"]
+            self.toolchain_subdirectory = data["toolchain"]["subdirectory"]
         except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
             raise BuildManagerError(
                 f"Le fichier de configuration '{config_path}' est manquant, invalide ou incomplet."
             ) from e
 
-    def _run_command(self, command: list[str], *, cwd: Path) -> subprocess.CompletedProcess:
+    def _run_command(self, command: list[str], *, cwd: Path, use_toolchain: bool = False) -> subprocess.CompletedProcess:
         """Exécute une commande et lève une exception détaillée en cas d'échec."""
+        env = os.environ.copy()
+        if use_toolchain:
+            toolchain_bin = self.toolchain_dir / "bin"
+            if not toolchain_bin.exists():
+                raise BuildManagerError(f"Le répertoire bin de la toolchain '{toolchain_bin}' est introuvable.")
+            env["PATH"] = f"{toolchain_bin}{os.pathsep}{env['PATH']}"
+
         try:
             return subprocess.run(
                 command,
@@ -64,6 +77,7 @@ class BuildManager:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                env=env,
             )
         except FileNotFoundError as e:
             raise BuildManagerError(f"La commande '{command[0]}' est introuvable. Est-elle installée et dans le PATH ?") from e
@@ -90,10 +104,57 @@ class BuildManager:
             self._run_command(["git", "fetch", "origin", "--tags"], cwd=self.klipper_dir)
             self._run_command(["git", "checkout", self.klipper_ref], cwd=self.klipper_dir)
 
-    def _run_interactive_command(self, command: list[str], *, cwd: Path) -> None:
-        """Exécute une commande interactive."""
+    def ensure_toolchain(self) -> None:
+        """S'assure que la toolchain RISC-V est téléchargée et extraite."""
+        if self.toolchain_dir.exists():
+            print("La toolchain RISC-V est déjà présente.")
+            return
+
+        print("Téléchargement de la toolchain RISC-V...")
+        self.cache_root.mkdir(exist_ok=True)
+        archive_path = self.cache_root / "riscv-toolchain.tar.gz"
+
         try:
-            subprocess.run(command, cwd=cwd, check=True)
+            with urllib.request.urlopen(self.toolchain_url) as response, open(archive_path, 'wb') as out_file:
+                shutil.copyfileobj(response, out_file)
+        except Exception as e:
+            raise BuildManagerError(f"Échec du téléchargement de la toolchain : {e}") from e
+
+        print(f"Extraction de l'archive de la toolchain vers {self.toolchain_dir}...")
+        try:
+            with tarfile.open(archive_path, "r:gz") as tar:
+                # Extraire dans un répertoire temporaire d'abord pour pouvoir le renommer
+                temp_extract_dir = self.cache_root / "temp_toolchain_extract"
+                tar.extractall(path=temp_extract_dir)
+
+                # Le contenu est souvent dans un sous-répertoire, trouvons-le
+                extracted_dirs = [d for d in temp_extract_dir.iterdir() if d.is_dir()]
+                if not extracted_dirs:
+                    raise BuildManagerError("L'archive de la toolchain est vide ou a un format inattendu.")
+
+                # Renommer le répertoire extrait avec le nom de destination final
+                shutil.move(str(extracted_dirs[0]), str(self.toolchain_dir))
+                shutil.rmtree(temp_extract_dir)
+
+        except tarfile.TarError as e:
+            raise BuildManagerError(f"Échec de l'extraction de l'archive de la toolchain : {e}") from e
+        finally:
+            # Nettoyer l'archive téléchargée
+            if archive_path.exists():
+                archive_path.unlink()
+
+        print("Toolchain installée avec succès.")
+
+    def _run_interactive_command(self, command: list[str], *, cwd: Path, use_toolchain: bool = False) -> None:
+        """Exécute une commande interactive."""
+        env = os.environ.copy()
+        if use_toolchain:
+            toolchain_bin = self.toolchain_dir / "bin"
+            if not toolchain_bin.exists():
+                raise BuildManagerError(f"Le répertoire bin de la toolchain '{toolchain_bin}' est introuvable.")
+            env["PATH"] = f"{toolchain_bin}{os.pathsep}{env['PATH']}"
+        try:
+            subprocess.run(command, cwd=cwd, check=True, env=env)
         except FileNotFoundError as e:
             raise BuildManagerError(f"La commande '{command[0]}' est introuvable.") from e
         except subprocess.CalledProcessError as e:
@@ -143,7 +204,7 @@ class BuildManager:
             initial_mtime = None
 
         print("Lancement de l'interface de configuration de Klipper (menuconfig)...")
-        self._run_interactive_command(["make", "menuconfig"], cwd=self.klipper_dir)
+        self._run_interactive_command(["make", "menuconfig"], cwd=self.klipper_dir, use_toolchain=True)
 
         # Obtenir l'état final et comparer
         try:
@@ -188,6 +249,7 @@ class BuildManager:
         """Compile le firmware et retourne le chemin vers le binaire."""
         print("Compilation du firmware Klipper...")
         self.ensure_klipper_repo()
+        self.ensure_toolchain()
         self._apply_klipper_overrides()
 
         if use_default_config:
@@ -199,7 +261,7 @@ class BuildManager:
             shutil.copy(config_src, config_dest)
 
         print("Nettoyage de l'environnement de compilation...")
-        self._run_command(["make", "clean"], cwd=self.klipper_dir)
+        self._run_command(["make", "clean"], cwd=self.klipper_dir, use_toolchain=True)
         # Forcer la suppression du répertoire 'out' au cas où 'make clean'
         # ne serait pas suffisant, en ignorant les erreurs de permission.
         out_dir = self.klipper_dir / "out"
@@ -207,10 +269,10 @@ class BuildManager:
             shutil.rmtree(out_dir, ignore_errors=True)
 
         print("Préparation de la configuration Klipper...")
-        self._run_command(["make", "olddefconfig"], cwd=self.klipper_dir)
+        self._run_command(["make", "olddefconfig"], cwd=self.klipper_dir, use_toolchain=True)
 
         print("Lancement de la compilation...")
-        make_process = self._run_command(["make"], cwd=self.klipper_dir)
+        make_process = self._run_command(["make"], cwd=self.klipper_dir, use_toolchain=True)
 
         firmware_path = self.klipper_dir / "out/klipper.bin"
         if not firmware_path.exists():
