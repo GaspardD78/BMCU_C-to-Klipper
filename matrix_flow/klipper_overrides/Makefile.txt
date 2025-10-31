@@ -1,0 +1,36 @@
+# Klipper build system
+src-y += sched.c command.c stepper.c endstop.c
+src-y += gpiocmds.c spicmds.c i2ccmds.c adccmds.c
+src-y += basecmd.c debugcmds.c initial_pins.c trsync.c
+
+# Core RISC-V requirements
+src-$(CONFIG_MACH_CH32V20X) += ch32v20x/main.c ch32v20x/timer.c 
+src-$(CONFIG_MACH_CH32V20X) += ch32v20x/gpio.c ch32v20x/adc.c
+src-$(CONFIG_MACH_CH32V20X) += ch32v20x/i2c.c ch32v20x/spi.c
+src-$(CONFIG_MACH_CH32V20X) += ch32v20x/serial.c ch32v20x/watchdog.c
+src-$(CONFIG_MACH_CH32V20X) += generic/crc16_ccitt.c generic/alloc.c
+
+# Build options
+CROSS_PREFIX=riscv64-unknown-elf-
+
+dirs-$(CONFIG_MACH_CH32V20X) += src/ch32v20x src/generic
+
+# CH32V20X compiler configuration
+CC=$(CROSS_PREFIX)gcc
+OBJCOPY=$(CROSS_PREFIX)objcopy
+OBJDUMP=$(CROSS_PREFIX)objdump
+AS=$(CROSS_PREFIX)as
+LD=$(CROSS_PREFIX)ld
+SIZE=$(CROSS_PREFIX)size
+
+# CH32V20X RISC-V specific flags
+CFLAGS-$(CONFIG_MACH_CH32V20X) += -march=rv32imac -mabi=ilp32 -mcmodel=medlow
+CFLAGS-$(CONFIG_MACH_CH32V20X) += -Isrc/ch32v20x -DCONFIG_CH32V20X
+
+# Optimization settings
+CFLAGS-$(CONFIG_MACH_CH32V20X) += -Os -fomit-frame-pointer -fno-strict-aliasing
+CFLAGS-$(CONFIG_MACH_CH32V20X) += -Wall -Wno-format-truncation
+
+# Memory sections
+LDFLAGS-$(CONFIG_MACH_CH32V20X) += -Tsrc/ch32v20x/ch32v20x.ld
+LDFLAGS-$(CONFIG_MACH_CH32V20X) += -nostartfiles

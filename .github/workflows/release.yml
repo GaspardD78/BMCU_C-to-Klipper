@@ -20,17 +20,16 @@ jobs:
       - name: Install Python dependencies
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install -r flash_automation/requirements.txt
+          python3 -m pip install -r matrix_flow/requirements.txt
 
       - name: Build firmware
         id: build
         run: |
-          # Run the build process via the main tool
-          # The tool is interactive, so we need to pipe 'y' to confirm compilation
-          echo 'y' | python3 flash_automation/bmcu_tool.py --action build
+          # Run the MatrixFlow workflow to build the firmware
+          python3 -m matrix_flow.run_workflow
 
           # Find the compiled binary and store its path
-          FIRMWARE_PATH=$(find flash_automation/.cache/klipper/out -name "klipper.bin" -type f)
+          FIRMWARE_PATH=$(find matrix_flow/.cache/klipper/out -name "klipper.bin" -type f)
           if [ -z "$FIRMWARE_PATH" ]; then
             echo "::error::klipper.bin not found after build!"
             exit 1
@@ -41,33 +40,23 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
-      - name: Create release packages
+      - name: Create release package
         run: |
           set -eu
           # Create a directory for the release files
-          mkdir -p release_packages
+          mkdir -p release_packages manual_flash_pkg
 
-          # --- 1. Addon Version ---
-          # This is the simplest: just the addon directory itself
-          zip -r release_packages/BMCU_Klipper_Addon-${{ env.VERSION }}.zip addon/
-
-          # --- 2. Manual Flash Version ---
-          # This contains the firmware binary and release notes
-          mkdir -p manual_flash_pkg
+          # Create the Manual Flash package, which contains the firmware binary.
+          # This is the primary artifact for end-users.
           cp "${{ env.firmware_path }}" manual_flash_pkg/klipper.bin
-          # Assume release notes might exist, or create a placeholder
           echo "Release notes for ${{ env.VERSION }}" > manual_flash_pkg/release_notes.md
           zip -r release_packages/BMCU_Manual_Flash-${{ env.VERSION }}.zip manual_flash_pkg/
 
-          # --- 3. Auto-Flash Version (All-in-one) ---
-          # This contains the tool and all necessary files to run it
-          mkdir -p auto_flash_pkg
-          cp -r flash_automation/ auto_flash_pkg/
-          cp "${{ env.firmware_path }}" auto_flash_pkg/flash_automation/
-          # We remove the tests and cache from the package to keep it light
-          rm -rf auto_flash_pkg/flash_automation/tests/
-          rm -rf auto_flash_pkg/flash_automation/.cache/
-          zip -r release_packages/BMCU_Auto_Flash_Tool-${{ env.VERSION }}.zip auto_flash_pkg/
+          # NOTE: The previous version of this workflow also created a 'Klipper_Addon'
+          # and an 'Auto_Flash_Tool' zip. These are now obsolete with MatrixFlow:
+          # - The 'addon/' directory has been removed from the project.
+          # - MatrixFlow is not designed as a distributable all-in-one tool,
+          #   so the auto-flash package is no longer applicable.
 
       - name: Create GitHub Release
         id: create_release
@@ -80,17 +69,7 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: Upload Release Assets
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./release_packages/BMCU_Klipper_Addon-${{ env.VERSION }}.zip
-          asset_name: BMCU_Klipper_Addon-${{ env.VERSION }}.zip
-          asset_content_type: application/zip
-
-      - name: Upload Manual Flash Asset
+      - name: Upload Firmware Asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -98,14 +77,4 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./release_packages/BMCU_Manual_Flash-${{ env.VERSION }}.zip
           asset_name: BMCU_Manual_Flash-${{ env.VERSION }}.zip
-          asset_content_type: application/zip
-
-      - name: Upload Auto Flash Tool Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./release_packages/BMCU_Auto_Flash_Tool-${{ env.VERSION }}.zip
-          asset_name: BMCU_Auto_Flash_Tool-${{ env.VERSION }}.zip
           asset_content_type: application/zip

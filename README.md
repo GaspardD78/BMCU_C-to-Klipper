@@ -1,10 +1,10 @@
 # MatrixFlow : Flashez votre BMCU-C avec Klipper
 
 <p align="center">
-  <img src="assets/bmcu_logo.svg" alt="Logo BMCU-C to Klipper" width="220" />
+  <img src="assets/logo.png" alt="Logo Matrix_Flow" width="220" />
 </p>
 
-**MatrixFlow** est un workflow automatisé et scripté pour compiler et flasher le firmware [Klipper](https://www.klipper3d.org/) sur une carte **BMCU-C**. Conçu pour être robuste, simple et transparent, il vous guide à travers chaque étape, de la préparation de l'environnement au flashage final.
+**MatrixFlow** est un workflow automatisé et scripté pour compiler et flasher le firmware [Klipper](https://www.klipper3d.org/) sur une carte [BMCU-C](https://wiki.yuekai.fr/). Conçu pour être robuste, simple et transparent, il vous guide à travers chaque étape, de la préparation de l'environnement au flashage final.
 
 Ce projet se concentre exclusivement sur la méthode MatrixFlow, qui utilise une série de scripts Python non interactifs pour une automatisation complète et fiable.
 

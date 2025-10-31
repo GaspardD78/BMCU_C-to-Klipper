@@ -86,8 +86,26 @@ class FlashManager:
             available_devices = self.detect_serial_devices()
             if not available_devices:
                 raise FlashError("Aucun port série détecté. Veuillez en spécifier un avec l'argument --device.")
-            serial_device = available_devices[0]
-            print(f"Port série détecté : {serial_device}")
+            elif len(available_devices) == 1:
+                serial_device = available_devices[0]
+                print(f"Un seul port série détecté : {serial_device}")
+            else:
+                print("Plusieurs ports série détectés. Veuillez choisir lequel utiliser :")
+                for i, device in enumerate(available_devices):
+                    print(f"  {i + 1}: {device}")
+
+                while True:
+                    try:
+                        choice = input(f"Entrez le numéro du port (1-{len(available_devices)}) : ")
+                        choice_index = int(choice) - 1
+                        if 0 <= choice_index < len(available_devices):
+                            serial_device = available_devices[choice_index]
+                            print(f"Port série sélectionné : {serial_device}")
+                            break
+                        else:
+                            print("Choix invalide. Veuillez réessayer.")
+                    except (ValueError, IndexError):
+                        print("Entrée invalide. Veuillez entrer un numéro de la liste.")
 
         self._manage_klipper_service("stop")
         try:
