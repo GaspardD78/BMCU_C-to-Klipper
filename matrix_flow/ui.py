@@ -43,8 +43,14 @@ def get_banner() -> str:
 
 def print_banner():
     """Affiche la bannière MatrixFlow."""
-    # Évaluation de la f-string pour interpréter les couleurs
-    banner = eval(f'f"""{get_banner()}"""', {"AnsiColors": AnsiColors, **AnsiColors.__dict__})
+    # Création d'un dictionnaire de couleurs à partir de la classe AnsiColors.
+    # On utilise str.format() pour une substitution sécurisée, évitant eval().
+    colors = {
+        key: value
+        for key, value in AnsiColors.__dict__.items()
+        if not key.startswith("__")
+    }
+    banner = get_banner().format(**colors)
     print(banner)
 
 def print_header(text: str):
