@@ -51,11 +51,12 @@ Cette approche modulaire rend le processus facile à comprendre, à déboguer et
 
 -   **git**
 -   **python3**
+-   **python3-venv**
 -   **make**
 
 Vous pouvez les installer sur un système Debian/Ubuntu avec la commande suivante :
 ```bash
-sudo apt update && sudo apt install -y git python3 make
+sudo apt update && sudo apt install -y git python3 python3-venv make
 ```
 
 ---
@@ -70,9 +71,29 @@ git clone https://github.com/GaspardD78/BMCU_C-to-Klipper.git
 cd BMCU_C-to-Klipper
 ```
 
-### Étape 2 : Lancer le workflow
+### Étape 2 : Créer un environnement virtuel et installer les dépendances
 
-Le workflow complet est géré par un seul script. Exécutez-le depuis la racine du projet :
+Pour éviter les conflits avec les paquets système de Python, il est fortement recommandé d'utiliser un environnement virtuel.
+
+1.  **Créez l'environnement virtuel :**
+    ```bash
+    python3 -m venv .venv
+    ```
+
+2.  **Activez-le :**
+    ```bash
+    source .venv/bin/activate
+    ```
+    *Votre invite de commande devrait maintenant être préfixée par `(.venv)`. Pour quitter l'environnement virtuel plus tard, il vous suffira de taper la commande `deactivate`.*
+
+3.  **Installez les dépendances :**
+    ```bash
+    pip install -r matrix_flow/requirements.txt
+    ```
+
+### Étape 3 : Lancer le workflow
+
+Assurez-vous que votre environnement virtuel est toujours activé (vous devriez voir `(.venv)` au début de votre invite de commande), puis lancez le workflow :
 ```bash
 python3 -m matrix_flow.run_workflow
 ```
