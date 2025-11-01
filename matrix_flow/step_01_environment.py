@@ -10,6 +10,7 @@ sont en place pour les étapes de compilation et de flashage.
 
 import json
 import os
+import platform
 import shutil
 import subprocess
 import tarfile
@@ -104,7 +105,13 @@ class EnvironmentManager:
         ui.print_info("Téléchargement de la toolchain RISC-V...")
         self.cache_dir.mkdir(exist_ok=True)
         archive_path = self.cache_dir / "riscv-toolchain.tar.gz"
-        toolchain_url = self.config["toolchain"]["url"]
+
+        machine_arch = platform.machine()
+        if machine_arch not in self.config["toolchain"]["urls"]:
+            raise EnvironmentError(f"L'architecture machine '{machine_arch}' n'est pas supportée. Architectures disponibles : {', '.join(self.config['toolchain']['urls'].keys())}")
+
+        toolchain_url = self.config["toolchain"]["urls"][machine_arch]
+        ui.print_info(f"Détection de l'architecture : {machine_arch}. Utilisation de l'URL : {toolchain_url}")
 
         try:
             with TqdmUpTo(unit='B', unit_scale=True, unit_divisor=1024, miniters=1,

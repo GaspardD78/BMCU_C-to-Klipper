@@ -4,7 +4,10 @@
     "git_ref": "v0.13.0"
   },
   "toolchain": {
-    "url": "https://sourceforge.net/projects/riscv-none-elf-gcc-xpack/files/v15.2.0-1/xpack-riscv-none-elf-gcc-15.2.0-1-linux-x64.tar.gz/download",
+    "urls": {
+      "x86_64": "https://sourceforge.net/projects/riscv-none-elf-gcc-xpack/files/v15.2.0-1/xpack-riscv-none-elf-gcc-15.2.0-1-linux-x64.tar.gz/download",
+      "aarch64": "https://sourceforge.net/projects/riscv-none-elf-gcc-xpack/files/v15.2.0-1/xpack-riscv-none-elf-gcc-15.2.0-1-linux-arm64.tar.gz/download"
+    },
     "subdirectory": "riscv-toolchain"
   }
 }
