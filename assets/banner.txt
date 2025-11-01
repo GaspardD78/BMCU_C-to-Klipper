@@ -1,8 +1,6 @@
-
        {CYAN}( (O) ){PINK} ------ {CYAN}◇{PINK}.--.{CYAN}◇{PINK} ------ {CYAN}( (O) )
        {CYAN}                                                 
-                {WHITE}M A T R I X F L O W{PINK}         
-                    {GREY}[ KLPTR_AMS ]{PINK}             
+              {WHITE}M A T R I X F L O W{PINK}         
+                  {GREY}[ KLPTR_AMS ]{PINK}             
        {CYAN}                                                 
-        {CYAN}( (O) ){PINK} ------ {CYAN}◇{PINK}'--'{CYAN}◇{PINK} ------ {CYAN}( (O) )
-
+       {CYAN}( (O) ){PINK} ------ {CYAN}◇{PINK}'--'{CYAN}◇{PINK} ------ {CYAN}( (O) )
