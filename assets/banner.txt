@@ -1,9 +1,8 @@
 
-{PINK}███████████████████████████████████████████████████████{RESET}
-{PINK}█ {CYAN}( (O) ){PINK} ------ {CYAN}◇{PINK}.--.{CYAN}◇{PINK} ------ {CYAN}( (O) ){PINK} █{RESET}
-{PINK}█{CYAN}                                                 {PINK}█{RESET}
-{PINK}█         {WHITE}M A T R I X F L O W{PINK}         █{RESET}
-{PINK}█             {GREY}[ KLPTR_AMS ]{PINK}             █{RESET}
-{PINK}█{CYAN}                                                 {PINK}█{RESET}
-{PINK}█ {CYAN}( (O) ){PINK} ------ {CYAN}◇{PINK}'--'{CYAN}◇{PINK} ------ {CYAN}( (O) ){PINK} █{RESET}
-{PINK}███████████████████████████████████████████████████████{RESET}
+       {CYAN}( (O) ){PINK} ------ {CYAN}◇{PINK}.--.{CYAN}◇{PINK} ------ {CYAN}( (O) )
+       {CYAN}                                                 
+                {WHITE}M A T R I X F L O W{PINK}         
+                    {GREY}[ KLPTR_AMS ]{PINK}             
+       {CYAN}                                                 
+        {CYAN}( (O) ){PINK} ------ {CYAN}◇{PINK}'--'{CYAN}◇{PINK} ------ {CYAN}( (O) )
+
