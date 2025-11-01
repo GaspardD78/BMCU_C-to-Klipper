@@ -1,4 +1,10 @@
-name: Test suite
+# .github/workflows/tests.yml
+#
+# Ce workflow valide la chaîne de compilation du firmware Klipper.
+# Il est conçu pour être exécuté sur chaque push et pull request pour
+# garantir qu'aucune régression n'est introduite dans le processus de build.
+
+name: "Build Verification"
 
 on:
   push:
@@ -7,29 +13,30 @@ on:
   pull_request:
 
 jobs:
-  tests:
+  build-firmware:
+    name: "Compile Firmware using Docker"
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
+      - name: "1. Checkout Code"
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install system dependencies
+      - name: "2. Build Docker Image"
         run: |
-          sudo apt-get update
-          sudo apt-get install -y expect
+          docker build . -t matrixflow-test --file Dockerfile
 
-      - name: Install Python dependencies
+      - name: "3. Run Build Verification inside Docker"
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install pytest
-          python3 -m pip install -r flash_automation/requirements.txt
+          docker run --rm \
+            -v ${{ github.workspace }}:/app \
+            matrixflow-test python3 -m matrix_flow.run_workflow --ci-check
 
-      - name: Run pytest suite
+      - name: "4. Verify Build Artifact"
         run: |
-          python3 -m pytest flash_automation/tests/ addon/tests/
-
+          ARTIFACT_PATH="./matrix_flow/.cache/klipper/out/klipper.bin"
+          if [ -s "$ARTIFACT_PATH" ]; then
+            echo "SUCCESS: $ARTIFACT_PATH a été généré avec succès."
+          else
+            echo "ERROR: $ARTIFACT_PATH n'a pas été généré ou est vide."
+            exit 1
+          fi

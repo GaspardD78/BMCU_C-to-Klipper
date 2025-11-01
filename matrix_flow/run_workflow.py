@@ -36,6 +36,11 @@ def main():
         action="store_true",
         help="Passer l'étape de flashage (utile pour ne faire que la compilation)."
     )
+    parser.add_argument(
+        "--ci-check",
+        action="store_true",
+        help="Exécute uniquement les étapes de validation pour l'intégration continue (env + build)."
+    )
     args = parser.parse_args()
 
     # Sauvegarde des arguments originaux pour les passer aux sous-scripts
@@ -56,6 +61,11 @@ def main():
         sys.argv = [original_argv[0]]
         run_step_02()
         ui.print_success("ÉTAPE 2 TERMINÉE AVEC SUCCÈS")
+
+        # Si c'est un test CI, on s'arrête ici avec succès.
+        if args.ci_check:
+            ui.print_header("VÉRIFICATION CI TERMINÉE AVEC SUCCÈS")
+            sys.exit(0)
 
         # --- Étape 3: Flashage ---
         if not args.skip_flash:
