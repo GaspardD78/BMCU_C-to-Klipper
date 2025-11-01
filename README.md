@@ -4,6 +4,12 @@
   <img src="assets/logo.png" alt="Logo Matrix_Flow" width="220" />
 </p>
 
+<p align="center">
+  <a href="https://github.com/GaspardD78/BMCU_C-to-Klipper/actions/workflows/tests.yml">
+    <img src="https://github.com/GaspardD78/BMCU_C-to-Klipper/actions/workflows/tests.yml/badge.svg" alt="Build Status" />
+  </a>
+</p>
+
 **MatrixFlow** est un workflow automatisé et scripté pour compiler et flasher le firmware [Klipper](https://www.klipper3d.org/) sur une carte [BMCU-C](https://wiki.yuekai.fr/). Conçu pour être robuste, simple et transparent, il vous guide à travers chaque étape, de la préparation de l'environnement au flashage final.
 
 Ce projet se concentre exclusivement sur la méthode MatrixFlow, qui utilise une série de scripts Python non interactifs pour une automatisation complète et fiable.
@@ -112,6 +118,32 @@ Pour une documentation technique détaillée de chaque script, consultez le doss
 | **Échec du flashage (`wchisp` échoue)** | - Vérifiez que la carte est bien en **mode bootloader**.<br>- Assurez-vous que le câble USB est bien connecté et fonctionnel.<br>- Si le service Klipper est en cours, le script tente de l'arrêter. Si cela échoue, arrêtez Klipper manuellement (`sudo systemctl stop klipper`) avant de relancer. |
 | **"Permission denied" sur le port série** | Votre utilisateur n'a pas les droits pour accéder aux ports série. Ajoutez-le au groupe `dialout` : `sudo usermod -aG dialout $USER`, puis déconnectez-vous et reconnectez-vous. |
 | **Aucun port série détecté** | Après le flashage, la carte peut prendre quelques secondes à s'initialiser. Débranchez et rebranchez-la. Vous pouvez aussi trouver le port manuellement avec `ls /dev/serial/by-id/*` et l'ajouter dans la configuration. |
+
+---
+
+## 🧑‍💻 Développement et Tests
+
+Ce projet utilise [Docker](https://www.docker.com/) pour fournir un environnement de développement et de test cohérent et reproductible. Une suite de tests automatisés est exécutée via GitHub Actions à chaque modification du code.
+
+### Lancer les tests en local
+
+Pour valider que la chaîne de compilation est fonctionnelle sur votre machine locale, vous pouvez utiliser le même environnement Docker que celui de l'intégration continue.
+
+**Prérequis :**
+-   Docker doit être installé et en cours d'exécution.
+
+**Commandes :**
+1.  **Construire l'image Docker :**
+    ```bash
+    docker build . -t matrixflow-test
+    ```
+
+2.  **Lancer le test de compilation :**
+    ```bash
+    docker run --rm matrixflow-test python3 -m matrix_flow.run_workflow --ci-check
+    ```
+
+Si le script se termine avec le message "VÉRIFICATION CI TERMINÉE AVEC SUCCÈS", cela signifie que l'environnement et le processus de compilation sont valides.
 
 ---
 
