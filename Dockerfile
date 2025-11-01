@@ -25,6 +25,10 @@ COPY matrix_flow/requirements.txt ./matrix_flow/requirements.txt
 # wchisp is a binary, not a pip package. Remove it from requirements for the build.
 RUN sed -i '/wchisp/d' ./matrix_flow/requirements.txt
 
+# Copy and install development requirements
+COPY requirements-dev.txt .
+RUN pip3 install --no-cache-dir -r requirements-dev.txt
+
 # Install Python dependencies
 RUN pip3 install --no-cache-dir -r ./matrix_flow/requirements.txt
 
