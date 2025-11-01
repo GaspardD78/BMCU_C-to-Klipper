@@ -8,8 +8,29 @@ Ce script exécute séquentiellement toutes les étapes nécessaires pour
 préparer, compiler, flasher et configurer le firmware Klipper pour la BMCU-C.
 """
 
-import argparse
 import sys
+
+# Vérification des dépendances avant tout
+try:
+    from tqdm import tqdm
+    import serial
+except ImportError:
+    ERROR_MSG = """
+Des dépendances Python sont manquantes. Veuillez les installer en suivant ces étapes :
+
+1. Assurez-vous que l'environnement virtuel est activé. Si vous ne voyez pas (.venv)
+   au début de votre invite de commande, exécutez :
+   source .venv/bin/activate
+
+2. Installez les dépendances requises :
+   pip install -r matrix_flow/requirements.txt
+
+Puis relancez ce script.
+"""
+    print(ERROR_MSG, file=sys.stderr)
+    sys.exit(1)
+
+import argparse
 from pathlib import Path
 
 # Ajoute le répertoire parent au path pour permettre les imports
