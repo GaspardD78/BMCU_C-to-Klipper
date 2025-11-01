@@ -40,3 +40,9 @@ jobs:
             echo "ERROR: $ARTIFACT_PATH n'a pas été généré ou est vide."
             exit 1
           fi
+
+      - name: "5. Run Unit Tests"
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/app \
+            matrixflow-test python3 -m pytest matrix_flow/tests/
